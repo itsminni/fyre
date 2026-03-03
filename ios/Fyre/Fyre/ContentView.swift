@@ -8,13 +8,13 @@
 import SwiftUI
 
 struct ContentView: View {
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                // Minimal modern gradient background
-                LinearGradient(colors: [Color.pink.opacity(0.25), Color.purple.opacity(0.25)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .ignoresSafeArea()
+    @Environment(UserStore.self) private var store
 
+    var body: some View {
+        if store.isLoggedIn {
+            HomeView()
+        } else {
+            NavigationStack {
                 VStack(spacing: 24) {
                     Spacer()
 
@@ -22,8 +22,8 @@ struct ContentView: View {
                         Text("Fyre")
                             .font(.system(size: 48, weight: .bold, design: .rounded))
                             .kerning(1.2)
-                        Text("Incontra persone. Accendi connessioni.")
-                            .font(.subheadline)
+                        Text("Dalla scintilla al fyre")
+                            .font(.title2.bold())
                             .foregroundStyle(.secondary)
                     }
                     .multilineTextAlignment(.center)
@@ -32,20 +32,16 @@ struct ContentView: View {
                     Spacer()
 
                     VStack(spacing: 12) {
-                        NavigationLink {
-                            LoginView()
-                        } label: {
-                            Text("Log in")
+                        NavigationLink(destination: LoginView()) {
+                            Text("Accedi")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.pink)
                         .controlSize(.large)
 
-                        NavigationLink {
-                            SignUpView()
-                        } label: {
-                            Text("Sign up")
+                        NavigationLink(destination: SignUpView()) {
+                            Text("Registrati")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
@@ -55,12 +51,57 @@ struct ContentView: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom, 24)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    LinearGradient(
+                        colors: [Color.pink.opacity(0.25), Color.purple.opacity(0.25)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .ignoresSafeArea()
+                )
+                .toolbar(.hidden, for: .navigationBar)
             }
-            .navigationBarHidden(true)
         }
+    }
+}
+
+// Simple logged-in placeholder - ai da cambiare
+struct HomeView: View {
+    @Environment(UserStore.self) private var store
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            VStack(spacing: 8) {
+                Text("Ciao, \(store.currentUser?.name ?? "")!")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Text(store.currentUser?.email ?? "")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                store.logOut()
+            } label: {
+                Text("Log out")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.pink)
+            .controlSize(.large)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 }
 
 #Preview {
     ContentView()
+        .environment(UserStore.shared)
 }

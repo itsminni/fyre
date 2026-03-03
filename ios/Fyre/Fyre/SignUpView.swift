@@ -8,69 +8,99 @@
 import SwiftUI
 
 struct SignUpView: View {
-    @State private var name: String = ""
-    @State private var email: String = ""
-    @State private var password: String = ""
-    @State private var isSecure: Bool = true
-    @State private var agree: Bool = false
+    @Environment(UserStore.self) private var store
+    @State private var name = ""
+    @State private var email = ""
+    @State private var password = ""
+    @State private var isSecure = true
+    @State private var agree = false
+    @State private var errorMessage: String?
 
     var body: some View {
-        FormContainer(title: "Crea account") {
-            VStack(spacing: 16) {
-                TextField("Nome", text: $name)
-                    .textContentType(.name)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Crea account")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .padding(.top, 8)
 
-                TextField("Email", text: $email)
-                    .textContentType(.emailAddress)
-                    .keyboardType(.emailAddress)
-                    .autocapitalization(.none)
-                    .textInputAutocapitalization(.never)
+                VStack(spacing: 16) {
+                    TextField("Nome", text: $name)
+                        .textContentType(.name)
 
-                Group {
-                    if isSecure {
-                        SecureField("Password", text: $password)
-                            .textContentType(.newPassword)
-                    } else {
-                        TextField("Password", text: $password)
-                            .textContentType(.newPassword)
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    ZStack(alignment: .trailing) {
+                        if isSecure {
+                            SecureField("Password", text: $password)
+                                .textContentType(.newPassword)
+                        } else {
+                            TextField("Password", text: $password)
+                                .textContentType(.newPassword)
+                        }
+
+                        Button {
+                            isSecure.toggle()
+                        } label: {
+                            Image(systemName: isSecure ? "eye" : "eye.slash")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                }
-                .overlay(alignment: .trailing) {
+
+                    Toggle(isOn: $agree) {
+                        Text("Accetto i Termini e l'Informativa sulla privacy")
+                    }
+                    .toggleStyle(.switch)
+                    .font(.footnote)
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
                     Button {
-                        isSecure.toggle()
+                        errorMessage = nil
+                        if let err = store.signUp(name: name, email: email, password: password) {
+                            errorMessage = err
+                        }
                     } label: {
-                        Image(systemName: isSecure ? "eye" : "eye.slash")
-                            .foregroundStyle(.secondary)
+                        Text("Crea account")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.plain)
-                }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.pink)
+                    .controlSize(.large)
+                    .disabled(!isFormValid)
+                    .opacity(isFormValid ? 1 : 0.6)
 
-                Toggle(isOn: $agree) {
-                    Text("Accetto i Termini e l'Informativa sulla privacy")
+                    HStack(spacing: 6) {
+                        Text("Hai già un account?")
+                            .foregroundStyle(.secondary)
+                        NavigationLink("Accedi", destination: LoginView())
+                    }
+                    .font(.footnote)
                 }
-                .toggleStyle(.switch)
-                .font(.footnote)
-
-                Button {
-                    // TODO: Handle sign up action
-                } label: {
-                    Text("Crea account")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.pink)
-                .controlSize(.large)
-                .disabled(!isFormValid)
-                .opacity(isFormValid ? 1 : 0.6)
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
             }
+            .padding(20)
         }
+        .background(Color(.systemBackground))
         .navigationTitle("Sign up")
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private var isFormValid: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        email.contains("@") &&
+        UserStore.isValidEmail(email) &&
         password.count >= 6 &&
         agree
     }
@@ -78,4 +108,5 @@ struct SignUpView: View {
 
 #Preview {
     NavigationStack { SignUpView() }
+        .environment(UserStore.shared)
 }

@@ -9,9 +9,14 @@ import SwiftUI
 
 @main
 struct FyreApp: App {
+    @State private var store = UserStore.shared
+
+    nonisolated init() {}
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(store)
         }
     }
 }

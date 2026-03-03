@@ -8,113 +8,93 @@
 import SwiftUI
 
 struct LoginView: View {
-    @State private var email: String = ""
-    @State private var password: String = ""
-    @State private var isSecure: Bool = true
+    @Environment(UserStore.self) private var store
+    @State private var email = ""
+    @State private var password = ""
+    @State private var isSecure = true
+    @State private var errorMessage: String?
 
     var body: some View {
-        FormContainer(title: "Accedi") {
-            VStack(spacing: 16) {
-                // Email
-                TextField("Email", text: $email)
-                    .textContentType(.emailAddress)
-                    .keyboardType(.emailAddress)
-                    .autocapitalization(.none)
-                    .textInputAutocapitalization(.never)
-                    .submitLabel(.next)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Accedi")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .padding(.top, 8)
 
-                // Password
-                Group {
-                    if isSecure {
-                        SecureField("Password", text: $password)
-                            .textContentType(.password)
-                            .submitLabel(.go)
-                    } else {
-                        TextField("Password", text: $password)
-                            .textContentType(.password)
-                            .submitLabel(.go)
+                VStack(spacing: 16) {
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    ZStack(alignment: .trailing) {
+                        if isSecure {
+                            SecureField("Password", text: $password)
+                                .textContentType(.password)
+                        } else {
+                            TextField("Password", text: $password)
+                                .textContentType(.password)
+                        }
+
+                        Button {
+                            isSecure.toggle()
+                        } label: {
+                            Image(systemName: isSecure ? "eye" : "eye.slash")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                }
-                .overlay(alignment: .trailing) {
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
                     Button {
-                        isSecure.toggle()
+                        errorMessage = nil
+                        if let err = store.logIn(email: email, password: password) {
+                            errorMessage = err
+                        }
                     } label: {
-                        Image(systemName: isSecure ? "eye" : "eye.slash")
+                        Text("Accedi")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.pink)
+                    .controlSize(.large)
+                    .disabled(!isFormValid)
+                    .opacity(isFormValid ? 1 : 0.6)
+                    .padding(.top, 8)
+
+                    HStack(spacing: 6) {
+                        Text("Non hai un account?")
                             .foregroundStyle(.secondary)
+                        NavigationLink("Registrati", destination: SignUpView())
                     }
-                    .buttonStyle(.plain)
+                    .font(.footnote)
+                    .padding(.top, 4)
                 }
-
-                // Primary action
-                Button {
-                    // TODO: Handle login action
-                } label: {
-                    Text("Log in")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.pink)
-                .controlSize(.large)
-                .padding(.top, 8)
-
-                // Secondary text
-                HStack(spacing: 6) {
-                    Text("Non hai un account?")
-                        .foregroundStyle(.secondary)
-                    NavigationLink("Registrati", destination: SignUpView())
-                }
-                .font(.footnote)
-                .padding(.top, 4)
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
             }
+            .padding(20)
         }
-        .toolbarTitleDisplayMode()
-    }
-}
-
-private extension View {
-    func toolbarTitleDisplayMode() -> some View {
-        self
-            .navigationTitle("Log in")
-            .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-// Shared minimalist container used across auth screens
-struct FormContainer<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: () -> Content
-
-    init(title: String, @ViewBuilder content: @escaping () -> Content) {
-        self.title = title
-        self.content = content
+        .background(Color(.systemBackground))
+        .navigationTitle("Log in")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
-    var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(.systemBackground), Color(.secondarySystemBackground)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text(title)
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .padding(.top, 8)
-
-                    VStack(spacing: 12) {
-                        content()
-                    }
-                    .padding(16)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(.quaternary, lineWidth: 1)
-                    )
-                }
-                .padding(20)
-            }
-        }
+    private var isFormValid: Bool {
+        UserStore.isValidEmail(email) && password.count >= 6
     }
 }
 
 #Preview {
     NavigationStack { LoginView() }
+        .environment(UserStore.shared)
 }
