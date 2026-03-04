@@ -28,7 +28,7 @@ struct SignUpView: View {
                         .textContentType(.name)
 
                     TextField("Email", text: $email)
-                        .textContentType(.emailAddress)
+                        .textContentType(.username)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
