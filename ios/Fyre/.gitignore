@@ -1,0 +1,48 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+*.xcarchive
+*.xcuserstate
+xcuserdata/
+*.xcworkspace
+
+# Derived data
+DerivedData/
+*/DerivedData/
+
+# Swift Package Manager
+.build/
+
+# CocoaPods
+Pods/
+
+# Archives
+*.ipa
+
+# iOS Simulator — app bundles and containers
+*.app
+*.app.dSYM
+**/Library/Developer/CoreSimulator/Devices/*/data/Containers/Bundle/Application/*/*.app
+**/Library/Developer/CoreSimulator/Devices/*/data/Containers/Data/Application/*
+
+# Xcode signing
+*.mobileprovision
+*.cer
+*.p12
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+
+# Temporary files
+*.swp
+*.lock
+
+# Logs
+*.log
+
+# Ignore build products that may appear in the repo root of this Xcode project
+Fyre.xcodeproj/project.xcworkspace/xcuserdata/
