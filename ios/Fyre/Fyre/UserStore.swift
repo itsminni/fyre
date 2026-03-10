@@ -32,7 +32,7 @@ final class UserStore: @unchecked Sendable {
     /// Register a new user. Returns an error message on failure, nil on success.
     func signUp(name: String, email: String, password: String) -> String? {
         var users = loadUsers()
-        let normalizedEmail = email.lowercased().trimmingCharacters(in: .whitespaces)
+        let normalizedEmail = normalizeEmail(email)
 
         if users.contains(where: { $0.email == normalizedEmail }) {
             return "Esiste già un account con questa email."
@@ -48,7 +48,7 @@ final class UserStore: @unchecked Sendable {
     /// Log in with email + password. Returns an error message on failure, nil on success.
     func logIn(email: String, password: String) -> String? {
         let users = loadUsers()
-        let normalizedEmail = email.lowercased().trimmingCharacters(in: .whitespaces)
+        let normalizedEmail = normalizeEmail(email)
 
         guard let user = users.first(where: { $0.email == normalizedEmail }) else {
             return "Nessun account trovato con questa email."
@@ -69,7 +69,7 @@ final class UserStore: @unchecked Sendable {
 
     /// Checks that the email has a reasonable format: local@domain.tld
     static func isValidEmail(_ email: String) -> Bool {
-        let trimmed = email.trimmingCharacters(in: .whitespaces)
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
         // Must have exactly one @, non-empty local part, domain with at least one dot
         let parts = trimmed.split(separator: "@", omittingEmptySubsequences: false)
         guard parts.count == 2 else { return false }
@@ -84,7 +84,11 @@ final class UserStore: @unchecked Sendable {
         return true
     }
 
-    // MARK: - Persistence helpers - thanks ai
+    // MARK: - Persistence helpers
+
+    private func normalizeEmail(_ email: String) -> String {
+        email.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     private func loadUsers() -> [User] {
         guard let data = UserDefaults.standard.data(forKey: key),
