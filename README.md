@@ -1,7 +1,5 @@
 # Fyre
 
-====
-
 Fyre is a mobile project with two clients:
 - iOS in SwiftUI
 - Android in Jetpack Compose
