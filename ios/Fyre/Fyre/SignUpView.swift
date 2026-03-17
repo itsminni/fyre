@@ -7,6 +7,11 @@
 
 import SwiftUI
 
+// Sign-up screen
+// - Collects name, email and password for account creation
+// - Includes a terms toggle and basic client validation
+// - Accessibility identifiers are present for UI tests
+
 struct SignUpView: View {
     @Environment(UserStore.self) private var store
     @State private var name = ""
@@ -19,27 +24,36 @@ struct SignUpView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Crea account")
+                // Header: sign-up title
+                Text(L10n.tr("auth.signup.title"))
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .padding(.top, 8)
+                    .accessibilityAddTraits(.isHeader)
 
                 VStack(spacing: 16) {
-                    TextField("Nome", text: $name)
+                    // Name input
+                    TextField(L10n.tr("field.name"), text: $name)
                         .textContentType(.name)
+                        .accessibilityIdentifier("signup.name")
 
-                    TextField("Email", text: $email)
+                    // Email input
+                    TextField(L10n.tr("field.email"), text: $email)
                         .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityIdentifier("signup.email")
 
                     ZStack(alignment: .trailing) {
+                        // Password input with optional reveal
                         if isSecure {
-                            SecureField("Password", text: $password)
+                            SecureField(L10n.tr("field.password"), text: $password)
                                 .textContentType(.newPassword)
+                                .accessibilityIdentifier("signup.password.secure")
                         } else {
-                            TextField("Password", text: $password)
+                            TextField(L10n.tr("field.password"), text: $password)
                                 .textContentType(.newPassword)
+                                .accessibilityIdentifier("signup.password.plain")
                         }
 
                         Button {
@@ -51,25 +65,29 @@ struct SignUpView: View {
                         .buttonStyle(.plain)
                     }
 
+                    // Terms acceptance toggle (required to enable sign-up)
                     Toggle(isOn: $agree) {
-                        Text("Accetto i Termini e l'Informativa sulla privacy")
+                        Text(L10n.tr("auth.signup.terms"))
                     }
                     .toggleStyle(.switch)
                     .font(.footnote)
+                    .accessibilityIdentifier("signup.terms")
 
+                    // Show validation or server-side errors
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
 
+                    // Primary create-account action
                     Button {
                         errorMessage = nil
                         if let err = store.signUp(name: name, email: email, password: password) {
                             errorMessage = err
                         }
                     } label: {
-                        Text("Crea account")
+                        Text(L10n.tr("auth.signup.action"))
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -77,11 +95,14 @@ struct SignUpView: View {
                     .controlSize(.large)
                     .disabled(!isFormValid)
                     .opacity(isFormValid ? 1 : 0.6)
+                    .accessibilityIdentifier("signup.submit")
 
+                    // Link back to login for existing users
                     HStack(spacing: 6) {
-                        Text("Hai già un account?")
+                        Text(L10n.tr("auth.haveAccount.prompt"))
                             .foregroundStyle(.secondary)
-                        NavigationLink("Accedi", destination: LoginView())
+                        NavigationLink(L10n.tr("auth.login.action"), destination: LoginView())
+                            .accessibilityIdentifier("signup.gotoLogin")
                     }
                     .font(.footnote)
                 }
@@ -94,7 +115,7 @@ struct SignUpView: View {
             .padding(20)
         }
         .background(Color(.systemBackground))
-        .navigationTitle("Sign up")
+        .navigationTitle(L10n.tr("auth.signup.navigationTitle"))
         .navigationBarTitleDisplayMode(.inline)
     }
 

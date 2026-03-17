@@ -17,30 +17,30 @@ struct AccountView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Profilo") {
+                Section(L10n.tr("account.section.profile")) {
                     Text(store.currentUser?.name ?? "-")
                     Text(store.currentUser?.email ?? "-")
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Impostazioni") {
-                    Picker("Tema", selection: $themeMode) {
-                        Text("Sistema").tag("system")
-                        Text("Chiaro").tag("light")
-                        Text("Scuro").tag("dark")
+                Section(L10n.tr("account.section.settings")) {
+                    Picker(L10n.tr("account.theme"), selection: $themeMode) {
+                        Text(L10n.tr("account.theme.system")).tag("system")
+                        Text(L10n.tr("account.theme.light")).tag("light")
+                        Text(L10n.tr("account.theme.dark")).tag("dark")
                     }
-                    Toggle("Notifiche", isOn: $notificationsEnabled)
-                    Toggle("Mostra età", isOn: $showAge)
-                    Toggle("Mostra distanza", isOn: $showDistance)
+                    Toggle(L10n.tr("account.notifications"), isOn: $notificationsEnabled)
+                    Toggle(L10n.tr("account.showAge"), isOn: $showAge)
+                    Toggle(L10n.tr("account.showDistance"), isOn: $showDistance)
                 }
 
                 Section {
-                    Button("Disconnettiti", role: .destructive) {
+                    Button(L10n.tr("auth.logout.action"), role: .destructive) {
                         store.logOut()
                     }
                 }
             }
-            .navigationTitle("Account")
+            .navigationTitle(L10n.tr("tab.account"))
         }
     }
 }

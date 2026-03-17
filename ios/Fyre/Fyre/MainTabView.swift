@@ -12,17 +12,17 @@ struct MainTabView: View {
         TabView {
             SwipeHomeView()
                 .tabItem {
-                    Label("Home", systemImage: "flame.fill")
+                    Label(L10n.tr("tab.home"), systemImage: "flame.fill")
                 }
 
             MessagesView()
                 .tabItem {
-                    Label("Messaggi", systemImage: "message.fill")
+                    Label(L10n.tr("tab.messages"), systemImage: "message.fill")
                 }
 
             AccountView()
                 .tabItem {
-                    Label("Account", systemImage: "person.crop.circle")
+                    Label(L10n.tr("tab.account"), systemImage: "person.crop.circle")
                 }
         }
         .toolbarBackground(.visible, for: .tabBar)

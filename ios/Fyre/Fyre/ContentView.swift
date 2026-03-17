@@ -9,20 +9,22 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(UserStore.self) private var store
+    @Environment(AppRouter.self) private var router
 
     var body: some View {
-        if store.isLoggedIn {
-            HomeView()
-        } else {
+        Group {
+            if router.root == .main {
+                MainTabView()
+            } else {
             NavigationStack {
                 VStack(spacing: 24) {
                     Spacer()
 
                     VStack(spacing: 8) {
-                        Text("Fyre")
+                        Text(L10n.tr("app.name"))
                             .font(.system(size: 48, weight: .bold, design: .rounded))
                             .kerning(1.2)
-                        Text("Dalla scintilla al fyre")
+                        Text(L10n.tr("landing.tagline"))
                             .font(.title2.bold())
                             .foregroundStyle(.secondary)
                     }
@@ -33,20 +35,22 @@ struct ContentView: View {
 
                     VStack(spacing: 12) {
                         NavigationLink(destination: LoginView()) {
-                            Text("Accedi")
+                            Text(L10n.tr("auth.login.action"))
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.pink)
                         .controlSize(.large)
+                        .accessibilityIdentifier("landing.login")
 
                         NavigationLink(destination: SignUpView()) {
-                            Text("Registrati")
+                            Text(L10n.tr("auth.signup.action"))
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
                         .tint(.pink)
                         .controlSize(.large)
+                        .accessibilityIdentifier("landing.signup")
                     }
                     .padding(.horizontal, 24)
                     .padding(.bottom, 24)
@@ -63,6 +67,13 @@ struct ContentView: View {
                 .toolbar(.hidden, for: .navigationBar)
             }
         }
+        }
+        .onAppear {
+            router.sync(isLoggedIn: store.isLoggedIn)
+        }
+        .onChange(of: store.isLoggedIn) { _, isLoggedIn in
+            router.sync(isLoggedIn: isLoggedIn)
+        }
     }
 }
 
@@ -75,7 +86,7 @@ struct HomeView: View {
             Spacer()
 
             VStack(spacing: 8) {
-                Text("Ciao, \(store.currentUser?.name ?? "")!")
+                Text(L10n.greeting(store.currentUser?.name ?? ""))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                 Text(store.currentUser?.email ?? "")
                     .font(.subheadline)
@@ -87,7 +98,7 @@ struct HomeView: View {
             Button {
                 store.logOut()
             } label: {
-                Text("Log out")
+                Text(L10n.tr("auth.logout.action"))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)

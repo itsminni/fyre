@@ -19,13 +19,20 @@ struct User: Codable, Sendable {
 final class UserStore: @unchecked Sendable {
     static let shared = UserStore()
 
-    var currentUser: User?
+    var currentUser: User? {
+        didSet {
+            saveCurrentUser(currentUser)
+        }
+    }
 
     var isLoggedIn: Bool { currentUser != nil }
 
     private let key = "fyre_users"
+    private let currentUserKey = "fyre_current_user"
 
-    private init() {}
+    private init() {
+        currentUser = loadCurrentUser()
+    }
 
     // MARK: - Public API
 
@@ -35,7 +42,7 @@ final class UserStore: @unchecked Sendable {
         let normalizedEmail = normalizeEmail(email)
 
         if users.contains(where: { $0.email == normalizedEmail }) {
-            return "Esiste già un account con questa email."
+            return L10n.tr("error.signup.emailInUse")
         }
 
         let user = User(name: name, email: normalizedEmail, password: password)
@@ -51,10 +58,10 @@ final class UserStore: @unchecked Sendable {
         let normalizedEmail = normalizeEmail(email)
 
         guard let user = users.first(where: { $0.email == normalizedEmail }) else {
-            return "Nessun account trovato con questa email."
+            return L10n.tr("error.login.userNotFound")
         }
         guard user.password == password else {
-            return "Password errata."
+            return L10n.tr("error.login.invalidPassword")
         }
 
         currentUser = user
@@ -101,6 +108,25 @@ final class UserStore: @unchecked Sendable {
     private func saveUsers(_ users: [User]) {
         if let data = try? JSONEncoder().encode(users) {
             UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private func loadCurrentUser() -> User? {
+        guard let data = UserDefaults.standard.data(forKey: currentUserKey),
+              let user = try? JSONDecoder().decode(User.self, from: data) else {
+            return nil
+        }
+        return user
+    }
+
+    private func saveCurrentUser(_ user: User?) {
+        guard let user else {
+            UserDefaults.standard.removeObject(forKey: currentUserKey)
+            return
+        }
+
+        if let data = try? JSONEncoder().encode(user) {
+            UserDefaults.standard.set(data, forKey: currentUserKey)
         }
     }
 
