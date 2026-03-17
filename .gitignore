@@ -1,3 +1,5 @@
 .DS_Store
 **/.DS_Store
 
+# Ignore Xcode user workspace state (local)
+ios/Fyre/Fyre.xcodeproj/project.xcworkspace/xcuserdata/

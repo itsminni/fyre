@@ -1,0 +1,10 @@
+platform :ios, '17.0'
+
+project 'Fyre.xcodeproj'
+
+target 'Fyre' do
+  use_frameworks!
+
+  # Dependency manifest intentionally present even when empty,
+  # so new iOS libraries can be tracked in a single place.
+end

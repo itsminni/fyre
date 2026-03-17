@@ -1,0 +1,54 @@
+"app.name" = "Fyre";
+"landing.tagline" = "Dalla scintilla al fyre";
+
+"field.name" = "Nome";
+"field.email" = "Email";
+"field.password" = "Password";
+
+"auth.login.title" = "Accedi";
+"auth.login.action" = "Accedi";
+"auth.login.navigationTitle" = "Accedi";
+"auth.signup.title" = "Crea account";
+"auth.signup.action" = "Registrati";
+"auth.signup.navigationTitle" = "Registrati";
+"auth.signup.terms" = "Accetto i Termini e l'Informativa sulla privacy";
+"auth.haveAccount.prompt" = "Hai gia un account?";
+"auth.noAccount.prompt" = "Non hai un account?";
+"auth.icloudPassword.action" = "Usa password iCloud";
+"auth.icloudPassword.noCredential" = "Nessuna credenziale iCloud disponibile.";
+"auth.icloudPassword.error" = "Accesso iCloud non riuscito. Riprova.";
+"auth.logout.action" = "Disconnettiti";
+
+"error.signup.emailInUse" = "Esiste gia un account con questa email.";
+"error.login.userNotFound" = "Nessun account trovato con questa email.";
+"error.login.invalidPassword" = "Password errata.";
+
+"home.greeting" = "Ciao, %@!";
+"home.navigationTitle" = "Scopri";
+"home.empty.title" = "Fine profili";
+"home.empty.description" = "Hai visto tutti i profili demo.";
+"home.skip.accessibility" = "Salta";
+
+"tab.home" = "Home";
+"tab.messages" = "Messaggi";
+"tab.account" = "Account";
+
+"messages.navigationTitle" = "Messaggi recenti";
+"messages.empty.title" = "Nessuna chat";
+"messages.empty.description" = "Inizia a matchare per vedere i messaggi.";
+"messages.online" = "Online";
+"messages.openChat.hint" = "Tocca per aprire la chat";
+
+"chat.copy" = "Copia";
+"chat.cut" = "Taglia";
+"chat.message.placeholder" = "Messaggio";
+
+"account.section.profile" = "Profilo";
+"account.section.settings" = "Impostazioni";
+"account.theme" = "Tema";
+"account.theme.system" = "Sistema";
+"account.theme.light" = "Chiaro";
+"account.theme.dark" = "Scuro";
+"account.notifications" = "Notifiche";
+"account.showAge" = "Mostra eta";
+"account.showDistance" = "Mostra distanza";
