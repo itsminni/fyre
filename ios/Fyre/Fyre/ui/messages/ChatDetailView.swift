@@ -13,6 +13,8 @@ struct ChatDetailView: View {
 
     @State private var messages: [ChatMessage]
     @State private var draft = ""
+    @FocusState private var isInputFocused: Bool
+    private let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
 
     init(thread: ChatThread) {
         self.thread = thread
@@ -52,13 +54,13 @@ struct ChatDetailView: View {
                                         Button {
                                             copyMessageText(message.text)
                                         } label: {
-                                            Label("Copia", systemImage: "doc.on.doc")
+                                            Label(L10n.tr("chat.copy"), systemImage: "doc.on.doc")
                                         }
 
                                         Button {
                                             cutMessage(message)
                                         } label: {
-                                            Label("Taglia", systemImage: "scissors")
+                                            Label(L10n.tr("chat.cut"), systemImage: "scissors")
                                         }
                                     }
 
@@ -76,7 +78,8 @@ struct ChatDetailView: View {
             }
 
             HStack(spacing: 10) {
-                TextField("Messaggio", text: $draft)
+                TextField(L10n.tr("chat.message.placeholder"), text: $draft)
+                    .focused($isInputFocused)
                     .textFieldStyle(.plain)
                     .padding(.leading, 14)
                     .padding(.trailing, 10)
@@ -85,6 +88,14 @@ struct ChatDetailView: View {
                     .overlay(
                         Capsule(style: .continuous)
                             .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+                    // - swipe up to focus/open keyboard
+                    // - swipe down to dismiss keyboard
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 18)
+                            .onEnded { value in
+                                handleInputSwipe(value)
+                            }
                     )
 
                 LiquidStretchSendButton(
@@ -97,6 +108,10 @@ struct ChatDetailView: View {
         }
         .navigationTitle(thread.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onTapGesture {
+            // Tap outside the input closes the keyboard.
+            isInputFocused = false
+        }
     }
 
     private func sendMessage() {
@@ -114,6 +129,23 @@ struct ChatDetailView: View {
     private func cutMessage(_ message: ChatMessage) {
         UIPasteboard.general.string = message.text
         messages.removeAll { $0.id == message.id }
+    }
+
+    private func handleInputSwipe(_ value: DragGesture.Value) {
+        let vertical = value.translation.height
+        let predictedVertical = value.predictedEndTranslation.height
+
+        // Combine distance and momentum to make the gesture feel natural.
+        let opensKeyboard = vertical <= -18 || predictedVertical <= -55
+        let closesKeyboard = vertical >= 18 || predictedVertical >= 55
+
+        if opensKeyboard, !isInputFocused {
+            isInputFocused = true
+            feedbackGenerator.impactOccurred()
+        } else if closesKeyboard, isInputFocused {
+            isInputFocused = false
+            feedbackGenerator.impactOccurred()
+        }
     }
 
     private static let timeFormatter: DateFormatter = {

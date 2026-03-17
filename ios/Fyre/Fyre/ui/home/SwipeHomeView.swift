@@ -22,11 +22,8 @@ struct SwipeHomeView: View {
         case right
     }
 
-    @State private var profiles: [SwipeProfile] = [
-        SwipeProfile(name: "Giulia", age: 24, bio: "Amo concerti e caffe."),
-        SwipeProfile(name: "Marco", age: 27, bio: "Sport e viaggi nel weekend."),
-        SwipeProfile(name: "Elena", age: 25, bio: "Cinema, libri e passeggiate.")
-    ]
+    @Environment(AppServices.self) private var services
+    @State private var profiles: [SwipeProfile] = []
     @State private var dragOffset: CGSize = .zero
     @State private var isAnimatingDecision = false
 
@@ -54,9 +51,9 @@ struct SwipeHomeView: View {
                         )
                 } else {
                     ContentUnavailableView(
-                        "Fine profili",
+                        L10n.tr("home.empty.title"),
                         systemImage: "checkmark.circle",
-                        description: Text("Hai visto tutti i profili demo.")
+                        description: Text(L10n.tr("home.empty.description"))
                     )
                 }
 
@@ -71,7 +68,7 @@ struct SwipeHomeView: View {
                             .frame(width: 58, height: 58)
                             .background(.ultraThinMaterial, in: Circle())
                     }
-                    .accessibilityLabel("Salta")
+                    .accessibilityLabel(L10n.tr("home.skip.accessibility"))
                     .disabled(isAnimatingDecision || profiles.isEmpty)
 
                     Button {
@@ -83,12 +80,17 @@ struct SwipeHomeView: View {
                             .frame(width: 62, height: 62)
                             .background(.ultraThinMaterial, in: Circle())
                     }
-                    .accessibilityLabel("Fyre")
+                    .accessibilityLabel(L10n.tr("app.name"))
                     .disabled(isAnimatingDecision || profiles.isEmpty)
                 }
             }
             .padding()
-            .navigationTitle("Scopri")
+            .navigationTitle(L10n.tr("home.navigationTitle"))
+        }
+        .task {
+            if profiles.isEmpty {
+                await loadProfiles()
+            }
         }
     }
 
@@ -138,6 +140,15 @@ struct SwipeHomeView: View {
             profiles.removeFirst()
             dragOffset = .zero
             isAnimatingDecision = false
+        }
+    }
+
+    private func loadProfiles() async {
+        do {
+            let dtos = try await services.backend.fetchDiscoverProfiles()
+            profiles = dtos.map { SwipeProfile(name: $0.name, age: $0.age, bio: $0.bio) }
+        } catch {
+            profiles = []
         }
     }
 }
