@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "2630"
-   version = "1.7">
+   version = "1.8">
    <BuildAction
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
@@ -29,6 +29,38 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1B2C3D72F3C71A10045CA2F"
+               BuildableName = "FyreTests.xctest"
+               BlueprintName = "FyreTests"
+               ReferencedContainer = "container:Fyre.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1B2C3D82F3C71A10045CA2F"
+               BuildableName = "FyreUITests.xctest"
+               BlueprintName = "FyreUITests"
+               ReferencedContainer = "container:Fyre.xcodeproj">
+            </BuildableReference>
+            <MacroExpansion>
+               <BuildableReference
+                  BuildableIdentifier = "primary"
+                  BlueprintIdentifier = "3F9C19CD2F3C71A10045CA2F"
+                  BuildableName = "Fyre.app"
+                  BlueprintName = "Fyre"
+                  ReferencedContainer = "container:Fyre.xcodeproj">
+               </BuildableReference>
+            </MacroExpansion>
+         </TestableReference>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

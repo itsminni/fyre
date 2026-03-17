@@ -8,6 +8,8 @@
 
 /* Begin PBXFileReference section */
 		3F9C19CE2F3C71A10045CA2F /* Fyre.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Fyre.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D12F3C71A10045CA2F /* FyreTests.xctest */ = {isa = PBXFileReference; explicitFileType = "wrapper.cfbundle"; includeInIndex = 0; path = FyreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D22F3C71A10045CA2F /* FyreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = "wrapper.cfbundle"; includeInIndex = 0; path = FyreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +18,51 @@
 			path = Fyre;
 			sourceTree = "<group>";
 		};
+		A1B2C3D32F3C71A10045CA2F /* FyreTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FyreTests;
+			sourceTree = "<group>";
+		};
+		A1B2C3D42F3C71A10045CA2F /* FyreUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FyreUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		A1B2C3DB2F3C71A10045CA2F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3F9C19C62F3C71A10045CA2F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3F9C19CD2F3C71A10045CA2F;
+			remoteInfo = Fyre;
+		};
+		A1B2C3DC2F3C71A10045CA2F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3F9C19C62F3C71A10045CA2F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3F9C19CD2F3C71A10045CA2F;
+			remoteInfo = Fyre;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		3F9C19CB2F3C71A10045CA2F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D52F3C71A10045CA2F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D62F3C71A10045CA2F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +76,8 @@
 			isa = PBXGroup;
 			children = (
 				3F9C19D02F3C71A10045CA2F /* Fyre */,
+				A1B2C3D32F3C71A10045CA2F /* FyreTests */,
+				A1B2C3D42F3C71A10045CA2F /* FyreUITests */,
 				3F9C19CF2F3C71A10045CA2F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +86,8 @@
 			isa = PBXGroup;
 			children = (
 				3F9C19CE2F3C71A10045CA2F /* Fyre.app */,
+				A1B2C3D12F3C71A10045CA2F /* FyreTests.xctest */,
+				A1B2C3D22F3C71A10045CA2F /* FyreUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +117,52 @@
 			productReference = 3F9C19CE2F3C71A10045CA2F /* Fyre.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A1B2C3D72F3C71A10045CA2F /* FyreTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C3E52F3C71A10045CA2F /* Build configuration list for PBXNativeTarget "FyreTests" */;
+			buildPhases = (
+				A1B2C3DF2F3C71A10045CA2F /* Sources */,
+				A1B2C3D52F3C71A10045CA2F /* Frameworks */,
+				A1B2C3DD2F3C71A10045CA2F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1B2C3D92F3C71A10045CA2F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A1B2C3D32F3C71A10045CA2F /* FyreTests */,
+			);
+			name = FyreTests;
+			packageProductDependencies = (
+			);
+			productName = FyreTests;
+			productReference = A1B2C3D12F3C71A10045CA2F /* FyreTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A1B2C3D82F3C71A10045CA2F /* FyreUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C3E62F3C71A10045CA2F /* Build configuration list for PBXNativeTarget "FyreUITests" */;
+			buildPhases = (
+				A1B2C3E02F3C71A10045CA2F /* Sources */,
+				A1B2C3D62F3C71A10045CA2F /* Frameworks */,
+				A1B2C3DE2F3C71A10045CA2F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1B2C3DA2F3C71A10045CA2F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A1B2C3D42F3C71A10045CA2F /* FyreUITests */,
+			);
+			name = FyreUITests;
+			packageProductDependencies = (
+			);
+			productName = FyreUITests;
+			productReference = A1B2C3D22F3C71A10045CA2F /* FyreUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +175,14 @@
 				TargetAttributes = {
 					3F9C19CD2F3C71A10045CA2F = {
 						CreatedOnToolsVersion = 26.2;
+					};
+					A1B2C3D72F3C71A10045CA2F = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 3F9C19CD2F3C71A10045CA2F;
+					};
+					A1B2C3D82F3C71A10045CA2F = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 3F9C19CD2F3C71A10045CA2F;
 					};
 				};
 			};
@@ -100,12 +201,28 @@
 			projectRoot = "";
 			targets = (
 				3F9C19CD2F3C71A10045CA2F /* Fyre */,
+				A1B2C3D72F3C71A10045CA2F /* FyreTests */,
+				A1B2C3D82F3C71A10045CA2F /* FyreUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		3F9C19CC2F3C71A10045CA2F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3DD2F3C71A10045CA2F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3DE2F3C71A10045CA2F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +239,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A1B2C3DF2F3C71A10045CA2F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3E02F3C71A10045CA2F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1B2C3D92F3C71A10045CA2F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3F9C19CD2F3C71A10045CA2F /* Fyre */;
+			targetProxy = A1B2C3DB2F3C71A10045CA2F /* PBXContainerItemProxy */;
+		};
+		A1B2C3DA2F3C71A10045CA2F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3F9C19CD2F3C71A10045CA2F /* Fyre */;
+			targetProxy = A1B2C3DC2F3C71A10045CA2F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		3F9C19D72F3C71A20045CA2F /* Debug */ = {
@@ -253,7 +397,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Fyre/Fyre.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Fyre/Fyre.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = APPLE_TEAM_REDACTED;
@@ -262,6 +407,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Fyre;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare la foto profilo.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Fyre usa la posizione per mostrare distanza e profili nelle vicinanze.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere la foto profilo.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -294,7 +442,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Fyre/Fyre.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Fyre/Fyre.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = APPLE_TEAM_REDACTED;
@@ -303,6 +452,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Fyre;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare la foto profilo.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Fyre usa la posizione per mostrare distanza e profili nelle vicinanze.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere la foto profilo.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -330,6 +482,76 @@
 			};
 			name = Release;
 		};
+		A1B2C3E12F3C71A10045CA2F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = APPLE_TEAM_REDACTED;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = minni.FyreTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Fyre.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Fyre";
+			};
+			name = Debug;
+		};
+		A1B2C3E22F3C71A10045CA2F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = APPLE_TEAM_REDACTED;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = minni.FyreTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Fyre.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Fyre";
+			};
+			name = Release;
+		};
+		A1B2C3E32F3C71A10045CA2F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = APPLE_TEAM_REDACTED;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = minni.FyreUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Fyre;
+			};
+			name = Debug;
+		};
+		A1B2C3E42F3C71A10045CA2F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = APPLE_TEAM_REDACTED;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = minni.FyreUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Fyre;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -347,6 +569,24 @@
 			buildConfigurations = (
 				3F9C19DA2F3C71A20045CA2F /* Debug */,
 				3F9C19DB2F3C71A20045CA2F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1B2C3E52F3C71A10045CA2F /* Build configuration list for PBXNativeTarget "FyreTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3E12F3C71A10045CA2F /* Debug */,
+				A1B2C3E22F3C71A10045CA2F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1B2C3E62F3C71A10045CA2F /* Build configuration list for PBXNativeTarget "FyreUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3E32F3C71A10045CA2F /* Debug */,
+				A1B2C3E42F3C71A10045CA2F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
