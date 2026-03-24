@@ -20,6 +20,11 @@ struct MainTabView: View {
                     Label(L10n.tr("tab.messages"), systemImage: "message.fill")
                 }
 
+            EventsView()
+                .tabItem {
+                    Label(L10n.tr("tab.events"), systemImage: "calendar.badge.plus")
+                }
+
             AccountView()
                 .tabItem {
                     Label(L10n.tr("tab.account"), systemImage: "person.crop.circle")

@@ -11,15 +11,21 @@ import SwiftUI
 struct FyreApp: App {
     @AppStorage("settings_theme_mode") private var themeMode = "system"
     @State private var store = UserStore.shared
-    @State private var router = AppRouter()
+    @StateObject private var router = AppRouter()
     @State private var services = AppServices.shared
+
+    init() {
+        if ProcessInfo.processInfo.arguments.contains("-uitest-reset") {
+            UserStore.resetPersistedState()
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .preferredColorScheme(preferredColorScheme)
                 .environment(store)
-                .environment(router)
+                .environmentObject(router)
                 .environment(services)
         }
     }

@@ -9,12 +9,16 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(UserStore.self) private var store
-    @Environment(AppRouter.self) private var router
+    @EnvironmentObject private var router: AppRouter
 
     var body: some View {
         Group {
             if router.root == .main {
-                MainTabView()
+                if store.isProfileComplete {
+                    MainTabView()
+                } else {
+                    ProfileSetupView()
+                }
             } else {
             NavigationStack {
                 VStack(spacing: 24) {
@@ -77,42 +81,8 @@ struct ContentView: View {
     }
 }
 
-// Simple logged-in placeholder - ai da cambiare
-struct HomeView: View {
-    @Environment(UserStore.self) private var store
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            VStack(spacing: 8) {
-                Text(L10n.greeting(store.currentUser?.name ?? ""))
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text(store.currentUser?.email ?? "")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Button {
-                store.logOut()
-            } label: {
-                Text(L10n.tr("auth.logout.action"))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .tint(.pink)
-            .controlSize(.large)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 24)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
-    }
-}
-
 #Preview {
     ContentView()
         .environment(UserStore.shared)
+        .environmentObject(AppRouter())
 }

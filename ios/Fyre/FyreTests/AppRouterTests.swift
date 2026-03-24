@@ -9,15 +9,19 @@ import XCTest
 @testable import Fyre
 
 final class AppRouterTests: XCTestCase {
-    func testRouterMovesToMainWhenLoggedIn() {
-        let router = AppRouter()
-        router.sync(isLoggedIn: true)
-        XCTAssertEqual(router.root, .main)
+    func testRouterMovesToMainWhenLoggedIn() async {
+        await MainActor.run {
+            let router = AppRouter()
+            router.sync(isLoggedIn: true)
+            XCTAssertEqual(router.root, .main)
+        }
     }
 
-    func testRouterMovesToAuthWhenLoggedOut() {
-        let router = AppRouter()
-        router.sync(isLoggedIn: false)
-        XCTAssertEqual(router.root, .auth)
+    func testRouterMovesToAuthWhenLoggedOut() async {
+        await MainActor.run {
+            let router = AppRouter()
+            router.sync(isLoggedIn: false)
+            XCTAssertEqual(router.root, .auth)
+        }
     }
 }

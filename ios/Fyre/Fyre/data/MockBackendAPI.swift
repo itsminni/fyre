@@ -12,9 +12,11 @@ import Foundation
 struct MockBackendAPI: BackendAPI {
     func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
         [
-            ProfileDTO(id: UUID(), name: "Giulia", age: 24, bio: "Loves concerts and coffee."),
-            ProfileDTO(id: UUID(), name: "Marco", age: 27, bio: "Sports and weekend trips."),
-            ProfileDTO(id: UUID(), name: "Elena", age: 25, bio: "Movies, books and walks.")
+            ProfileDTO(id: UUID(), name: "Giulia", age: 24, gender: .female, bio: "Loves concerts and coffee."),
+            ProfileDTO(id: UUID(), name: "Marco", age: 27, gender: .male, bio: "Sports and weekend trips."),
+            ProfileDTO(id: UUID(), name: "Elena", age: 25, gender: .female, bio: "Movies, books and walks."),
+            ProfileDTO(id: UUID(), name: "Luca", age: 29, gender: .male, bio: "Vinyls, aperitivo and last-minute road trips."),
+            ProfileDTO(id: UUID(), name: "Sam", age: 26, gender: .nonBinary, bio: "Art nights, playlists and honest conversations.")
         ]
     }
 

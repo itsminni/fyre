@@ -14,7 +14,6 @@ import SwiftUI
 
 struct SignUpView: View {
     @Environment(UserStore.self) private var store
-    @State private var name = ""
     @State private var email = ""
     @State private var password = ""
     @State private var isSecure = true
@@ -31,11 +30,6 @@ struct SignUpView: View {
                     .accessibilityAddTraits(.isHeader)
 
                 VStack(spacing: 16) {
-                    // Name input
-                    TextField(L10n.tr("field.name"), text: $name)
-                        .textContentType(.name)
-                        .accessibilityIdentifier("signup.name")
-
                     // Email input
                     TextField(L10n.tr("field.email"), text: $email)
                         .textContentType(.emailAddress)
@@ -83,7 +77,7 @@ struct SignUpView: View {
                     // Primary create-account action
                     Button {
                         errorMessage = nil
-                        if let err = store.signUp(name: name, email: email, password: password) {
+                        if let err = store.signUp(email: email, password: password) {
                             errorMessage = err
                         }
                     } label: {
@@ -120,7 +114,6 @@ struct SignUpView: View {
     }
 
     private var isFormValid: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         UserStore.isValidEmail(email) &&
         password.count >= 6 &&
         agree
