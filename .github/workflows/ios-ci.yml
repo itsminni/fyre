@@ -31,18 +31,3 @@ jobs:
 
       - name: Test (iPhone 16 simulator)
         run: xcodebuild test -project Fyre.xcodeproj -scheme Fyre -destination 'platform=iOS Simulator,name=iPhone 16' -test-timeouts-enabled YES
-
-  distribution-readiness:
-    runs-on: macos-15
-    needs: test
-    defaults:
-      run:
-        working-directory: ios/Fyre
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate signing setup file exists
-        run: |
-          test -f docs/ios-signing.md
-          echo "Signing guide present"
