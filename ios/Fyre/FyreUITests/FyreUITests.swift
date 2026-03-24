@@ -14,6 +14,7 @@ final class FyreUITests: XCTestCase {
 
     func testOpenSignupAndBackToLogin() throws {
         let app = XCUIApplication()
+        app.launchArguments.append("-uitest-reset")
         app.launch()
 
         let signupButton = app.buttons["landing.signup"]

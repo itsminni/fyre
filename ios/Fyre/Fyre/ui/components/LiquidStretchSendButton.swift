@@ -9,6 +9,7 @@ import SwiftUI
 
 // Send button stretches toward drag direction for a "liquid" feel.
 struct LiquidStretchSendButton: View {
+    @Environment(\.colorScheme) private var colorScheme
     let isEnabled: Bool
     let action: () -> Void
 
@@ -30,12 +31,20 @@ struct LiquidStretchSendButton: View {
                 )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.3) : Color.black.opacity(0.10), lineWidth: 1)
                 )
-                .scaleEffect(x: stretchX, y: stretchY)
-                .offset(x: dragOffset.width * 0.14, y: dragOffset.height * 0.14)
-                .shadow(color: Color.orange.opacity(0.28), radius: 10, x: 0, y: 5)
-                .animation(.spring(response: 0.26, dampingFraction: 0.7), value: dragOffset)
+                .scaleEffect(x: supportsLiquidInteraction ? stretchX : 1, y: supportsLiquidInteraction ? stretchY : 1)
+                .offset(
+                    x: supportsLiquidInteraction ? dragOffset.width * 0.14 : 0,
+                    y: supportsLiquidInteraction ? dragOffset.height * 0.14 : 0
+                )
+                .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.28 : 0.20), radius: 10, x: 0, y: 5)
+                .animation(
+                    supportsLiquidInteraction
+                    ? .spring(response: 0.26, dampingFraction: 0.7)
+                    : nil,
+                    value: dragOffset
+                )
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -43,12 +52,21 @@ struct LiquidStretchSendButton: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .updating($dragOffset) { value, state, _ in
+                    guard supportsLiquidInteraction else { return }
                     state = CGSize(
                         width: min(max(value.translation.width, -16), 16),
                         height: min(max(value.translation.height, -16), 16)
                     )
                 }
         )
+    }
+
+    private var supportsLiquidInteraction: Bool {
+        if #available(iOS 26, *) {
+            return true
+        }
+
+        return false
     }
 
     private var stretchX: CGFloat {

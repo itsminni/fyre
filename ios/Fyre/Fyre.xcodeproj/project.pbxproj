@@ -6,10 +6,27 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		A1B2C3DB2F3C71A10045CA2F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3F9C19C62F3C71A10045CA2F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3F9C19CD2F3C71A10045CA2F;
+			remoteInfo = Fyre;
+		};
+		A1B2C3DC2F3C71A10045CA2F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 3F9C19C62F3C71A10045CA2F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3F9C19CD2F3C71A10045CA2F;
+			remoteInfo = Fyre;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		3F9C19CE2F3C71A10045CA2F /* Fyre.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Fyre.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A1B2C3D12F3C71A10045CA2F /* FyreTests.xctest */ = {isa = PBXFileReference; explicitFileType = "wrapper.cfbundle"; includeInIndex = 0; path = FyreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A1B2C3D22F3C71A10045CA2F /* FyreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = "wrapper.cfbundle"; includeInIndex = 0; path = FyreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D12F3C71A10045CA2F /* FyreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FyreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D22F3C71A10045CA2F /* FyreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FyreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -29,23 +46,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXContainerItemProxy section */
-		A1B2C3DB2F3C71A10045CA2F /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 3F9C19C62F3C71A10045CA2F /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 3F9C19CD2F3C71A10045CA2F;
-			remoteInfo = Fyre;
-		};
-		A1B2C3DC2F3C71A10045CA2F /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 3F9C19C62F3C71A10045CA2F /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 3F9C19CD2F3C71A10045CA2F;
-			remoteInfo = Fyre;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		3F9C19CB2F3C71A10045CA2F /* Frameworks */ = {
@@ -192,6 +192,7 @@
 			knownRegions = (
 				en,
 				Base,
+				it,
 			);
 			mainGroup = 3F9C19C52F3C71A10045CA2F;
 			minimizedProjectReferenceProxies = 1;
