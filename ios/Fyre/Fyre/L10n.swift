@@ -7,16 +7,10 @@
 
 import Foundation
 
-// Lightweight localization helper
-// - `tr(_:)` wraps `NSLocalizedString` so views call `L10n.tr("key")`
-// - `greeting(_:)` demonstrates a localized formatted string with a name
+// Lightweight localization helper.
 // Note: actual translations live in `Localizable.strings` per language.
 enum L10n {
     static func tr(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
-    }
-
-    static func greeting(_ name: String) -> String {
-        String(format: tr("home.greeting"), locale: Locale.autoupdatingCurrent, name)
     }
 }
