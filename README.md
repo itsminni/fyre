@@ -18,14 +18,6 @@ Repository structure
 Documentation
 - `docs/` contains planning materials and useful notes, including AI prompts used during exploration.
 
-Web frontend notes
-- The web app is intentionally frontend-only.
-- No server, no database, no real API integration is implemented.
-- Backend-dependent flows are simulated via local state, localStorage persistence, and mock services.
-- Future backend integration points are marked in `web/src/services/mockBackend.ts`.
-- Local user management for testing is available in login/account screens.
-- Demo users can be injected locally from UI with default password: `DEMO_PASSWORD_REDACTED`.
-
 Web run commands
 1. `cd web`
 2. `npm install`
