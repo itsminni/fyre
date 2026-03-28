@@ -3,3 +3,10 @@
 
 # Ignore Xcode user workspace state (local)
 ios/Fyre/Fyre.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Web dependencies and build artifacts
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
