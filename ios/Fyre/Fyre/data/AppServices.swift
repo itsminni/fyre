@@ -15,7 +15,7 @@ import Observation
 final class AppServices {
     static let shared = AppServices()
 
-    // Backend API used by the UI (mock by default)
+    // Backend API used by the UI
     var backend: BackendAPI
 
     init(backend: BackendAPI? = nil) {
@@ -24,21 +24,42 @@ final class AppServices {
             return
         }
 
-        if Self.isRunningTests {
-            self.backend = MockBackendAPI()
-            return
-        }
-
         do {
-            // Prefer the real backend outside tests, but keep a safe mock fallback when config is missing.
+            // If Appwrite is unavailable, fail.
             let configuration = try AppwriteConfiguration.load()
             self.backend = AppwriteBackendAPI(configuration: configuration)
         } catch {
-            self.backend = MockBackendAPI()
+            debugPrint("AppServices initialization failed: \(error.localizedDescription)")
+            self.backend = UnavailableBackendAPI(reason: error.localizedDescription)
         }
     }
+}
 
-    private static var isRunningTests: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+private struct UnavailableBackendAPI: BackendAPI {
+    let reason: String
+
+    func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
+        throw APIError.configuration(reason)
+    }
+
+    func fetchThreads() async throws -> [ThreadDTO] {
+        throw APIError.configuration(reason)
+    }
+
+    func createOrGetThread(otherUserId: String) async throws -> ThreadDTO {
+        _ = otherUserId
+        throw APIError.configuration(reason)
+    }
+
+    func sendMessage(threadId: String, text: String) async throws -> MessageDTO {
+        _ = threadId
+        _ = text
+        throw APIError.configuration(reason)
+    }
+
+    func submitSwipe(otherUserId: String, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
+        _ = otherUserId
+        _ = decision
+        throw APIError.configuration(reason)
     }
 }

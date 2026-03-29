@@ -45,6 +45,22 @@ enum APIError: Error, Sendable {
     case notImplemented
     case network
     case decoding
+    case configuration(String)
+}
+
+extension APIError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .notImplemented:
+            return "Backend API not implemented."
+        case .network:
+            return "Network request failed."
+        case .decoding:
+            return "Failed to decode backend payload."
+        case let .configuration(message):
+            return message
+        }
+    }
 }
 
 // Protocol that the app uses to fetch backend data. Implementations

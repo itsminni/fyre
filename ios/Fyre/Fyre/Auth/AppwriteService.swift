@@ -638,15 +638,6 @@ actor AppwriteService {
         )
     }
 
-    private func requireUpcomingEventId() async throws -> String {
-        let events = try await fetchUpcomingEventRows()
-        guard let eventId = events.first.flatMap({ stringValue(forKey: "$id", in: $0) }) else {
-            throw AppwriteServiceError.api(statusCode: 404, message: "events.error.notRegistered", type: "event")
-        }
-
-        return eventId
-    }
-
     private func resolvedAccountId(from user: User?) async throws -> String? {
         if let accountId = user?.appwriteUserId?.trimmingCharacters(in: .whitespacesAndNewlines),
            !accountId.isEmpty {
