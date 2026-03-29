@@ -212,9 +212,7 @@ actor AppwriteService {
         let excludedUserIds = try await excludedDiscoverUserIds(currentAccountId: currentAccountId)
         let rows = try await listRows(
             tableId: configuration.profilesTableId,
-            queries: [
-                AppwriteQuery.limit(100)
-            ]
+            queries: []
         )
 
         return rows.compactMap { row in

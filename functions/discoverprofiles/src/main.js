@@ -5,12 +5,11 @@ export default async ({ req, res, error }) => {
 
     // Build a minimal discover payload server-side so the client does not need full profile read access.
     const [profiles, swipes, matches] = await Promise.all([
-      listRows(config, config.profilesTableId, [limit(100)]),
+      listRows(config, config.profilesTableId, []),
       listRows(config, config.swipesTableId, [
-        equal("fromUserId", [currentUserId]),
-        limit(200)
+        equal("fromUserId", [currentUserId])
       ]),
-      listRows(config, config.matchesTableId, [limit(200)])
+      listRows(config, config.matchesTableId, [])
     ]);
 
     const excludedUserIds = new Set();
@@ -122,8 +121,4 @@ async function request(config, method, path, body, queries = []) {
 
 function equal(field, values) {
   return JSON.stringify({ method: "equal", attribute: field, values });
-}
-
-function limit(value) {
-  return JSON.stringify({ method: "limit", values: [value] });
 }

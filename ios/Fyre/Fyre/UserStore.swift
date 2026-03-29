@@ -679,6 +679,9 @@ final class UserStore: @unchecked Sendable {
         if Self.shouldUseAppwrite {
             guard let user = currentUser else { return L10n.tr("events.error.loginRequired") }
             guard let appwriteService else { return eventRequestErrorMessage() }
+            guard let gender = user.gender else { return L10n.tr("events.error.genderRequired") }
+            guard gender == .male || gender == .female else { return L10n.tr("events.error.genderUnsupported") }
+            guard user.orientation == .straight else { return L10n.tr("events.error.orientationUnsupported") }
             let hadRegistrationBeforeRequest = hasCurrentUserMainEventRegistration
 
             do {
