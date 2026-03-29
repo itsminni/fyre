@@ -32,13 +32,15 @@ final class UserStoreAuthTests: XCTestCase {
         let unique = UUID().uuidString.lowercased()
         let email = "\(unique)@example.test"
 
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
         XCTAssertEqual(store.currentUser?.email, email)
 
         await store.logOut()
         XCTAssertNil(store.currentUser)
 
-        XCTAssertNil(await store.logIn(email: email, password: "password123"))
+        let loginError = await store.logIn(email: email, password: "password123")
+        XCTAssertNil(loginError)
         XCTAssertEqual(store.currentUser?.email, email)
     }
 
@@ -59,10 +61,12 @@ final class UserStoreAuthTests: XCTestCase {
         let maleBEmail = "\(UUID().uuidString.lowercased())@example.test"
 
         await registerEventEligibleUser(store: store, email: maleAEmail, gender: .male, firstName: "Male", lastName: "A")
-        XCTAssertNil(store.registerForMainEvent())
+        let firstRegistration = await store.registerForMainEvent()
+        XCTAssertNil(firstRegistration)
 
         await registerEventEligibleUser(store: store, email: maleBEmail, gender: .male, firstName: "Male", lastName: "B")
-        XCTAssertNil(store.registerForMainEvent())
+        let secondRegistration = await store.registerForMainEvent()
+        XCTAssertNil(secondRegistration)
 
         let snapshot = store.mainEventSnapshot
         XCTAssertEqual(snapshot.maleCount, 2)
@@ -79,19 +83,23 @@ final class UserStoreAuthTests: XCTestCase {
         let waitingEmail = "\(UUID().uuidString.lowercased())@example.test"
 
         await registerEventEligibleUser(store: store, email: waitingEmail, gender: .male, firstName: "Waiting", lastName: "Male")
-        XCTAssertEqual(store.registerForMainEvent(), L10n.tr("events.success.waitlisted"))
+        let waitingRegistration = await store.registerForMainEvent()
+        XCTAssertEqual(waitingRegistration, L10n.tr("events.success.waitlisted"))
         XCTAssertEqual(store.mainEventSnapshot.maleCount, 24)
         XCTAssertEqual(store.mainEventSnapshot.waitingListCount, 1)
         XCTAssertTrue(store.isCurrentUserWaitingForMainEvent)
 
-        XCTAssertNil(await store.logIn(email: confirmedMaleEmails[0], password: "password123"))
-        XCTAssertNil(store.cancelMainEventRegistration())
+        let confirmedLogin = await store.logIn(email: confirmedMaleEmails[0], password: "password123")
+        XCTAssertNil(confirmedLogin)
+        let cancelConfirmed = await store.cancelMainEventRegistration()
+        XCTAssertNil(cancelConfirmed)
 
         let snapshot = store.mainEventSnapshot
         XCTAssertEqual(snapshot.maleCount, 24)
         XCTAssertEqual(snapshot.waitingListCount, 0)
 
-        XCTAssertNil(await store.logIn(email: waitingEmail, password: "password123"))
+        let waitingLogin = await store.logIn(email: waitingEmail, password: "password123")
+        XCTAssertNil(waitingLogin)
         XCTAssertTrue(store.isCurrentUserRegisteredForMainEvent)
         XCTAssertFalse(store.isCurrentUserWaitingForMainEvent)
     }
@@ -104,11 +112,13 @@ final class UserStoreAuthTests: XCTestCase {
 
         _ = await fillMainEventSlots(store: store, count: 24, gender: .male, emailPrefix: "filled-male")
         await registerEventEligibleUser(store: store, email: maleBEmail, gender: .male, firstName: "Male", lastName: "B")
-        XCTAssertEqual(store.registerForMainEvent(), L10n.tr("events.success.waitlisted"))
+        let waitlistResult = await store.registerForMainEvent()
+        XCTAssertEqual(waitlistResult, L10n.tr("events.success.waitlisted"))
         XCTAssertEqual(store.mainEventSnapshot.waitingListCount, 1)
         XCTAssertTrue(store.isCurrentUserWaitingForMainEvent)
 
-        XCTAssertNil(store.cancelMainEventRegistration())
+        let cancelWaiting = await store.cancelMainEventRegistration()
+        XCTAssertNil(cancelWaiting)
         XCTAssertEqual(store.mainEventSnapshot.waitingListCount, 0)
         XCTAssertFalse(store.isCurrentUserWaitingForMainEvent)
     }
@@ -118,11 +128,14 @@ final class UserStoreAuthTests: XCTestCase {
         let store = UserStore.shared
         let email = "\(UUID().uuidString.lowercased())@example.test"
 
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
-        XCTAssertNil(await store.setProfileGender(.male))
-        XCTAssertNil(await store.updateProfile(
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+        let setGenderError = await store.setProfileGender(.male)
+        XCTAssertNil(setGenderError)
+        let initialProfileError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
             orientation: .straight,
             smokes: false,
@@ -132,13 +145,16 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
-        XCTAssertNil(store.registerForMainEvent())
+        )
+        XCTAssertNil(initialProfileError)
+        let initialRegistration = await store.registerForMainEvent()
+        XCTAssertNil(initialRegistration)
         XCTAssertTrue(store.isCurrentUserRegisteredForMainEvent)
 
-        XCTAssertNil(await store.updateProfile(
+        let changedOrientationError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
             orientation: .bisexual,
             smokes: false,
@@ -148,7 +164,8 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
+        )
+        XCTAssertNil(changedOrientationError)
         XCTAssertFalse(store.isCurrentUserRegisteredForMainEvent)
     }
 
@@ -157,11 +174,14 @@ final class UserStoreAuthTests: XCTestCase {
         let store = UserStore.shared
         let email = "\(UUID().uuidString.lowercased())@example.test"
 
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
-        XCTAssertNil(await store.setProfileGender(.male))
-        XCTAssertNil(await store.updateProfile(
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+        let setGenderError = await store.setProfileGender(.male)
+        XCTAssertNil(setGenderError)
+        let profileError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
             orientation: .straight,
             smokes: false,
@@ -171,11 +191,14 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
-        XCTAssertNil(store.registerForMainEvent())
+        )
+        XCTAssertNil(profileError)
+        let initialRegistration = await store.registerForMainEvent()
+        XCTAssertNil(initialRegistration)
         XCTAssertTrue(store.isCurrentUserRegisteredForMainEvent)
 
-        XCTAssertNil(await store.setProfileGender(.other))
+        let changedGenderError = await store.setProfileGender(.other)
+        XCTAssertNil(changedGenderError)
         XCTAssertFalse(store.isCurrentUserRegisteredForMainEvent)
     }
 
@@ -184,11 +207,14 @@ final class UserStoreAuthTests: XCTestCase {
         let store = UserStore.shared
         let email = "\(UUID().uuidString.lowercased())@example.test"
 
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
-        XCTAssertNil(await store.setProfileGender(.female))
-        XCTAssertNil(await store.updateProfile(
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+        let setGenderError = await store.setProfileGender(.female)
+        XCTAssertNil(setGenderError)
+        let profileError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -24, to: Date()),
             orientation: .bisexual,
             smokes: false,
@@ -198,9 +224,10 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
+        )
+        XCTAssertNil(profileError)
 
-        let error = store.registerForMainEvent()
+        let error = await store.registerForMainEvent()
         XCTAssertEqual(error, L10n.tr("events.error.orientationUnsupported"))
         XCTAssertFalse(store.isCurrentUserRegisteredForMainEvent)
     }
@@ -210,11 +237,14 @@ final class UserStoreAuthTests: XCTestCase {
         let store = UserStore.shared
         let email = "\(UUID().uuidString.lowercased())@example.test"
 
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
-        XCTAssertNil(await store.setProfileGender(.other))
-        XCTAssertNil(await store.updateProfile(
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+        let setGenderError = await store.setProfileGender(.other)
+        XCTAssertNil(setGenderError)
+        let profileError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -24, to: Date()),
             orientation: .straight,
             smokes: false,
@@ -224,9 +254,10 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
+        )
+        XCTAssertNil(profileError)
 
-        let error = store.registerForMainEvent()
+        let error = await store.registerForMainEvent()
         XCTAssertEqual(error, L10n.tr("events.error.genderUnsupported"))
         XCTAssertFalse(store.isCurrentUserRegisteredForMainEvent)
     }
@@ -236,11 +267,14 @@ final class UserStoreAuthTests: XCTestCase {
         let store = UserStore.shared
         let email = "\(UUID().uuidString.lowercased())@example.test"
 
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
-        XCTAssertNil(await store.setProfileGender(.male))
-        XCTAssertNil(await store.updateProfile(
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+        let setGenderError = await store.setProfileGender(.male)
+        XCTAssertNil(setGenderError)
+        let initialProfileError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -29, to: Date()),
             orientation: .straight,
             smokes: false,
@@ -250,14 +284,17 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
-        XCTAssertNil(store.registerForMainEvent())
+        )
+        XCTAssertNil(initialProfileError)
+        let initialRegistration = await store.registerForMainEvent()
+        XCTAssertNil(initialRegistration)
         XCTAssertTrue(store.isCurrentUserRegisteredForMainEvent)
         XCTAssertTrue(store.willCurrentUserLoseMainEventRegistrations(orientation: .bisexual))
 
-        XCTAssertNil(await store.updateProfile(
+        let changedOrientationError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -29, to: Date()),
             orientation: .bisexual,
             smokes: false,
@@ -267,7 +304,8 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
+        )
+        XCTAssertNil(changedOrientationError)
 
         XCTAssertFalse(store.isCurrentUserRegisteredForMainEvent)
         XCTAssertFalse(store.isCurrentUserWaitingForMainEvent)
@@ -281,11 +319,13 @@ final class UserStoreAuthTests: XCTestCase {
         _ = await fillMainEventSlots(store: store, count: 24, gender: .male, emailPrefix: "seeded-male")
         await registerEventEligibleUser(store: store, email: waitingEmail, gender: .male, firstName: "Second", lastName: "User")
 
-        XCTAssertEqual(store.registerForMainEvent(), L10n.tr("events.success.waitlisted"))
+        let waitlistResult = await store.registerForMainEvent()
+        XCTAssertEqual(waitlistResult, L10n.tr("events.success.waitlisted"))
         XCTAssertTrue(store.isCurrentUserWaitingForMainEvent)
         XCTAssertTrue(store.willCurrentUserLoseMainEventRegistrations(changingGenderTo: .other))
 
-        XCTAssertNil(await store.setProfileGender(.other))
+        let changedGenderError = await store.setProfileGender(.other)
+        XCTAssertNil(changedGenderError)
 
         XCTAssertFalse(store.isCurrentUserRegisteredForMainEvent)
         XCTAssertFalse(store.isCurrentUserWaitingForMainEvent)
@@ -296,11 +336,14 @@ final class UserStoreAuthTests: XCTestCase {
         let store = UserStore.shared
         let email = "\(UUID().uuidString.lowercased())@example.test"
 
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
-        XCTAssertNil(await store.setProfileGender(.male))
-        XCTAssertNil(await store.updateProfile(
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+        let setGenderError = await store.setProfileGender(.male)
+        XCTAssertNil(setGenderError)
+        let profileError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
             orientation: .straight,
             showMe: .women,
@@ -311,7 +354,8 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
+        )
+        XCTAssertNil(profileError)
 
         XCTAssertEqual(store.currentUser?.showMe, .women)
     }
@@ -321,9 +365,11 @@ final class UserStoreAuthTests: XCTestCase {
         let store = UserStore.shared
         let email = "\(UUID().uuidString.lowercased())@example.test"
 
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
-        XCTAssertNil(await store.setProfileGender(.female))
-        XCTAssertNil(await store.updateProfile(
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+        let setGenderError = await store.setProfileGender(.female)
+        XCTAssertNil(setGenderError)
+        let profileError = await store.updateProfile(
             firstName: "A",
             lastName: "B",
             city: "Rome",
@@ -336,7 +382,8 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
+        )
+        XCTAssertNil(profileError)
 
         XCTAssertEqual(store.currentUser?.city, "Rome")
     }
@@ -364,11 +411,14 @@ final class UserStoreAuthTests: XCTestCase {
         firstName: String = "Test",
         lastName: String = "User"
     ) async {
-        XCTAssertNil(await store.signUp(email: email, password: "password123"))
-        XCTAssertNil(await store.setProfileGender(gender))
-        XCTAssertNil(await store.updateProfile(
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+        let setGenderError = await store.setProfileGender(gender)
+        XCTAssertNil(setGenderError)
+        let profileError = await store.updateProfile(
             firstName: firstName,
             lastName: lastName,
+            city: "Rome",
             birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
             orientation: .straight,
             smokes: false,
@@ -378,7 +428,8 @@ final class UserStoreAuthTests: XCTestCase {
             lookingFor: "",
             favoriteSong: "",
             favoriteMovie: ""
-        ))
+        )
+        XCTAssertNil(profileError)
     }
 
     @discardableResult
@@ -399,7 +450,8 @@ final class UserStoreAuthTests: XCTestCase {
                 firstName: "\(gender == .male ? "Male" : "Female") \(index)",
                 lastName: "User"
             )
-            XCTAssertNil(store.registerForMainEvent())
+            let registrationError = await store.registerForMainEvent()
+            XCTAssertNil(registrationError)
             emails.append(email)
         }
 

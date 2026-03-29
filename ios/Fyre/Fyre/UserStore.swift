@@ -478,6 +478,55 @@ final class UserStore: @unchecked Sendable {
     }
 
     @MainActor
+    func setProfileGender(_ gender: UserGender) async -> String? {
+        guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
+
+        let shouldRemoveMainEventRegistration = willCurrentUserLoseMainEventRegistrations(changingGenderTo: gender)
+        user.gender = gender
+
+        if Self.shouldUseAppwrite {
+            // Compatibility helper kept for tests and legacy call sites while profile edits now flow through updateProfile.
+            currentUser = user
+
+            if user.isProfileComplete {
+                guard let appwriteService else {
+                    return authConfigurationErrorMessage()
+                }
+
+                do {
+                    let updatedUser = try await appwriteService.updateProfile(for: user)
+                    currentUser = updatedUser
+                    if shouldRemoveMainEventRegistration {
+                        try? await appwriteService.cancelMainEventRegistration(
+                            for: updatedUser,
+                            eventId: remoteMainEventState?.eventId,
+                            force: true
+                        )
+                    }
+                    await refreshRemoteMainEventState()
+                } catch {
+                    return profileErrorMessage(for: error)
+                }
+            }
+        } else {
+            var users = UserStore.loadUsers()
+            guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+                return L10n.tr("profile.error.noCurrentUser")
+            }
+
+            users[userIndex] = user
+            UserStore.saveUsers(users)
+            currentUser = user
+        }
+
+        if shouldRemoveMainEventRegistration, !Self.shouldUseAppwrite {
+            forceRemoveUserFromMainEvent(email: user.email)
+        }
+
+        return nil
+    }
+
+    @MainActor
     func updateProfile(
         firstName: String,
         lastName: String,
