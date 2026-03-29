@@ -5,6 +5,7 @@
 //  Created by Gabriele Mininni on 11/02/26.
 //
 
+import Foundation
 import Observation
 
 // Central registry for app-wide services
@@ -17,7 +18,27 @@ final class AppServices {
     // Backend API used by the UI (mock by default)
     var backend: BackendAPI
 
-    init(backend: BackendAPI = MockBackendAPI()) {
-        self.backend = backend
+    init(backend: BackendAPI? = nil) {
+        if let backend {
+            self.backend = backend
+            return
+        }
+
+        if Self.isRunningTests {
+            self.backend = MockBackendAPI()
+            return
+        }
+
+        do {
+            // Prefer the real backend outside tests, but keep a safe mock fallback when config is missing.
+            let configuration = try AppwriteConfiguration.load()
+            self.backend = AppwriteBackendAPI(configuration: configuration)
+        } catch {
+            self.backend = MockBackendAPI()
+        }
+    }
+
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 }
