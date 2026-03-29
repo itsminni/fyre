@@ -10,6 +10,7 @@ import PhotosUI
 
 struct AccountView: View {
     private struct EditableProfileDraft: Equatable {
+        let city: String
         let orientation: UserOrientation
         let showMe: UserShowMe
         let smokes: Bool
@@ -49,6 +50,7 @@ struct AccountView: View {
     @State private var selectedSection: AccountSection = .profile
     @State private var firstName = ""
     @State private var lastName = ""
+    @State private var city = ""
     @State private var birthDate = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
     @State private var orientation: UserOrientation = .straight
     @State private var showMe: UserShowMe = .everyone
@@ -67,6 +69,8 @@ struct AccountView: View {
     @State private var pendingDangerousOrientation: UserOrientation?
     @State private var isHydratingProfileForm = false
     @State private var hasLoadedProfileForm = false
+    @State private var isSavingProfile = false
+    @State private var isLoggingOut = false
 
     private let supportEmail = "support@example.com"
 
@@ -79,7 +83,7 @@ struct AccountView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
+            VStack(spacing: 8) {
                 Picker("", selection: $selectedSection) {
                     ForEach(AccountSection.allCases) { section in
                         Text(L10n.tr(section.titleKey)).tag(section)
@@ -87,7 +91,7 @@ struct AccountView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
-                .padding(.top, 8)
+                .padding(.top, 4)
 
                 Group {
                     switch selectedSection {
@@ -112,10 +116,20 @@ struct AccountView: View {
             .task(id: pickedPhotoItem) {
                 guard let pickedPhotoItem else { return }
                 if let data = try? await pickedPhotoItem.loadTransferable(type: Data.self) {
-                    _ = store.updateProfileImage(data)
+                    // Avatar uploads are handled separately so autosaving text fields never reuploads the image.
+                    let result = await store.updateProfileImage(data)
+                    if let result {
+                        profileMessage = result
+                        profileMessageIsError = true
+                    } else {
+                        profileMessage = nil
+                        profileMessageIsError = false
+                        fillFromUser()
+                    }
                 }
             }
             .task(id: editableProfileDraft) {
+                // Only editable profile fields participate in autosave; identity fields stay read-only above.
                 await autosaveProfileIfNeeded()
             }
             .alert(
@@ -123,12 +137,14 @@ struct AccountView: View {
                 isPresented: $showEventRemovalAlert
             ) {
                 Button(L10n.tr("profile.eventsRemoval.warning.confirm"), role: .destructive) {
-                    performProfileSave(
-                        orientationOverride: pendingDangerousOrientation,
-                        notifyEventRemoval: true,
-                        showSuccessMessage: true
-                    )
-                    pendingDangerousOrientation = nil
+                    Task {
+                        await performProfileSave(
+                            orientationOverride: pendingDangerousOrientation,
+                            notifyEventRemoval: true,
+                            showSuccessMessage: true
+                        )
+                        pendingDangerousOrientation = nil
+                    }
                 }
                 Button(L10n.tr("common.cancel"), role: .cancel) {
                     pendingDangerousOrientation = nil
@@ -185,6 +201,8 @@ struct AccountView: View {
 
                 AccountCard(title: L10n.tr("profile.section.preferences"), icon: "slider.horizontal.3") {
                     VStack(spacing: 14) {
+                        ProfileTextField(title: L10n.tr("profile.city"), text: $city)
+
                         ProfilePickerField(
                             title: L10n.tr("profile.orientation"),
                             selection: $orientation,
@@ -226,12 +244,15 @@ struct AccountView: View {
                 }
 
                 Button(L10n.tr("auth.logout.action")) {
-                    store.logOut()
+                    Task {
+                        await performLogout()
+                    }
                 }
                 .buttonStyle(AccountPrimaryButtonStyle(tint: .red))
+                .disabled(isLoggingOut)
             }
             .padding(.horizontal)
-            .padding(.top, 8)
+            .padding(.top, 2)
             .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
@@ -239,18 +260,41 @@ struct AccountView: View {
     }
 
     private var appSettings: some View {
-        Form {
-            Section(L10n.tr("account.section.settings")) {
-                Picker(L10n.tr("account.theme"), selection: $themeMode) {
-                    Text(L10n.tr("account.theme.system")).tag("system")
-                    Text(L10n.tr("account.theme.light")).tag("light")
-                    Text(L10n.tr("account.theme.dark")).tag("dark")
+        ScrollView {
+            VStack(spacing: 18) {
+                // Use the same card layout as the other tabs to avoid the extra top inset from Form.
+                AccountCard(
+                    title: L10n.tr("account.section.settings"),
+                    icon: "gearshape.fill"
+                ) {
+                    VStack(spacing: 14) {
+                        SettingsPickerField(
+                            title: L10n.tr("account.theme"),
+                            selection: $themeMode,
+                            options: ["system", "light", "dark"]
+                        ) { option in
+                            switch option {
+                            case "light":
+                                return L10n.tr("account.theme.light")
+                            case "dark":
+                                return L10n.tr("account.theme.dark")
+                            default:
+                                return L10n.tr("account.theme.system")
+                            }
+                        }
+
+                        SettingsToggleField(title: L10n.tr("account.notifications"), isOn: $notificationsEnabled)
+                        SettingsToggleField(title: L10n.tr("account.showAge"), isOn: $showAge)
+                        SettingsToggleField(title: L10n.tr("account.showDistance"), isOn: $showDistance)
+                    }
                 }
-                Toggle(L10n.tr("account.notifications"), isOn: $notificationsEnabled)
-                Toggle(L10n.tr("account.showAge"), isOn: $showAge)
-                Toggle(L10n.tr("account.showDistance"), isOn: $showDistance)
             }
+            .padding(.horizontal)
+            .padding(.top, 2)
+            .padding(.bottom, 28)
         }
+        .scrollIndicators(.hidden)
+        .background(accountBackground.ignoresSafeArea())
     }
 
     private var securitySettings: some View {
@@ -282,7 +326,7 @@ struct AccountView: View {
                 }
             }
             .padding(.horizontal)
-            .padding(.top, 8)
+            .padding(.top, 2)
             .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
@@ -373,6 +417,7 @@ struct AccountView: View {
         isHydratingProfileForm = true
         firstName = store.currentUser?.firstName ?? ""
         lastName = store.currentUser?.lastName ?? ""
+        city = store.currentUser?.city ?? ""
         birthDate = store.currentUser?.birthDate ?? birthDate
         orientation = store.currentUser?.orientation ?? .straight
         showMe = store.currentUser?.showMe ?? .everyone
@@ -389,6 +434,7 @@ struct AccountView: View {
 
     private var editableProfileDraft: EditableProfileDraft {
         EditableProfileDraft(
+            city: city,
             orientation: orientation,
             showMe: showMe,
             smokes: smokes,
@@ -405,6 +451,7 @@ struct AccountView: View {
         guard let user = store.currentUser else { return nil }
 
         return EditableProfileDraft(
+            city: user.city ?? "",
             orientation: user.orientation ?? .straight,
             showMe: user.showMe,
             smokes: user.smokes ?? false,
@@ -435,6 +482,7 @@ struct AccountView: View {
         // Debounce rapid edits so we only persist once the user pauses.
         guard hasLoadedProfileForm,
               !isHydratingProfileForm,
+              !isSavingProfile,
               pendingDangerousOrientation == nil,
               editableProfileDraft != storedEditableProfileDraft else { return }
 
@@ -442,17 +490,21 @@ struct AccountView: View {
         guard !Task.isCancelled,
               hasLoadedProfileForm,
               !isHydratingProfileForm,
+              !isSavingProfile,
               pendingDangerousOrientation == nil,
               editableProfileDraft != storedEditableProfileDraft else { return }
 
-        performProfileSave(showSuccessMessage: false)
+        await performProfileSave(showSuccessMessage: false)
     }
 
+    @MainActor
     private func performProfileSave(
         orientationOverride: UserOrientation? = nil,
         notifyEventRemoval: Bool = false,
         showSuccessMessage: Bool = false
-    ) {
+    ) async {
+        guard !isSavingProfile else { return }
+
         // Preserve the draft when the save fails so the form stays consistent.
         let previousDraft = editableProfileDraft
 
@@ -473,9 +525,12 @@ struct AccountView: View {
             return
         }
 
-        let result = store.updateProfile(
+        isSavingProfile = true
+
+        let result = await store.updateProfile(
             firstName: firstName,
             lastName: lastName,
+            city: city,
             birthDate: birthDate,
             orientation: targetOrientation,
             showMe: showMe,
@@ -508,6 +563,16 @@ struct AccountView: View {
             }
             fillFromUser()
         }
+
+        isSavingProfile = false
+    }
+
+    @MainActor
+    private func performLogout() async {
+        guard !isLoggingOut else { return }
+        isLoggingOut = true
+        await store.logOut()
+        isLoggingOut = false
     }
 
     private func openPasswordResetMail() {
@@ -645,6 +710,47 @@ private struct ProfilePickerField<Option: Identifiable & Hashable>: View {
 
             Picker(title, selection: $selection) {
                 ForEach(options) { option in
+                    Text(titleForOption(option)).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct SettingsToggleField: View {
+    let title: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            Text(title)
+                .font(.subheadline)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct SettingsPickerField: View {
+    let title: String
+    @Binding var selection: String
+    let options: [String]
+    let titleForOption: (String) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Picker(title, selection: $selection) {
+                ForEach(options, id: \.self) { option in
                     Text(titleForOption(option)).tag(option)
                 }
             }

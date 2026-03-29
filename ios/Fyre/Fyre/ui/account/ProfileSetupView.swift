@@ -12,6 +12,7 @@ struct ProfileSetupView: View {
     @Environment(UserStore.self) private var store
     @State private var firstName = ""
     @State private var lastName = ""
+    @State private var city = ""
     @State private var birthDate = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
     @State private var gender: UserGender = .male
     @State private var orientation: UserOrientation = .straight
@@ -25,6 +26,7 @@ struct ProfileSetupView: View {
     @State private var favoriteMovie = ""
     @State private var pickedPhotoItem: PhotosPickerItem?
     @State private var errorMessage: String?
+    @State private var isSaving = false
     @State private var showEventRemovalAlert = false
     @State private var hasHydratedFromUser = false
 
@@ -72,6 +74,7 @@ struct ProfileSetupView: View {
                 }
 
                 Section(L10n.tr("profile.section.preferences")) {
+                    labeledField(L10n.tr("profile.city"), text: $city, isRequired: true)
                     Toggle(L10n.tr("profile.smokes"), isOn: $smokes)
                     Toggle(L10n.tr("profile.drinks"), isOn: $drinks)
                     labeledField(L10n.tr("profile.hobbies"), text: $hobbies, isRequired: true)
@@ -93,6 +96,7 @@ struct ProfileSetupView: View {
                     Button(L10n.tr("profile.complete")) {
                         handleCompleteProfile()
                     }
+                    .disabled(isSaving)
                 }
             }
             .navigationTitle(L10n.tr("profile.setup.title"))
@@ -101,7 +105,9 @@ struct ProfileSetupView: View {
                 isPresented: $showEventRemovalAlert
             ) {
                 Button(L10n.tr("profile.eventsRemoval.warning.confirm"), role: .destructive) {
-                    completeProfile()
+                    Task {
+                        await completeProfile()
+                    }
                 }
                 Button(L10n.tr("common.cancel"), role: .cancel) {}
             } message: {
@@ -110,7 +116,8 @@ struct ProfileSetupView: View {
             .task(id: pickedPhotoItem) {
                 guard let pickedPhotoItem else { return }
                 if let data = try? await pickedPhotoItem.loadTransferable(type: Data.self) {
-                    _ = store.updateProfileImage(data)
+                    // Save the picked avatar immediately so the final profile submit can focus on text fields.
+                    errorMessage = await store.updateProfileImage(data)
                 }
             }
             .onAppear {
@@ -168,6 +175,7 @@ struct ProfileSetupView: View {
 
         firstName = user.firstName ?? firstName
         lastName = user.lastName ?? lastName
+        city = user.city ?? city
         birthDate = user.birthDate ?? birthDate
         gender = user.gender ?? gender
         orientation = user.orientation ?? orientation
@@ -193,10 +201,14 @@ struct ProfileSetupView: View {
             return
         }
 
-        completeProfile()
+        Task {
+            await completeProfile()
+        }
     }
 
-    private func completeProfile() {
+    @MainActor
+    private func completeProfile() async {
+        guard !isSaving else { return }
         errorMessage = nil
 
         guard hasAllRequiredTextFields else {
@@ -204,14 +216,13 @@ struct ProfileSetupView: View {
             return
         }
 
-        if let err = store.setProfileGender(gender) {
-            errorMessage = err
-            return
-        }
+        isSaving = true
 
-        if let err = store.updateProfile(
+        if let err = await store.updateProfile(
             firstName: firstName,
             lastName: lastName,
+            gender: gender,
+            city: city,
             birthDate: birthDate,
             orientation: orientation,
             showMe: showMe,
@@ -224,13 +235,18 @@ struct ProfileSetupView: View {
             favoriteMovie: favoriteMovie
         ) {
             errorMessage = err
+            isSaving = false
+            return
         }
+
+        isSaving = false
     }
 
     private var hasAllRequiredTextFields: Bool {
         [
             firstName,
             lastName,
+            city,
             hobbies,
             passions,
             lookingFor,

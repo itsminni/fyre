@@ -18,6 +18,7 @@ struct SignUpView: View {
     @State private var password = ""
     @State private var isSecure = true
     @State private var agree = false
+    @State private var isSubmitting = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -76,19 +77,25 @@ struct SignUpView: View {
 
                     // Primary create-account action
                     Button {
-                        errorMessage = nil
-                        if let err = store.signUp(email: email, password: password) {
-                            errorMessage = err
+                        Task {
+                            await submitSignUp()
                         }
                     } label: {
-                        Text(L10n.tr("auth.signup.action"))
-                            .frame(maxWidth: .infinity)
+                        Group {
+                            if isSubmitting {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Text(L10n.tr("auth.signup.action"))
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.pink)
                     .controlSize(.large)
-                    .disabled(!isFormValid)
-                    .opacity(isFormValid ? 1 : 0.6)
+                    .disabled(!isFormValid || isSubmitting)
+                    .opacity((isFormValid && !isSubmitting) ? 1 : 0.6)
                     .accessibilityIdentifier("signup.submit")
 
                     // Link back to login for existing users
@@ -115,8 +122,19 @@ struct SignUpView: View {
 
     private var isFormValid: Bool {
         UserStore.isValidEmail(email) &&
-        password.count >= 6 &&
+        password.count >= 8 &&
         agree
+    }
+
+    @MainActor
+    private func submitSignUp() async {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        errorMessage = nil
+        // UserStore owns the real Appwrite/signup flow and the local fallback used by tests.
+        let result = await store.signUp(email: email, password: password)
+        errorMessage = result
+        isSubmitting = false
     }
 }
 

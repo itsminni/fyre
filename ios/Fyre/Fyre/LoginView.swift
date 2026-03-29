@@ -17,6 +17,7 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var isSecure = true
+    @State private var isSubmitting = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -67,19 +68,25 @@ struct LoginView: View {
 
                     // Primary sign-in action
                     Button {
-                        errorMessage = nil
-                        if let err = store.logIn(email: email, password: password) {
-                            errorMessage = err
+                        Task {
+                            await submitLogin()
                         }
                     } label: {
-                        Text(L10n.tr("auth.login.action"))
-                            .frame(maxWidth: .infinity)
+                        Group {
+                            if isSubmitting {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Text(L10n.tr("auth.login.action"))
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.pink)
                     .controlSize(.large)
-                    .disabled(!isFormValid)
-                    .opacity(isFormValid ? 1 : 0.6)
+                    .disabled(!isFormValid || isSubmitting)
+                    .opacity((isFormValid && !isSubmitting) ? 1 : 0.6)
                     .padding(.top, 8)
                     .accessibilityIdentifier("login.submit")
 
@@ -107,7 +114,18 @@ struct LoginView: View {
     }
 
     private var isFormValid: Bool {
-        UserStore.isValidEmail(email) && password.count >= 6
+        UserStore.isValidEmail(email) && password.count >= 8
+    }
+
+    @MainActor
+    private func submitLogin() async {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        errorMessage = nil
+        // Keep auth side effects inside UserStore so the view only manages transient UI state.
+        let result = await store.logIn(email: email, password: password)
+        errorMessage = result
+        isSubmitting = false
     }
 }
 
