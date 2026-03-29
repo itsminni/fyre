@@ -161,23 +161,15 @@ function swipePermissions(userId) {
 }
 
 async function createThreadWithParticipants(config, currentUserId, otherUserId) {
-  const threadKey = [currentUserId, otherUserId].sort().join(":");
-  const existingThread = await findSingleRow(config, config.threadsTableId, [
-    equal("threadKey", [threadKey]),
-    limit(1)
-  ]);
-
-  if (existingThread?.$id) {
-    return existingThread.$id;
+  const existingThreadId = await findExistingThreadIdByParticipants(config, currentUserId, otherUserId);
+  if (existingThreadId) {
+    return existingThreadId;
   }
 
-  // Reuse the same stable thread key as the manual "create/get thread" flow.
   const threadId = uniqueId();
   const permissions = participantPermissions([currentUserId, otherUserId]);
 
   await createRow(config, config.threadsTableId, threadId, {
-    threadKey,
-    createdByUserId: currentUserId,
     lastMessageText: null,
     lastMessageAt: null
   }, permissions);
@@ -200,6 +192,41 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId) 
 async function findSingleRow(config, tableId, queries) {
   const rows = await listRows(config, tableId, queries);
   return rows[0] ?? null;
+}
+
+async function findExistingThreadIdByParticipants(config, firstUserId, secondUserId) {
+  const firstRows = await listRows(config, config.threadParticipantsTableId, [
+    equal("userId", [firstUserId]),
+    limit(100)
+  ]);
+
+  if (!firstRows.length) {
+    return null;
+  }
+
+  const firstThreadIds = new Set(
+    firstRows
+      .map((row) => asString(row.threadId))
+      .filter(Boolean)
+  );
+
+  if (!firstThreadIds.size) {
+    return null;
+  }
+
+  const secondRows = await listRows(config, config.threadParticipantsTableId, [
+    equal("userId", [secondUserId]),
+    limit(100)
+  ]);
+
+  for (const row of secondRows) {
+    const threadId = asString(row.threadId);
+    if (threadId && firstThreadIds.has(threadId)) {
+      return threadId;
+    }
+  }
+
+  return null;
 }
 
 async function listRows(config, tableId, queries) {

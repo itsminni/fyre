@@ -9,23 +9,15 @@ export default async ({ req, res, error }) => {
       return res.json({ message: "Invalid participant" }, 400);
     }
 
-    // Sorting both user ids gives us one stable key per pair, no matter who starts the chat first.
-    const threadKey = [currentUserId, otherUserId].sort().join(":");
-    const existingRows = await listRows(config, config.threadsTableId, [
-      equal("threadKey", [threadKey]),
-      limit(1)
-    ]);
-
-    if (existingRows[0]?.$id) {
-      return res.json({ threadId: existingRows[0].$id }, 200);
+    const existingThreadId = await findExistingThreadIdByParticipants(config, currentUserId, otherUserId);
+    if (existingThreadId) {
+      return res.json({ threadId: existingThreadId }, 200);
     }
 
     const threadId = uniqueId();
     const threadPermissions = participantPermissions([currentUserId, otherUserId]);
 
     await createRow(config, config.threadsTableId, threadId, {
-      threadKey,
-      createdByUserId: currentUserId,
       lastMessageText: null,
       lastMessageAt: null
     }, threadPermissions);
@@ -118,6 +110,41 @@ async function listRows(config, tableId, queries) {
     queries
   );
   return Array.isArray(payload.rows) ? payload.rows : [];
+}
+
+async function findExistingThreadIdByParticipants(config, firstUserId, secondUserId) {
+  const firstRows = await listRows(config, config.threadParticipantsTableId, [
+    equal("userId", [firstUserId]),
+    limit(100)
+  ]);
+
+  if (!firstRows.length) {
+    return null;
+  }
+
+  const firstThreadIds = new Set(
+    firstRows
+      .map((row) => asString(row.threadId))
+      .filter(Boolean)
+  );
+
+  if (!firstThreadIds.size) {
+    return null;
+  }
+
+  const secondRows = await listRows(config, config.threadParticipantsTableId, [
+    equal("userId", [secondUserId]),
+    limit(100)
+  ]);
+
+  for (const row of secondRows) {
+    const threadId = asString(row.threadId);
+    if (threadId && firstThreadIds.has(threadId)) {
+      return threadId;
+    }
+  }
+
+  return null;
 }
 
 async function createRow(config, tableId, rowId, data, permissions) {

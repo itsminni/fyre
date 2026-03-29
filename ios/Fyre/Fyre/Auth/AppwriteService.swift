@@ -205,14 +205,8 @@ actor AppwriteService {
             let response = try await executeFunction(functionId: functionId, body: [:])
             if let profiles = response["profiles"] as? [[String: Any]] {
                 let mappedProfiles = profiles.compactMap(makeDiscoverProfileDTO(from:))
-#if DEBUG
-                debugPrint("Discover function returned \(profiles.count) raw profiles, \(mappedProfiles.count) decoded profiles.")
-#endif
                 return mappedProfiles
             }
-#if DEBUG
-            debugPrint("Discover function completed without a `profiles` array. Response keys: \(response.keys.sorted()). Falling back to direct profile reads.")
-#endif
         }
 
         let currentAccountId = try await fetchCurrentAccountId(required: false)
@@ -231,9 +225,6 @@ actor AppwriteService {
             }
             return makeDiscoverProfileDTO(from: row)
         }
-#if DEBUG
-        debugPrint("Discover fallback read \(rows.count) rows, \(mappedProfiles.count) profiles remained after exclusions.")
-#endif
         return mappedProfiles
     }
 
@@ -686,9 +677,6 @@ actor AppwriteService {
 
         let initialStatus = stringValue(forKey: "status", in: execution)?.lowercased() ?? ""
         if initialStatus == "completed" || initialStatus == "failed" || initialStatus == "crashed" {
-#if DEBUG
-            debugPrint("Function create-execution returned terminal status immediately. Execution keys: \(execution.keys.sorted())")
-#endif
             return try decodeExecutionResponse(from: execution)
         }
 
@@ -737,12 +725,6 @@ actor AppwriteService {
            let loggedBody = decodeLoggedJSONPayload(from: execution) {
             body = loggedBody
         }
-
-#if DEBUG
-        if body.isEmpty {
-            debugPrint("Function execution decoded with empty body. Execution keys: \(execution.keys.sorted())")
-        }
-#endif
 
         guard (200..<300).contains(statusCode) else {
             // Prefer the raw backend message for 5xx so debug builds show the actual server failure.

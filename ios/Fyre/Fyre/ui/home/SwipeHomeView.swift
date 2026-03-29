@@ -200,14 +200,8 @@ struct SwipeHomeView: View {
                         bio: $0.bio
                     )
                 }
-#if DEBUG
-            debugPrint("Discover loaded \(dtos.count) profiles from backend, \(filteredProfiles.count) after applying showMe=\(preferredAudience.rawValue).")
-#endif
             profiles = filteredProfiles
         } catch {
-#if DEBUG
-            debugPrint("Discover load failed: \(error.localizedDescription)")
-#endif
             profiles = []
             swipeErrorMessage = error.localizedDescription
         }
