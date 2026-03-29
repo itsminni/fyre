@@ -170,6 +170,7 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId) 
   const permissions = participantPermissions([currentUserId, otherUserId]);
 
   await createRow(config, config.threadsTableId, threadId, {
+    threadId,
     lastMessageText: null,
     lastMessageAt: null
   }, permissions);

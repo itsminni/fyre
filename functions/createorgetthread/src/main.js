@@ -18,6 +18,7 @@ export default async ({ req, res, error }) => {
     const threadPermissions = participantPermissions([currentUserId, otherUserId]);
 
     await createRow(config, config.threadsTableId, threadId, {
+      threadId,
       lastMessageText: null,
       lastMessageAt: null
     }, threadPermissions);
