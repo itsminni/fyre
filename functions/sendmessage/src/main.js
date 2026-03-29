@@ -1,0 +1,163 @@
+export default async ({ req, res, error }) => {
+  try {
+    const config = getConfig(req);
+    const body = parseBody(req);
+    const currentUserId = requiredHeader(req, "x-appwrite-user-id");
+    const threadId = asString(body.threadId);
+    const text = asString(body.text);
+
+    if (!threadId || !text) {
+      return res.json({ message: "Missing payload" }, 400);
+    }
+
+    const participantRows = await listRows(config, config.threadParticipantsTableId, [
+      equal("threadId", [threadId]),
+      limit(10)
+    ]);
+    const participantIds = participantRows.map((row) => row.userId).filter(Boolean);
+
+    // Only participants of the thread are allowed to append new messages to it.
+    if (!participantIds.includes(currentUserId)) {
+      return res.json({ message: "Forbidden" }, 403);
+    }
+
+    const now = new Date().toISOString();
+    const messageId = uniqueId();
+    await createRow(config, config.messagesTableId, messageId, {
+      threadId,
+      senderUserId: currentUserId,
+      text,
+      createdAt: now
+    }, participantIds.map((userId) => `read("user:${userId}")`));
+
+    // Update the thread preview immediately so inbox ordering stays in sync with the latest message.
+    await updateRow(config, config.threadsTableId, threadId, {
+      lastMessageText: text,
+      lastMessageAt: now
+    });
+
+    const currentParticipant = participantRows.find((row) => row.userId === currentUserId);
+    if (currentParticipant?.$id) {
+      await updateRow(config, config.threadParticipantsTableId, currentParticipant.$id, {
+        threadId,
+        userId: currentUserId,
+        lastReadAt: now
+      });
+    }
+
+    return res.json({ messageId, text, createdAt: now }, 200);
+  } catch (err) {
+    error(String(err?.stack ?? err));
+    return res.json({ message: "Unable to send message" }, 500);
+  }
+};
+
+function getConfig(req) {
+  return {
+    endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
+    projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
+    apiKey: requiredHeader(req, "x-appwrite-key"),
+    databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
+    threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
+    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
+    messagesTableId: requiredEnv("APPWRITE_MESSAGES_TABLE_ID")
+  };
+}
+
+function parseBody(req) {
+  if (req.bodyJson && typeof req.bodyJson === "object") {
+    return req.bodyJson;
+  }
+
+  if (!req.bodyText) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(req.bodyText);
+  } catch {
+    return {};
+  }
+}
+
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing environment variable ${name}`);
+  }
+  return value;
+}
+
+function requiredHeader(req, name) {
+  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
+  if (!value) {
+    throw new Error(`Missing header ${name}`);
+  }
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function listRows(config, tableId, queries) {
+  const payload = await request(
+    config,
+    "GET",
+    `/tablesdb/${config.databaseId}/tables/${tableId}/rows`,
+    undefined,
+    queries
+  );
+  return Array.isArray(payload.rows) ? payload.rows : [];
+}
+
+async function createRow(config, tableId, rowId, data, permissions) {
+  return request(config, "POST", `/tablesdb/${config.databaseId}/tables/${tableId}/rows`, {
+    rowId,
+    data,
+    permissions
+  });
+}
+
+async function updateRow(config, tableId, rowId, data) {
+  return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
+    data
+  });
+}
+
+async function request(config, method, path, body, queries = []) {
+  const url = new URL(`${config.endpoint}${path}`);
+  for (const query of queries) {
+    url.searchParams.append("queries[]", query);
+  }
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Appwrite-Project": config.projectId,
+      "X-Appwrite-Key": config.apiKey,
+      "X-Appwrite-Response-Format": "1.8.0"
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new Error(payload.message ?? `Request failed with status ${response.status}`);
+  }
+  return payload;
+}
+
+function equal(field, values) {
+  return `equal("${field}", ${JSON.stringify(values)})`;
+}
+
+function limit(value) {
+  return `limit(${value})`;
+}
+
+function uniqueId() {
+  return crypto.randomUUID().replaceAll("-", "");
+}
+
+function asString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}

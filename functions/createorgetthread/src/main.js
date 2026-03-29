@@ -1,0 +1,162 @@
+export default async ({ req, res, error }) => {
+  try {
+    const config = getConfig(req);
+    const body = parseBody(req);
+    const currentUserId = requiredHeader(req, "x-appwrite-user-id");
+    const otherUserId = asString(body.otherUserId);
+
+    if (!otherUserId || otherUserId === currentUserId) {
+      return res.json({ message: "Invalid participant" }, 400);
+    }
+
+    // Sorting both user ids gives us one stable key per pair, no matter who starts the chat first.
+    const threadKey = [currentUserId, otherUserId].sort().join(":");
+    const existingRows = await listRows(config, config.threadsTableId, [
+      equal("threadKey", [threadKey]),
+      limit(1)
+    ]);
+
+    if (existingRows[0]?.$id) {
+      return res.json({ threadId: existingRows[0].$id }, 200);
+    }
+
+    const threadId = uniqueId();
+    const threadPermissions = participantPermissions([currentUserId, otherUserId]);
+
+    await createRow(config, config.threadsTableId, threadId, {
+      threadKey,
+      createdByUserId: currentUserId,
+      lastMessageText: null,
+      lastMessageAt: null
+    }, threadPermissions);
+
+    await createRow(config, config.threadParticipantsTableId, uniqueId(), {
+      threadId,
+      userId: currentUserId,
+      lastReadAt: null
+    }, threadPermissions);
+
+    await createRow(config, config.threadParticipantsTableId, uniqueId(), {
+      threadId,
+      userId: otherUserId,
+      lastReadAt: null
+    }, threadPermissions);
+
+    return res.json({ threadId }, 200);
+  } catch (err) {
+    error(String(err?.stack ?? err));
+    return res.json({ message: "Unable to create thread" }, 500);
+  }
+};
+
+function getConfig(req) {
+  return {
+    endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
+    projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
+    apiKey: requiredHeader(req, "x-appwrite-key"),
+    databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
+    threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
+    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID")
+  };
+}
+
+function parseBody(req) {
+  if (req.bodyJson && typeof req.bodyJson === "object") {
+    return req.bodyJson;
+  }
+
+  if (!req.bodyText) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(req.bodyText);
+  } catch {
+    return {};
+  }
+}
+
+function requiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing environment variable ${name}`);
+  }
+  return value;
+}
+
+function requiredHeader(req, name) {
+  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
+  if (!value) {
+    throw new Error(`Missing header ${name}`);
+  }
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function participantPermissions(userIds) {
+  // Mirror permissions on the thread and participant rows so both users can read the conversation metadata.
+  return userIds.flatMap((userId) => [
+    `read("user:${userId}")`,
+    `update("user:${userId}")`,
+    `delete("user:${userId}")`
+  ]);
+}
+
+async function listRows(config, tableId, queries) {
+  const payload = await request(
+    config,
+    "GET",
+    `/tablesdb/${config.databaseId}/tables/${tableId}/rows`,
+    undefined,
+    queries
+  );
+  return Array.isArray(payload.rows) ? payload.rows : [];
+}
+
+async function createRow(config, tableId, rowId, data, permissions) {
+  return request(config, "POST", `/tablesdb/${config.databaseId}/tables/${tableId}/rows`, {
+    rowId,
+    data,
+    permissions
+  });
+}
+
+async function request(config, method, path, body, queries = []) {
+  const url = new URL(`${config.endpoint}${path}`);
+  for (const query of queries) {
+    url.searchParams.append("queries[]", query);
+  }
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Appwrite-Project": config.projectId,
+      "X-Appwrite-Key": config.apiKey,
+      "X-Appwrite-Response-Format": "1.8.0"
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new Error(payload.message ?? `Request failed with status ${response.status}`);
+  }
+  return payload;
+}
+
+function equal(field, values) {
+  return `equal("${field}", ${JSON.stringify(values)})`;
+}
+
+function limit(value) {
+  return `limit(${value})`;
+}
+
+function uniqueId() {
+  return crypto.randomUUID().replaceAll("-", "");
+}
+
+function asString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
