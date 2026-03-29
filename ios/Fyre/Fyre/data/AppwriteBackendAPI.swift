@@ -9,20 +9,14 @@ import Foundation
 
 struct AppwriteBackendAPI: BackendAPI {
     private let service: AppwriteService
-    private let fallback = MockBackendAPI()
 
     init(configuration: AppwriteConfiguration) {
         service = AppwriteService(configuration: configuration)
     }
 
     func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
-        do {
-            // Keep discover usable while the dedicated Appwrite discover function is still being deployed.
-            let profiles = try await service.fetchDiscoverProfiles()
-            return profiles.isEmpty ? try await fallback.fetchDiscoverProfiles() : profiles
-        } catch {
-            return try await fallback.fetchDiscoverProfiles()
-        }
+        // When Appwrite is selected, discover should only show real backend profiles.
+        try await service.fetchDiscoverProfiles()
     }
 
     func fetchThreads() async throws -> [ThreadDTO] {
