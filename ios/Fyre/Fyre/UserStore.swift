@@ -92,8 +92,10 @@ enum UserShowMe: String, Codable, CaseIterable, Sendable, Identifiable {
 struct User: Codable, Sendable {
     var email: String
     var password: String
+    var appwriteUserId: String?
     var firstName: String?
     var lastName: String?
+    var city: String?
     var birthDate: Date?
     var gender: UserGender?
     var orientation: UserOrientation?
@@ -105,6 +107,7 @@ struct User: Codable, Sendable {
     var lookingFor: String?
     var favoriteSong: String?
     var favoriteMovie: String?
+    var avatarFileId: String?
     var profileImageData: Data?
 
     var displayName: String {
@@ -124,7 +127,7 @@ struct User: Codable, Sendable {
         return true
     }
 
-    init(email: String, password: String) {
+    nonisolated init(email: String, password: String) {
         self.email = email
         self.password = password
         self.showMe = .everyone
@@ -133,8 +136,10 @@ struct User: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case email
         case password
+        case appwriteUserId
         case firstName
         case lastName
+        case city
         case birthDate
         case gender
         case orientation
@@ -146,15 +151,17 @@ struct User: Codable, Sendable {
         case lookingFor
         case favoriteSong
         case favoriteMovie
-        case profileImageData
+        case avatarFileId
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         email = try c.decode(String.self, forKey: .email)
         password = try c.decode(String.self, forKey: .password)
+        appwriteUserId = try c.decodeIfPresent(String.self, forKey: .appwriteUserId)
         firstName = try c.decodeIfPresent(String.self, forKey: .firstName)
         lastName = try c.decodeIfPresent(String.self, forKey: .lastName)
+        city = try c.decodeIfPresent(String.self, forKey: .city)
         birthDate = try c.decodeIfPresent(Date.self, forKey: .birthDate)
         gender = try c.decodeIfPresent(UserGender.self, forKey: .gender)
         orientation = try c.decodeIfPresent(UserOrientation.self, forKey: .orientation)
@@ -166,15 +173,18 @@ struct User: Codable, Sendable {
         lookingFor = try c.decodeIfPresent(String.self, forKey: .lookingFor)
         favoriteSong = try c.decodeIfPresent(String.self, forKey: .favoriteSong)
         favoriteMovie = try c.decodeIfPresent(String.self, forKey: .favoriteMovie)
-        profileImageData = try c.decodeIfPresent(Data.self, forKey: .profileImageData)
+        avatarFileId = try c.decodeIfPresent(String.self, forKey: .avatarFileId)
+        profileImageData = nil
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(email, forKey: .email)
         try c.encode(password, forKey: .password)
+        try c.encodeIfPresent(appwriteUserId, forKey: .appwriteUserId)
         try c.encodeIfPresent(firstName, forKey: .firstName)
         try c.encodeIfPresent(lastName, forKey: .lastName)
+        try c.encodeIfPresent(city, forKey: .city)
         try c.encodeIfPresent(birthDate, forKey: .birthDate)
         try c.encodeIfPresent(gender, forKey: .gender)
         try c.encodeIfPresent(orientation, forKey: .orientation)
@@ -186,7 +196,7 @@ struct User: Codable, Sendable {
         try c.encodeIfPresent(lookingFor, forKey: .lookingFor)
         try c.encodeIfPresent(favoriteSong, forKey: .favoriteSong)
         try c.encodeIfPresent(favoriteMovie, forKey: .favoriteMovie)
-        try c.encodeIfPresent(profileImageData, forKey: .profileImageData)
+        try c.encodeIfPresent(avatarFileId, forKey: .avatarFileId)
     }
 }
 
