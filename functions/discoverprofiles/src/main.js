@@ -40,6 +40,10 @@ export default async ({ req, res, error }) => {
         hobbies: row.hobbies ?? null
       }));
 
+    // Some Appwrite environments occasionally return empty execution response bodies.
+    // Mirror the payload in logs so clients can recover it when `responseBody` is blank.
+    console.log(`RESULT_JSON:${JSON.stringify({ profiles: discoverProfiles })}`);
+
     return res.json({ profiles: discoverProfiles }, 200);
   } catch (err) {
     error(String(err?.stack ?? err));

@@ -204,8 +204,15 @@ actor AppwriteService {
         if let functionId = configuration.discoverProfilesFunctionId {
             let response = try await executeFunction(functionId: functionId, body: [:])
             if let profiles = response["profiles"] as? [[String: Any]] {
-                return profiles.compactMap(makeDiscoverProfileDTO(from:))
+                let mappedProfiles = profiles.compactMap(makeDiscoverProfileDTO(from:))
+#if DEBUG
+                debugPrint("Discover function returned \(profiles.count) raw profiles, \(mappedProfiles.count) decoded profiles.")
+#endif
+                return mappedProfiles
             }
+#if DEBUG
+            debugPrint("Discover function completed without a `profiles` array. Response keys: \(response.keys.sorted()). Falling back to direct profile reads.")
+#endif
         }
 
         let currentAccountId = try await fetchCurrentAccountId(required: false)
@@ -215,7 +222,7 @@ actor AppwriteService {
             queries: []
         )
 
-        return rows.compactMap { row in
+        let mappedProfiles: [ProfileDTO] = rows.compactMap { (row: [String: Any]) -> ProfileDTO? in
             guard let userId = stringValue(forKey: "userId", in: row),
                   userId != currentAccountId,
                   !excludedUserIds.contains(userId),
@@ -224,6 +231,10 @@ actor AppwriteService {
             }
             return makeDiscoverProfileDTO(from: row)
         }
+#if DEBUG
+        debugPrint("Discover fallback read \(rows.count) rows, \(mappedProfiles.count) profiles remained after exclusions.")
+#endif
+        return mappedProfiles
     }
 
     func fetchThreads() async throws -> [ThreadDTO] {
@@ -673,6 +684,14 @@ actor AppwriteService {
             throw AppwriteServiceError.invalidResponse
         }
 
+        let initialStatus = stringValue(forKey: "status", in: execution)?.lowercased() ?? ""
+        if initialStatus == "completed" || initialStatus == "failed" || initialStatus == "crashed" {
+#if DEBUG
+            debugPrint("Function create-execution returned terminal status immediately. Execution keys: \(execution.keys.sorted())")
+#endif
+            return try decodeExecutionResponse(from: execution)
+        }
+
         return try await waitForExecution(functionId: functionId, executionId: executionId)
     }
 
@@ -697,9 +716,33 @@ actor AppwriteService {
     }
 
     private func decodeExecutionResponse(from execution: [String: Any]) throws -> [String: Any] {
-        let statusCode = intValue(forKey: "responseStatusCode", in: execution) ?? 500
-        let responseBody = stringValue(forKey: "responseBody", in: execution) ?? ""
-        let body = try decodeJSONObjectStringIfPresent(responseBody)
+        let statusCode = intValue(forKey: "responseStatusCode", in: execution)
+            ?? intValue(forKey: "statusCode", in: execution)
+            ?? 500
+
+        var body: [String: Any]
+        if let dictionary = execution["responseBody"] as? [String: Any] {
+            body = dictionary
+        } else if let dictionary = execution["response"] as? [String: Any] {
+            body = dictionary
+        } else {
+            let responseBody = stringValue(forKey: "responseBody", in: execution)
+                ?? stringValue(forKey: "response", in: execution)
+                ?? ""
+            body = try decodeJSONObjectStringIfPresent(responseBody)
+        }
+
+        // In some environments Appwrite returns an empty responseBody even for successful executions.
+        if body.isEmpty,
+           let loggedBody = decodeLoggedJSONPayload(from: execution) {
+            body = loggedBody
+        }
+
+#if DEBUG
+        if body.isEmpty {
+            debugPrint("Function execution decoded with empty body. Execution keys: \(execution.keys.sorted())")
+        }
+#endif
 
         guard (200..<300).contains(statusCode) else {
             // Prefer the raw backend message for 5xx so debug builds show the actual server failure.
@@ -713,6 +756,40 @@ actor AppwriteService {
         }
 
         return body
+    }
+
+    private func decodeLoggedJSONPayload(from execution: [String: Any]) -> [String: Any]? {
+        let rawLogs: [String]
+
+        if let logs = execution["logs"] as? [String] {
+            rawLogs = logs
+        } else if let logs = execution["logs"] as? String {
+            rawLogs = logs
+                .components(separatedBy: .newlines)
+                .filter { !$0.isEmpty }
+        } else if let logs = execution["logs"] as? [Any] {
+            rawLogs = logs.compactMap { $0 as? String }
+        } else {
+            rawLogs = []
+        }
+
+        for line in rawLogs.reversed() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("RESULT_JSON:") else {
+                continue
+            }
+
+            let jsonText = String(trimmed.dropFirst("RESULT_JSON:".count))
+            guard let data = jsonText.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data),
+                  let payload = object as? [String: Any] else {
+                continue
+            }
+
+            return payload
+        }
+
+        return nil
     }
 
     private func listRows(tableId: String, queries: [String]) async throws -> [[String: Any]] {

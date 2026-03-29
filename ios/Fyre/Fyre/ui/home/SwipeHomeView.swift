@@ -113,6 +113,11 @@ struct SwipeHomeView: View {
                 ChatDetailView(thread: thread)
             }
         }
+        .onAppear {
+            Task {
+                await loadProfiles()
+            }
+        }
         .task(id: discoverFilterID) {
             await loadProfiles()
         }
@@ -179,11 +184,13 @@ struct SwipeHomeView: View {
         }
     }
 
+    @MainActor
     private func loadProfiles() async {
         do {
+            swipeErrorMessage = nil
             let dtos = try await services.backend.fetchDiscoverProfiles()
             let preferredAudience = store.currentUser?.showMe ?? .everyone
-            profiles = dtos
+            let filteredProfiles = dtos
                 .filter { preferredAudience.matches($0.gender) }
                 .map {
                     SwipeProfile(
@@ -193,8 +200,16 @@ struct SwipeHomeView: View {
                         bio: $0.bio
                     )
                 }
+#if DEBUG
+            debugPrint("Discover loaded \(dtos.count) profiles from backend, \(filteredProfiles.count) after applying showMe=\(preferredAudience.rawValue).")
+#endif
+            profiles = filteredProfiles
         } catch {
+#if DEBUG
+            debugPrint("Discover load failed: \(error.localizedDescription)")
+#endif
             profiles = []
+            swipeErrorMessage = error.localizedDescription
         }
     }
 
