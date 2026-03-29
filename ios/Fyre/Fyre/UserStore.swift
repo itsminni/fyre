@@ -283,11 +283,19 @@ final class UserStore: @unchecked Sendable {
     var isProfileComplete: Bool { currentUser?.isProfileComplete ?? false }
 
     var isCurrentUserRegisteredForMainEvent: Bool {
+        if Self.shouldUseAppwrite, let status = remoteMainEventState?.currentStatus {
+            return status == .confirmed || status == .promoted
+        }
+
         guard let email = currentUser?.email else { return false }
         return mainEventState.participants.contains(where: { $0.email == email })
     }
 
     var isCurrentUserWaitingForMainEvent: Bool {
+        if Self.shouldUseAppwrite, let status = remoteMainEventState?.currentStatus {
+            return status == .waitlisted
+        }
+
         guard let email = currentUser?.email else { return false }
         return mainEventState.waitingList.contains(where: { $0.email == email })
     }
@@ -297,6 +305,10 @@ final class UserStore: @unchecked Sendable {
     }
 
     var currentUserUpcomingEventHistory: [EventHistoryItem] {
+        if Self.shouldUseAppwrite, let remoteHistory = remoteMainEventState?.history {
+            return remoteHistory
+        }
+
         guard let email = currentUser?.email else { return [] }
         let now = Date()
         return mainEventState.history
@@ -314,6 +326,10 @@ final class UserStore: @unchecked Sendable {
     }
 
     var mainEventSnapshot: MainEventSnapshot {
+        if Self.shouldUseAppwrite, let remoteSnapshot = remoteMainEventState?.snapshot {
+            return remoteSnapshot
+        }
+
         let male = mainEventState.participants.filter { $0.gender == .male }.count
         let female = mainEventState.participants.filter { $0.gender == .female }.count
         return MainEventSnapshot(
@@ -326,11 +342,10 @@ final class UserStore: @unchecked Sendable {
         )
     }
 
-    private let key = "fyre_users"
-    private let currentUserKey = "fyre_current_user"
-    private let mainEventStateKey = "fyre_main_event_state"
     private let maxParticipants = 48
     private let mainEventTitle = "Fyre Event"
+    private let appwriteService: AppwriteService?
+    private let appwriteInitializationError: String?
     private let mainEventDate = Calendar.current.date(from: DateComponents(
         year: 2026,
         month: 3,
@@ -345,58 +360,129 @@ final class UserStore: @unchecked Sendable {
         }
     }
 
+    private var remoteMainEventState: MainEventRemoteState?
+
     private init() {
         currentUser = UserStore.loadCurrentUser()
         mainEventState = UserStore.loadMainEventState()
+        remoteMainEventState = nil
+        if Self.shouldUseAppwrite {
+            do {
+                // Once Appwrite is configured, auth/profile/event state should come from the backend.
+                let configuration = try AppwriteConfiguration.load()
+                appwriteService = AppwriteService(configuration: configuration)
+                appwriteInitializationError = nil
+                UserDefaults.standard.removeObject(forKey: PersistenceKey.users)
+                mainEventState = MainEventState()
+                UserStore.saveCurrentUser(currentUser)
+            } catch {
+                appwriteService = nil
+                appwriteInitializationError = error.localizedDescription
+                debugLog("Appwrite initialization failed: \(error.localizedDescription)")
+            }
+        } else {
+            appwriteService = nil
+            appwriteInitializationError = nil
+        }
     }
 
     // MARK: - Public API
 
-    func signUp(email: String, password: String) -> String? {
+    @MainActor
+    func signUp(email: String, password: String) async -> String? {
         guard Self.isValidEmail(email) else {
             return L10n.tr("error.auth.invalidEmail")
         }
 
-        var users = UserStore.loadUsers()
         let normalizedEmail = normalizeEmail(email)
 
-        if users.contains(where: { $0.email == normalizedEmail }) {
-            return L10n.tr("error.signup.emailInUse")
+        guard password.count >= 8 else {
+            return L10n.tr("error.auth.invalidPasswordLength")
         }
 
-        let user = User(email: normalizedEmail, password: password)
-        users.append(user)
-        UserStore.saveUsers(users)
-        currentUser = user
-        return nil
+        if Self.shouldUseAppwrite {
+            guard let appwriteService else {
+                return authConfigurationErrorMessage()
+            }
+
+            do {
+                let user = try await appwriteService.signUp(email: normalizedEmail, password: password)
+                currentUser = user
+                await refreshRemoteMainEventState()
+                return nil
+            } catch {
+                return authErrorMessage(for: error, isSignUp: true)
+            }
+        } else {
+            var users = UserStore.loadUsers()
+
+            if users.contains(where: { $0.email == normalizedEmail }) {
+                return L10n.tr("error.signup.emailInUse")
+            }
+
+            let user = User(email: normalizedEmail, password: password)
+            users.append(user)
+            UserStore.saveUsers(users)
+            currentUser = user
+            return nil
+        }
     }
 
-    func logIn(email: String, password: String) -> String? {
+    @MainActor
+    func logIn(email: String, password: String) async -> String? {
         guard Self.isValidEmail(email) else {
             return L10n.tr("error.auth.invalidEmail")
         }
 
-        let users = UserStore.loadUsers()
         let normalizedEmail = normalizeEmail(email)
 
-        guard let user = users.first(where: { $0.email == normalizedEmail }) else {
-            return L10n.tr("error.login.userNotFound")
-        }
-        guard user.password == password else {
-            return L10n.tr("error.login.invalidPassword")
-        }
+        if Self.shouldUseAppwrite {
+            guard let appwriteService else {
+                return authConfigurationErrorMessage()
+            }
 
-        currentUser = user
-        return nil
+            do {
+                let user = try await appwriteService.logIn(email: normalizedEmail, password: password)
+                currentUser = user
+                await refreshRemoteMainEventState()
+                return nil
+            } catch {
+                return authErrorMessage(for: error, isSignUp: false)
+            }
+        } else {
+            let users = UserStore.loadUsers()
+
+            guard let user = users.first(where: { $0.email == normalizedEmail }) else {
+                return L10n.tr("error.login.userNotFound")
+            }
+            guard user.password == password else {
+                return L10n.tr("error.login.invalidPassword")
+            }
+
+            currentUser = user
+            return nil
+        }
     }
 
-    func logOut() {
+    @MainActor
+    func logOut() async {
+        if let appwriteService {
+            do {
+                try await appwriteService.logOut()
+            } catch {
+                // Clear local state even when the remote session deletion fails.
+            }
+        }
         currentUser = nil
+        remoteMainEventState = nil
     }
 
+    @MainActor
     func updateProfile(
         firstName: String,
         lastName: String,
+        gender: UserGender? = nil,
+        city: String = "",
         birthDate: Date?,
         orientation: UserOrientation?,
         showMe: UserShowMe = .everyone,
@@ -407,26 +493,26 @@ final class UserStore: @unchecked Sendable {
         lookingFor: String,
         favoriteSong: String,
         favoriteMovie: String
-    ) -> String? {
+    ) async -> String? {
         guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
         let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !first.isEmpty else { return L10n.tr("profile.error.emptyFirstName") }
         guard !last.isEmpty else { return L10n.tr("profile.error.emptyLastName") }
+        guard !normalizedCity.isEmpty else { return L10n.tr("profile.error.emptyCity") }
         guard let birthDate, Self.age(from: birthDate) >= 18 else { return L10n.tr("profile.error.invalidAge") }
         guard let orientation else { return L10n.tr("profile.error.orientationRequired") }
+        let nextGender = gender ?? user.gender
         let shouldRemoveMainEventRegistration = willCurrentUserLoseMainEventRegistrations(
-            changingGenderTo: user.gender,
+            changingGenderTo: nextGender,
             orientation: orientation
         )
 
-        var users = UserStore.loadUsers()
-        guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
-            return L10n.tr("profile.error.noCurrentUser")
-        }
-
         user.firstName = first
         user.lastName = last
+        user.gender = nextGender
+        user.city = normalizedCity
         user.birthDate = birthDate
         user.orientation = orientation
         user.showMe = showMe
@@ -438,53 +524,77 @@ final class UserStore: @unchecked Sendable {
         user.favoriteSong = favoriteSong.trimmingCharacters(in: .whitespacesAndNewlines)
         user.favoriteMovie = favoriteMovie.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        users[userIndex] = user
-        UserStore.saveUsers(users)
-        currentUser = user
+        if Self.shouldUseAppwrite {
+            guard let appwriteService else {
+                return authConfigurationErrorMessage()
+            }
 
-        if shouldRemoveMainEventRegistration {
+            do {
+                let updatedUser = try await appwriteService.updateProfile(for: user)
+                currentUser = updatedUser
+                if shouldRemoveMainEventRegistration {
+                    try? await appwriteService.cancelMainEventRegistration(
+                        for: updatedUser,
+                        eventId: remoteMainEventState?.eventId,
+                        force: true
+                    )
+                }
+                await refreshRemoteMainEventState()
+            } catch {
+                return profileErrorMessage(for: error)
+            }
+        } else {
+            var users = UserStore.loadUsers()
+            guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+                return L10n.tr("profile.error.noCurrentUser")
+            }
+
+            users[userIndex] = user
+            UserStore.saveUsers(users)
+            currentUser = user
+        }
+
+        if shouldRemoveMainEventRegistration, !Self.shouldUseAppwrite {
             forceRemoveUserFromMainEvent(email: user.email)
         }
 
         return nil
     }
 
-    func updateProfileImage(_ imageData: Data?) -> String? {
-        guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
-        var users = UserStore.loadUsers()
-        guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
-            return L10n.tr("profile.error.noCurrentUser")
-        }
-
-        user.profileImageData = imageData
-        users[userIndex] = user
-        UserStore.saveUsers(users)
-        currentUser = user
-        return nil
-    }
-
-    func setProfileGender(_ gender: UserGender) -> String? {
+    @MainActor
+    func updateProfileImage(_ imageData: Data?) async -> String? {
         guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
 
-        let shouldRemoveMainEventRegistration = willCurrentUserLoseMainEventRegistrations(
-            changingGenderTo: gender,
-            orientation: user.orientation
-        )
-        var users = UserStore.loadUsers()
-        guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
-            return L10n.tr("profile.error.noCurrentUser")
+        if Self.shouldUseAppwrite {
+            if !user.isProfileComplete {
+                user.profileImageData = imageData
+                currentUser = user
+                return nil
+            }
+
+            guard let appwriteService else {
+                return authConfigurationErrorMessage()
+            }
+
+            do {
+                let updatedUser = try await appwriteService.updateProfileImage(imageData, for: user)
+                currentUser = updatedUser
+                return nil
+            } catch {
+                return profileErrorMessage(for: error)
+            }
+        } else {
+            var users = UserStore.loadUsers()
+            guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+                return L10n.tr("profile.error.noCurrentUser")
+            }
+
+            user.profileImageData = imageData
+            users[userIndex] = user
+            UserStore.saveUsers(users)
+            currentUser = user
+            return nil
         }
-
-        user.gender = gender
-        users[userIndex] = user
-        UserStore.saveUsers(users)
-        currentUser = user
-
-        if shouldRemoveMainEventRegistration {
-            forceRemoveUserFromMainEvent(email: user.email)
-        }
-
-        return nil
     }
 
     func willCurrentUserLoseMainEventRegistrations(
@@ -498,6 +608,64 @@ final class UserStore: @unchecked Sendable {
         let nextOrientation = orientation ?? user.orientation
 
         return user.gender != nextGender || user.orientation != nextOrientation
+    }
+
+    @MainActor
+    func refreshRemoteMainEventState() async {
+        guard Self.shouldUseAppwrite else { return }
+        guard let appwriteService else {
+            remoteMainEventState = nil
+            return
+        }
+
+        do {
+            remoteMainEventState = try await appwriteService.fetchMainEventState(for: currentUser)
+        } catch {
+            debugLog("Remote event refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    func registerForMainEvent() async -> String? {
+        if Self.shouldUseAppwrite {
+            guard let user = currentUser else { return L10n.tr("events.error.loginRequired") }
+            guard let appwriteService else { return eventRequestErrorMessage() }
+
+            do {
+                // Capacity, waitlist, and gender-balance rules live in the server-side function now.
+                let status = try await appwriteService.registerForMainEvent(
+                    for: user,
+                    eventId: remoteMainEventState?.eventId
+                )
+                await refreshRemoteMainEventState()
+                return status == .waitlisted ? L10n.tr("events.success.waitlisted") : nil
+            } catch {
+                return eventErrorMessage(for: error)
+            }
+        }
+
+        return await registerForMainEvent()
+    }
+
+    @MainActor
+    func cancelMainEventRegistration() async -> String? {
+        if Self.shouldUseAppwrite {
+            guard let user = currentUser else { return L10n.tr("events.error.loginRequired") }
+            guard let appwriteService else { return eventRequestErrorMessage() }
+
+            do {
+                try await appwriteService.cancelMainEventRegistration(
+                    for: user,
+                    eventId: remoteMainEventState?.eventId
+                )
+                await refreshRemoteMainEventState()
+                return nil
+            } catch {
+                return eventErrorMessage(for: error)
+            }
+        }
+
+        return await cancelMainEventRegistration()
     }
 
     func registerForMainEvent() -> String? {
@@ -575,6 +743,29 @@ final class UserStore: @unchecked Sendable {
 
     private func normalizeEmail(_ email: String) -> String {
         email.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @MainActor
+    func restoreRemoteSessionIfNeeded() async {
+        guard Self.shouldUseAppwrite else { return }
+        guard let appwriteService else {
+            currentUser = nil
+            remoteMainEventState = nil
+            if let appwriteInitializationError {
+                debugLog("Appwrite initialization failed: \(appwriteInitializationError)")
+            }
+            return
+        }
+
+        do {
+            currentUser = try await appwriteService.restoreCurrentUser()
+            await refreshRemoteMainEventState()
+        } catch let error as AppwriteServiceError where error.isUnauthorized {
+            currentUser = nil
+            remoteMainEventState = nil
+        } catch {
+            // Keep the last persisted user visible if the network is temporarily unavailable.
+        }
     }
 
     private static func loadUsers() -> [User] {
@@ -685,5 +876,114 @@ final class UserStore: @unchecked Sendable {
     func resetForTests() {
         currentUser = nil
         mainEventState = MainEventState()
+        remoteMainEventState = nil
+    }
+
+    private static var shouldUseAppwrite: Bool {
+        !isRunningTests && !ProcessInfo.processInfo.arguments.contains("-uitest-reset")
+    }
+
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    @MainActor
+    private func authErrorMessage(for error: Error, isSignUp: Bool) -> String {
+        switch error {
+        case let serviceError as AppwriteServiceError:
+            switch serviceError {
+            case let .api(statusCode, message, type):
+                let normalizedMessage = message?.lowercased() ?? ""
+                let normalizedType = type?.lowercased() ?? ""
+
+                if isSignUp && (statusCode == 409 || normalizedType.contains("already") || normalizedMessage.contains("already")) {
+                    return L10n.tr("error.signup.emailInUse")
+                }
+
+                if statusCode == 401 {
+                    return L10n.tr("error.login.invalidCredentials")
+                }
+
+                if normalizedType.contains("password") || normalizedMessage.contains("password") {
+                    return L10n.tr("error.auth.invalidPasswordLength")
+                }
+
+                return L10n.tr("error.auth.requestFailed")
+            case .network:
+                return L10n.tr("error.auth.requestFailed")
+            case .missingAccountId, .invalidResponse, .decoding, .missingConfiguration:
+                return L10n.tr("error.auth.requestFailed")
+            }
+        default:
+            return L10n.tr("error.auth.requestFailed")
+        }
+    }
+
+    @MainActor
+    private func authConfigurationErrorMessage() -> String {
+        if let appwriteInitializationError {
+            debugLog("Appwrite configuration error: \(appwriteInitializationError)")
+        }
+        return L10n.tr("error.auth.requestFailed")
+    }
+
+    @MainActor
+    private func profileErrorMessage(for error: Error) -> String {
+        switch error {
+        case let serviceError as AppwriteServiceError:
+            if serviceError.isUnauthorized {
+                currentUser = nil
+                return L10n.tr("profile.error.noCurrentUser")
+            }
+            if case let .api(_, message, _) = serviceError,
+               let message,
+               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                debugLog("Appwrite profile save failed: \(message)")
+            } else {
+                debugLog("Appwrite profile save failed: \(serviceError)")
+            }
+            return L10n.tr("profile.error.saveFailed")
+        default:
+            debugLog("Profile save failed: \(error.localizedDescription)")
+            return L10n.tr("profile.error.saveFailed")
+        }
+    }
+
+    @MainActor
+    private func eventErrorMessage(for error: Error) -> String {
+        switch error {
+        case let serviceError as AppwriteServiceError:
+            if serviceError.isUnauthorized {
+                currentUser = nil
+                remoteMainEventState = nil
+                return L10n.tr("events.error.loginRequired")
+            }
+
+            if case let .api(_, message, _) = serviceError,
+               let message {
+                if message.hasPrefix("events.") {
+                    return L10n.tr(message)
+                }
+                debugLog("Appwrite event request failed: \(message)")
+            } else {
+                debugLog("Appwrite event request failed: \(serviceError)")
+            }
+
+            return eventRequestErrorMessage()
+        default:
+            debugLog("Event request failed: \(error.localizedDescription)")
+            return eventRequestErrorMessage()
+        }
+    }
+
+    @MainActor
+    private func eventRequestErrorMessage() -> String {
+        L10n.tr("events.error.requestFailed")
+    }
+
+    private func debugLog(_ message: String) {
+#if DEBUG
+        print(message)
+#endif
     }
 }
