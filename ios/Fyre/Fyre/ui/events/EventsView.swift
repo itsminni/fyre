@@ -59,6 +59,9 @@ struct EventsView: View {
             .background(EventScreenBackground().ignoresSafeArea())
             .navigationTitle(L10n.tr("tab.events"))
         }
+        .task {
+            await store.refreshRemoteMainEventState()
+        }
     }
 
     private var registrationBadgeText: String? {
@@ -79,6 +82,7 @@ struct EventDetailView: View {
     @Environment(UserStore.self) private var store
     @State private var feedbackMessage: String?
     @State private var feedbackIsError = false
+    @State private var isSubmitting = false
 
     // The detail screen uses its own formatter because it lives in a different layout context.
     private static let detailDateFormatter: DateFormatter = {
@@ -244,6 +248,7 @@ struct EventDetailView: View {
                 role: actionRole,
                 message: feedbackMessage,
                 isError: feedbackIsError,
+                isLoading: isSubmitting,
                 action: performPrimaryAction
             )
         }
@@ -279,35 +284,37 @@ struct EventDetailView: View {
     }
 
     private func performPrimaryAction() {
-        // The button drives the complete join/leave flow, including waiting-list fallback.
-        if store.isCurrentUserRegisteredForMainEvent {
-            if let error = store.cancelMainEventRegistration() {
-                feedbackMessage = error
-                feedbackIsError = true
-            } else {
-                feedbackMessage = L10n.tr("events.success.cancelled")
-                feedbackIsError = false
-            }
-            return
-        }
+        guard !isSubmitting else { return }
+        isSubmitting = true
 
-        if store.isCurrentUserWaitingForMainEvent {
-            if let error = store.cancelMainEventRegistration() {
-                feedbackMessage = error
-                feedbackIsError = true
-            } else {
-                feedbackMessage = L10n.tr("events.success.waitingLeft")
-                feedbackIsError = false
+        Task {
+            // Keep join/leave in one branch so the action bar always mirrors the latest registration state.
+            if store.isCurrentUserRegisteredForMainEvent {
+                let error = await store.cancelMainEventRegistration()
+                await MainActor.run {
+                    feedbackMessage = error ?? L10n.tr("events.success.cancelled")
+                    feedbackIsError = error != nil
+                    isSubmitting = false
+                }
+                return
             }
-            return
-        }
 
-        if let message = store.registerForMainEvent() {
-            feedbackMessage = message
-            feedbackIsError = message != L10n.tr("events.success.waitlisted")
-        } else {
-            feedbackMessage = L10n.tr("events.success.joined")
-            feedbackIsError = false
+            if store.isCurrentUserWaitingForMainEvent {
+                let error = await store.cancelMainEventRegistration()
+                await MainActor.run {
+                    feedbackMessage = error ?? L10n.tr("events.success.waitingLeft")
+                    feedbackIsError = error != nil
+                    isSubmitting = false
+                }
+                return
+            }
+
+            let message = await store.registerForMainEvent()
+            await MainActor.run {
+                feedbackMessage = message ?? L10n.tr("events.success.joined")
+                feedbackIsError = message != nil && message != L10n.tr("events.success.waitlisted")
+                isSubmitting = false
+            }
         }
     }
 
@@ -699,12 +706,15 @@ private struct EventActionBar: View {
     let role: ButtonRole?
     let message: String?
     let isError: Bool
+    let isLoading: Bool
     let action: () -> Void
 
     var body: some View {
         VStack(spacing: 10) {
             Button(title, role: role, action: action)
                 .buttonStyle(EventPrimaryActionStyle(isDestructive: role == .destructive))
+                .disabled(isLoading)
+                .opacity(isLoading ? 0.72 : 1)
 
             if let message {
                 Text(message)

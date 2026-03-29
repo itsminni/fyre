@@ -62,5 +62,9 @@ struct AccountEventsHistoryView: View {
             }
         }
         .navigationTitle(L10n.tr("account.events.title"))
+        .task {
+            // Refresh once on open so the history screen reflects server-side event changes.
+            await store.refreshRemoteMainEventState()
+        }
     }
 }
