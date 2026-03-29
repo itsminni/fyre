@@ -102,6 +102,7 @@
 				3F9C19CA2F3C71A10045CA2F /* Sources */,
 				3F9C19CB2F3C71A10045CA2F /* Frameworks */,
 				3F9C19CC2F3C71A10045CA2F /* Resources */,
+				A19C0F012F5B00010045CA2F /* Copy Appwrite Config */,
 			);
 			buildRules = (
 			);
@@ -171,7 +172,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2620;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					3F9C19CD2F3C71A10045CA2F = {
 						CreatedOnToolsVersion = 26.2;
@@ -232,6 +233,26 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		A19C0F012F5B00010045CA2F /* Copy Appwrite Config */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(PROJECT_DIR)/../../Sources/Config.plist",
+			);
+			name = "Copy Appwrite Config";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Config.plist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nCONFIG_SOURCE=\"$PROJECT_DIR/../../Sources/Config.plist\"\nCONFIG_DESTINATION=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Config.plist\"\n\nif [ ! -f \"$CONFIG_SOURCE\" ]; then\n  echo \"warning: Appwrite Config.plist not found at $CONFIG_SOURCE\"\n  exit 0\nfi\n\nmkdir -p \"$(dirname \"$CONFIG_DESTINATION\")\"\ncp \"$CONFIG_SOURCE\" \"$CONFIG_DESTINATION\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		3F9C19CA2F3C71A10045CA2F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -275,6 +296,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -340,6 +362,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
