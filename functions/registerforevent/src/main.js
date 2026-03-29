@@ -37,8 +37,7 @@ export default async ({ req, res, error }) => {
     }
 
     const registrations = await listRows(config, config.eventRegistrationsTableId, [
-      equal("eventId", [event.$id]),
-      limit(200)
+      equal("eventId", [event.$id])
     ]);
 
     const existing = registrations.find((row) => row.userId === currentUserId);
@@ -87,8 +86,16 @@ export default async ({ req, res, error }) => {
 
     return res.json({ status: nextStatus, eventId: event.$id }, 200);
   } catch (err) {
-    error(String(err?.stack ?? err));
-    return res.json({ messageKey: "events.error.requestFailed" }, 500);
+    const detail = String(err?.stack ?? err);
+    if (typeof error === "function") {
+      error(detail);
+    } else {
+      console.error(detail);
+    }
+    return res.json({
+      messageKey: "events.error.requestFailed",
+      message: String(err?.message ?? err)
+    }, 500);
   }
 };
 
@@ -96,7 +103,8 @@ function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
     projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
-    apiKey: requiredHeader(req, "x-appwrite-key"),
+    apiKey: resolveApiKey(req),
+    userJwt: optionalHeader(req, "x-appwrite-user-jwt"),
     databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
     profilesTableId: requiredEnv("APPWRITE_PROFILES_TABLE_ID"),
     eventsTableId: requiredEnv("APPWRITE_EVENTS_TABLE_ID"),
@@ -136,8 +144,24 @@ function requiredHeader(req, name) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function optionalHeader(req, name) {
+  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
+  if (!value) {
+    return null;
+  }
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveApiKey(req) {
+  const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
+  if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
+    return runtimeKey.trim();
+  }
+  return optionalHeader(req, "x-appwrite-key");
+}
+
 async function getUpcomingEvent(config) {
-  const rows = await listRows(config, config.eventsTableId, [orderAsc("startsAt"), limit(50)]);
+  const rows = await listRows(config, config.eventsTableId, [orderAsc("startsAt")]);
   const now = Date.now();
 
   return rows.find((row) => {
@@ -193,35 +217,71 @@ async function request(config, method, path, body, queries = []) {
     url.searchParams.append("queries[]", query);
   }
 
-  const response = await fetch(url, {
-    method,
-    headers: {
+  const authModes = [];
+  if (config.userJwt) {
+    authModes.push("jwt");
+  }
+  if (config.apiKey) {
+    authModes.push("key");
+  }
+
+  if (authModes.length === 0) {
+    throw new Error("Missing Appwrite auth context (user JWT or API key)");
+  }
+
+  let lastStatus = 500;
+  let lastPayload = {};
+
+  for (const authMode of authModes) {
+    const headers = {
       "Content-Type": "application/json",
       "X-Appwrite-Project": config.projectId,
-      "X-Appwrite-Key": config.apiKey,
       "X-Appwrite-Response-Format": "1.8.0"
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
+    };
 
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
-  if (!response.ok) {
-    throw new Error(payload.message ?? `Request failed with status ${response.status}`);
+    if (authMode === "jwt") {
+      headers["X-Appwrite-JWT"] = config.userJwt;
+    } else {
+      headers["X-Appwrite-Key"] = config.apiKey;
+    }
+
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    const text = await response.text();
+    const payload = parseJSONSafely(text);
+
+    if (response.ok) {
+      return payload;
+    }
+
+    lastStatus = response.status;
+    lastPayload = payload;
   }
-  return payload;
+
+  throw new Error(lastPayload.message ?? `Request failed with status ${lastStatus}`);
+}
+
+function parseJSONSafely(text) {
+  if (!text) {
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
 }
 
 function equal(field, values) {
-  return `equal("${field}", ${JSON.stringify(values)})`;
+  return JSON.stringify({ method: "equal", attribute: field, values });
 }
 
 function orderAsc(field) {
-  return `orderAsc("${field}")`;
-}
-
-function limit(value) {
-  return `limit(${value})`;
+  return JSON.stringify({ method: "orderAsc", attribute: field });
 }
 
 function uniqueId() {

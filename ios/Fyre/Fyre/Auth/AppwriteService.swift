@@ -59,7 +59,7 @@ actor AppwriteService {
     }
 
     func updateProfile(for user: User) async throws -> User {
-        let accountId = try requireAccountId(from: user)
+        let accountId = try await resolvedRequiredAccountId(from: user)
         var updatedUser = user
         updatedUser.appwriteUserId = accountId
 
@@ -84,7 +84,7 @@ actor AppwriteService {
     }
 
     func updateProfileImage(_ imageData: Data?, for user: User) async throws -> User {
-        let accountId = try requireAccountId(from: user)
+        let accountId = try await resolvedRequiredAccountId(from: user)
         let previousFileId = user.avatarFileId
 
         var nextFileId: String?
@@ -122,8 +122,7 @@ actor AppwriteService {
         let eventRegistrations = try await listRows(
             tableId: configuration.eventRegistrationsTableId,
             queries: [
-                AppwriteQuery.equal("eventId", values: [eventId]),
-                AppwriteQuery.limit(200)
+                AppwriteQuery.equal("eventId", values: [eventId])
             ]
         )
 
@@ -144,16 +143,16 @@ actor AppwriteService {
     }
 
     func registerForMainEvent(for user: User, eventId: String? = nil) async throws -> EventHistoryStatus {
-        _ = try requireAccountId(from: user)
-        let resolvedEventId: String
+        _ = try await resolvedRequiredAccountId(from: user)
+        var body: [String: Any] = [:]
         if let eventId, !eventId.isEmpty {
-            resolvedEventId = eventId
-        } else {
-            resolvedEventId = try await requireUpcomingEventId()
+            body["eventId"] = eventId
         }
+
+        // Let the function resolve the current event when the client cannot read the events table directly.
         let response = try await executeFunction(
             functionId: configuration.registerForEventFunctionId,
-            body: ["eventId": resolvedEventId]
+            body: body
         )
 
         guard let status = eventHistoryStatus(for: stringValue(forKey: "status", in: response)) else {
@@ -164,19 +163,18 @@ actor AppwriteService {
     }
 
     func cancelMainEventRegistration(for user: User, eventId: String? = nil, force: Bool = false) async throws {
-        _ = try requireAccountId(from: user)
-        let resolvedEventId: String
+        _ = try await resolvedRequiredAccountId(from: user)
+        var body: [String: Any] = [
+            "force": force
+        ]
         if let eventId, !eventId.isEmpty {
-            resolvedEventId = eventId
-        } else {
-            resolvedEventId = try await requireUpcomingEventId()
+            body["eventId"] = eventId
         }
+
+        // Mirror the register flow so cancellation can still run even if event reads are private to Functions.
         _ = try await executeFunction(
             functionId: configuration.cancelEventRegistrationFunctionId,
-            body: [
-                "eventId": resolvedEventId,
-                "force": force
-            ]
+            body: body
         )
     }
 
@@ -239,7 +237,6 @@ actor AppwriteService {
             tableId: configuration.threadParticipantsTableId,
             queries: [
                 AppwriteQuery.equal("userId", values: [currentAccountId]),
-                AppwriteQuery.limit(100)
             ]
         )
 
@@ -330,7 +327,6 @@ actor AppwriteService {
             tableId: configuration.threadParticipantsTableId,
             queries: [
                 AppwriteQuery.equal("threadId", values: [threadId]),
-                AppwriteQuery.limit(10)
             ]
         )
 
@@ -344,7 +340,6 @@ actor AppwriteService {
             queries: [
                 AppwriteQuery.equal("threadId", values: [threadId]),
                 AppwriteQuery.orderAsc("createdAt"),
-                AppwriteQuery.limit(200)
             ]
         )
 
@@ -375,7 +370,7 @@ actor AppwriteService {
     }
 
     private func ensureProfileRow(for user: User) async throws -> User {
-        let accountId = try requireAccountId(from: user)
+        let accountId = try await resolvedRequiredAccountId(from: user)
         let payload = makeProfilePayload(for: user)
 
         // Use the Auth account id as the profile row id so auth and profile stay trivially linked.
@@ -528,7 +523,6 @@ actor AppwriteService {
             tableId: configuration.eventsTableId,
             queries: [
                 AppwriteQuery.orderAsc("startsAt"),
-                AppwriteQuery.limit(50)
             ]
         )
 
@@ -548,7 +542,6 @@ actor AppwriteService {
             tableId: configuration.eventRegistrationsTableId,
             queries: [
                 AppwriteQuery.equal("userId", values: [accountId]),
-                AppwriteQuery.limit(100)
             ]
         )
 
@@ -592,7 +585,6 @@ actor AppwriteService {
                 tableId: swipesTableId,
                 queries: [
                     AppwriteQuery.equal("fromUserId", values: [currentAccountId]),
-                    AppwriteQuery.limit(200)
                 ]
             )
 
@@ -607,7 +599,6 @@ actor AppwriteService {
             let matchRows = try await listRows(
                 tableId: matchesTableId,
                 queries: [
-                    AppwriteQuery.limit(200)
                 ]
             )
 
@@ -665,6 +656,15 @@ actor AppwriteService {
         return try await fetchCurrentAccountId(required: false)
     }
 
+    private func resolvedRequiredAccountId(from user: User?) async throws -> String {
+        // Old persisted sessions may miss appwriteUserId; recover from /account before failing the request.
+        guard let accountId = try await resolvedAccountId(from: user) else {
+            throw AppwriteServiceError.missingAccountId
+        }
+
+        return accountId
+    }
+
     private func executeFunction(functionId: String, body: [String: Any]) async throws -> [String: Any] {
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let bodyString = String(decoding: bodyData, as: UTF8.self)
@@ -688,18 +688,20 @@ actor AppwriteService {
     }
 
     private func waitForExecution(functionId: String, executionId: String) async throws -> [String: Any] {
-        for _ in 0..<20 {
+        for attempt in 0..<60 {
             let execution = try await sendJSONObjectRequest(
                 method: "GET",
                 pathComponents: ["functions", functionId, "executions", executionId]
             )
 
             let status = stringValue(forKey: "status", in: execution)?.lowercased() ?? ""
-            if status == "completed" || status == "failed" {
+            if status == "completed" || status == "failed" || status == "crashed" {
                 return try decodeExecutionResponse(from: execution)
             }
 
-            try await Task.sleep(nanoseconds: 300_000_000)
+            // Functions can sit in queue during cold starts; back off slightly after early polls.
+            let wait = attempt < 10 ? 300_000_000 : 500_000_000
+            try await Task.sleep(nanoseconds: UInt64(wait))
         }
 
         throw AppwriteServiceError.invalidResponse
@@ -711,7 +713,13 @@ actor AppwriteService {
         let body = try decodeJSONObjectStringIfPresent(responseBody)
 
         guard (200..<300).contains(statusCode) else {
-            let message = stringValue(forKey: "messageKey", in: body) ?? stringValue(forKey: "message", in: body)
+            // Prefer the raw backend message for 5xx so debug builds show the actual server failure.
+            let message: String?
+            if statusCode >= 500 {
+                message = stringValue(forKey: "message", in: body) ?? stringValue(forKey: "messageKey", in: body)
+            } else {
+                message = stringValue(forKey: "messageKey", in: body) ?? stringValue(forKey: "message", in: body)
+            }
             throw AppwriteServiceError.api(statusCode: statusCode, message: message, type: "function")
         }
 
@@ -882,15 +890,6 @@ actor AppwriteService {
             )
         }
         return .api(statusCode: statusCode, message: nil, type: nil)
-    }
-
-    private func requireAccountId(from user: User) throws -> String {
-        guard let accountId = user.appwriteUserId?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !accountId.isEmpty else {
-            throw AppwriteServiceError.missingAccountId
-        }
-
-        return accountId
     }
 
     private func makeProfilePayload(for user: User) -> [String: Any] {
@@ -1253,19 +1252,28 @@ actor AppwriteService {
 
 private enum AppwriteQuery {
     static func equal(_ field: String, values: [String]) -> String {
-        "equal(\"\(field)\", \(jsonArray(from: values)))"
+        query(method: "equal", column: field, values: values)
     }
 
     static func orderAsc(_ field: String) -> String {
-        "orderAsc(\"\(field)\")"
+        query(method: "orderAsc", column: field)
     }
 
     static func limit(_ value: Int) -> String {
-        "limit(\(value))"
+        query(method: "limit", values: [value])
     }
 
-    private static func jsonArray(from values: [String]) -> String {
-        let data = (try? JSONSerialization.data(withJSONObject: values)) ?? Data("[]".utf8)
+    private static func query(method: String, column: String? = nil, values: [Any] = []) -> String {
+        var payload: [String: Any] = ["method": method]
+        if let column {
+            // Appwrite's REST parser currently expects "attribute" for filtered/sorted row queries.
+            payload["attribute"] = column
+        }
+        if !values.isEmpty {
+            payload["values"] = values
+        }
+
+        let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
         return String(decoding: data, as: UTF8.self)
     }
 }

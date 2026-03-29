@@ -95,7 +95,7 @@ function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
     projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
-    apiKey: requiredHeader(req, "x-appwrite-key"),
+    apiKey: resolveApiKey(req),
     databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
     swipesTableId: requiredEnv("APPWRITE_SWIPES_TABLE_ID"),
     matchesTableId: requiredEnv("APPWRITE_MATCHES_TABLE_ID"),
@@ -134,6 +134,14 @@ function requiredHeader(req, name) {
     throw new Error(`Missing header ${name}`);
   }
   return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveApiKey(req) {
+  const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
+  if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
+    return runtimeKey.trim();
+  }
+  return requiredHeader(req, "x-appwrite-key");
 }
 
 function participantPermissions(userIds) {
@@ -246,11 +254,11 @@ async function request(config, method, path, body, queries = []) {
 }
 
 function equal(field, values) {
-  return `equal("${field}", ${JSON.stringify(values)})`;
+  return JSON.stringify({ method: "equal", attribute: field, values });
 }
 
 function limit(value) {
-  return `limit(${value})`;
+  return JSON.stringify({ method: "limit", values: [value] });
 }
 
 function uniqueId() {

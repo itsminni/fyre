@@ -348,7 +348,7 @@ final class UserStore: @unchecked Sendable {
     private let appwriteInitializationError: String?
     private let mainEventDate = Calendar.current.date(from: DateComponents(
         year: 2026,
-        month: 3,
+        month: 4,
         day: 30,
         hour: 21,
         minute: 0
@@ -670,7 +670,7 @@ final class UserStore: @unchecked Sendable {
         do {
             remoteMainEventState = try await appwriteService.fetchMainEventState(for: currentUser)
         } catch {
-            debugLog("Remote event refresh failed: \(error.localizedDescription)")
+            debugLog("Remote event refresh failed: \(String(describing: error))")
         }
     }
 
@@ -679,6 +679,7 @@ final class UserStore: @unchecked Sendable {
         if Self.shouldUseAppwrite {
             guard let user = currentUser else { return L10n.tr("events.error.loginRequired") }
             guard let appwriteService else { return eventRequestErrorMessage() }
+            let hadRegistrationBeforeRequest = hasCurrentUserMainEventRegistration
 
             do {
                 // Capacity, waitlist, and gender-balance rules live in the server-side function now.
@@ -686,9 +687,19 @@ final class UserStore: @unchecked Sendable {
                     for: user,
                     eventId: remoteMainEventState?.eventId
                 )
-                await refreshRemoteMainEventState()
-                return status == .waitlisted ? L10n.tr("events.success.waitlisted") : nil
+                await refreshRemoteMainEventStateWithRetry()
+
+                let resolvedStatus = remoteMainEventState?.currentStatus ?? status
+                return resolvedStatus == .waitlisted ? L10n.tr("events.success.waitlisted") : nil
             } catch {
+                // Functions can time out on cold start even when the mutation eventually succeeds.
+                await refreshRemoteMainEventStateWithRetry()
+
+                if !hadRegistrationBeforeRequest,
+                   hasCurrentUserMainEventRegistration {
+                    return isCurrentUserWaitingForMainEvent ? L10n.tr("events.success.waitlisted") : nil
+                }
+
                 return eventErrorMessage(for: error)
             }
         }
@@ -701,20 +712,38 @@ final class UserStore: @unchecked Sendable {
         if Self.shouldUseAppwrite {
             guard let user = currentUser else { return L10n.tr("events.error.loginRequired") }
             guard let appwriteService else { return eventRequestErrorMessage() }
+            let hadRegistrationBeforeRequest = hasCurrentUserMainEventRegistration
 
             do {
                 try await appwriteService.cancelMainEventRegistration(
                     for: user,
                     eventId: remoteMainEventState?.eventId
                 )
-                await refreshRemoteMainEventState()
+                await refreshRemoteMainEventStateWithRetry()
                 return nil
             } catch {
+                // Treat late function responses as success when backend state confirms cancellation.
+                await refreshRemoteMainEventStateWithRetry()
+
+                if hadRegistrationBeforeRequest,
+                   !hasCurrentUserMainEventRegistration {
+                    return nil
+                }
+
                 return eventErrorMessage(for: error)
             }
         }
 
         return await cancelMainEventRegistration()
+    }
+
+    @MainActor
+    private func refreshRemoteMainEventStateWithRetry() async {
+        await refreshRemoteMainEventState()
+
+        // Appwrite table updates may become visible a moment after function completion.
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        await refreshRemoteMainEventState()
     }
 
     func registerForMainEvent() -> String? {

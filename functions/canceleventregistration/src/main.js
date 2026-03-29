@@ -21,7 +21,10 @@ export default async ({ req, res, error }) => {
       limit(200)
     ]);
 
-    const currentRegistration = registrations.find((row) => row.userId === currentUserId && ACTIVE_STATUSES.has(row.status));
+    const currentRegistration = registrations.find((row) => {
+      const rowUserId = resolveUserId(row);
+      return rowUserId === currentUserId && ACTIVE_STATUSES.has(normalizeStatus(row.status));
+    });
     if (!currentRegistration) {
       return res.json({ messageKey: "events.error.notRegistered" }, 404);
     }
@@ -33,42 +36,50 @@ export default async ({ req, res, error }) => {
 
     const now = new Date().toISOString();
     await updateRow(config, config.eventRegistrationsTableId, currentRegistration.$id, {
-      eventId: event.$id,
-      userId: currentUserId,
-      gender: currentRegistration.gender,
       status: "cancelled",
-      createdAt: currentRegistration.createdAt ?? now,
-      cancelledAt: now,
-      promotedAt: currentRegistration.promotedAt ?? null
-    }, registrationPermissions(currentUserId));
+      cancelledAt: now
+    });
 
-    if (CONFIRMED_STATUSES.has(currentRegistration.status)) {
+    if (CONFIRMED_STATUSES.has(normalizeStatus(currentRegistration.status))) {
       // Promote the oldest waitlisted person of the same gender to preserve the event balance rules.
       const candidate = registrations
-        .filter((row) => row.status === "waitlisted" && row.gender === currentRegistration.gender)
+        .filter((row) => normalizeStatus(row.status) === "waitlisted" && row.gender === currentRegistration.gender)
         .sort((lhs, rhs) => {
-          const left = parseDate(lhs.createdAt)?.getTime() ?? 0;
-          const right = parseDate(rhs.createdAt)?.getTime() ?? 0;
+          const left = parseDate(lhs.createdAt ?? lhs.$createdAt)?.getTime() ?? 0;
+          const right = parseDate(rhs.createdAt ?? rhs.$createdAt)?.getTime() ?? 0;
           return left - right;
         })[0];
 
       if (candidate) {
-        await updateRow(config, config.eventRegistrationsTableId, candidate.$id, {
-          eventId: event.$id,
-          userId: candidate.userId,
-          gender: candidate.gender,
-          status: "promoted",
-          createdAt: candidate.createdAt ?? now,
-          cancelledAt: null,
-          promotedAt: now
-        }, registrationPermissions(candidate.userId));
+        try {
+          await updateRow(config, config.eventRegistrationsTableId, candidate.$id, {
+            status: "promoted",
+            cancelledAt: null,
+            promotedAt: now
+          });
+        } catch (promotionError) {
+          const detail = `Waitlist promotion skipped: ${String(promotionError?.message ?? promotionError)}`;
+          if (typeof error === "function") {
+            error(detail);
+          } else {
+            console.warn(detail);
+          }
+        }
       }
     }
 
     return res.json({ status: "cancelled", eventId: event.$id }, 200);
   } catch (err) {
-    error(String(err?.stack ?? err));
-    return res.json({ messageKey: "events.error.requestFailed" }, 500);
+    const detail = String(err?.stack ?? err);
+    if (typeof error === "function") {
+      error(detail);
+    } else {
+      console.error(detail);
+    }
+    return res.json({
+      messageKey: "events.error.requestFailed",
+      message: String(err?.message ?? err)
+    }, 500);
   }
 };
 
@@ -76,7 +87,8 @@ function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
     projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
-    apiKey: requiredHeader(req, "x-appwrite-key"),
+    apiKey: resolveApiKey(req),
+    userJwt: optionalHeader(req, "x-appwrite-user-jwt"),
     databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
     eventsTableId: requiredEnv("APPWRITE_EVENTS_TABLE_ID"),
     eventRegistrationsTableId: requiredEnv("APPWRITE_EVENT_REGISTRATIONS_TABLE_ID")
@@ -115,8 +127,24 @@ function requiredHeader(req, name) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function optionalHeader(req, name) {
+  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
+  if (!value) {
+    return null;
+  }
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveApiKey(req) {
+  const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
+  if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
+    return runtimeKey.trim();
+  }
+  return optionalHeader(req, "x-appwrite-key");
+}
+
 async function getUpcomingEvent(config) {
-  const rows = await listRows(config, config.eventsTableId, [orderAsc("startsAt"), limit(50)]);
+  const rows = await listRows(config, config.eventsTableId, [orderAsc("startsAt")]);
   const now = Date.now();
 
   return rows.find((row) => {
@@ -126,14 +154,6 @@ async function getUpcomingEvent(config) {
     const startsAt = parseDate(row.startsAt);
     return !startsAt || startsAt.getTime() >= now;
   }) ?? null;
-}
-
-function registrationPermissions(userId) {
-  return [
-    "read(\"users\")",
-    `update(\"user:${userId}\")`,
-    `delete(\"user:${userId}\")`
-  ];
 }
 
 async function getRow(config, tableId, rowId) {
@@ -151,10 +171,9 @@ async function listRows(config, tableId, queries) {
   return Array.isArray(payload.rows) ? payload.rows : [];
 }
 
-async function updateRow(config, tableId, rowId, data, permissions) {
+async function updateRow(config, tableId, rowId, data) {
   return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
-    data,
-    permissions
+    data
   });
 }
 
@@ -164,35 +183,87 @@ async function request(config, method, path, body, queries = []) {
     url.searchParams.append("queries[]", query);
   }
 
-  const response = await fetch(url, {
-    method,
-    headers: {
+  const authModes = [];
+  if (config.userJwt) {
+    authModes.push("jwt");
+  }
+  if (config.apiKey) {
+    authModes.push("key");
+  }
+
+  if (authModes.length === 0) {
+    throw new Error("Missing Appwrite auth context (user JWT or API key)");
+  }
+
+  let lastStatus = 500;
+  let lastPayload = {};
+
+  for (const authMode of authModes) {
+    const headers = {
       "Content-Type": "application/json",
       "X-Appwrite-Project": config.projectId,
-      "X-Appwrite-Key": config.apiKey,
       "X-Appwrite-Response-Format": "1.8.0"
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
+    };
 
-  const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
-  if (!response.ok) {
-    throw new Error(payload.message ?? `Request failed with status ${response.status}`);
+    if (authMode === "jwt") {
+      headers["X-Appwrite-JWT"] = config.userJwt;
+    } else {
+      headers["X-Appwrite-Key"] = config.apiKey;
+    }
+
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    const text = await response.text();
+    const payload = parseJSONSafely(text);
+
+    if (response.ok) {
+      return payload;
+    }
+
+    lastStatus = response.status;
+    lastPayload = payload;
   }
-  return payload;
+
+  throw new Error(lastPayload.message ?? `Request failed with status ${lastStatus}`);
+}
+
+function parseJSONSafely(text) {
+  if (!text) {
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
 }
 
 function equal(field, values) {
-  return `equal("${field}", ${JSON.stringify(values)})`;
+  return JSON.stringify({ method: "equal", attribute: field, values });
 }
 
 function orderAsc(field) {
-  return `orderAsc("${field}")`;
+  return JSON.stringify({ method: "orderAsc", attribute: field });
 }
 
 function limit(value) {
-  return `limit(${value})`;
+  return JSON.stringify({ method: "limit", values: [value] });
+}
+
+function normalizeStatus(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function resolveUserId(row) {
+  return asString(row?.userId) ?? asString(row?.userid);
+}
+
+function asString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function parseDate(value) {

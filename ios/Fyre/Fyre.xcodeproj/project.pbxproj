@@ -98,11 +98,11 @@
 		3F9C19CD2F3C71A10045CA2F /* Fyre */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 3F9C19D92F3C71A20045CA2F /* Build configuration list for PBXNativeTarget "Fyre" */;
-				buildPhases = (
-					3F9C19CA2F3C71A10045CA2F /* Sources */,
-					3F9C19CB2F3C71A10045CA2F /* Frameworks */,
-					3F9C19CC2F3C71A10045CA2F /* Resources */,
-				);
+			buildPhases = (
+				3F9C19CA2F3C71A10045CA2F /* Sources */,
+				3F9C19CB2F3C71A10045CA2F /* Frameworks */,
+				3F9C19CC2F3C71A10045CA2F /* Resources */,
+			);
 			buildRules = (
 			);
 			dependencies = (
