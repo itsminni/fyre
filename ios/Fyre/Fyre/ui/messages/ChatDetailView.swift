@@ -9,11 +9,14 @@ import SwiftUI
 import UIKit
 
 struct ChatDetailView: View {
+    @Environment(AppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
     let thread: ChatThread
 
     @State private var messages: [ChatMessage]
     @State private var draft = ""
+    @State private var sendErrorMessage: String?
+    @State private var isSending = false
     @FocusState private var isInputFocused: Bool
     private let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
 
@@ -73,35 +76,66 @@ struct ChatDetailView: View {
                 .padding()
             }
 
-            HStack(spacing: 10) {
-                TextField(L10n.tr("chat.message.placeholder"), text: $draft)
-                    .focused($isInputFocused)
-                    .textFieldStyle(.plain)
-                    .padding(.leading, 14)
-                    .padding(.trailing, 10)
-                    .frame(height: 38)
-                    .background(composerBackground, in: Capsule(style: .continuous))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(composerStroke, lineWidth: 1)
-                    )
-                    .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.06), radius: 8, y: 3)
-                    // - swipe up to focus/open keyboard
-                    // - swipe down to dismiss keyboard
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 18)
-                            .onEnded { value in
-                                handleInputSwipe(value)
-                            }
-                    )
+            VStack(alignment: .leading, spacing: 8) {
+                if let sendErrorMessage {
+                    Text(sendErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
-                LiquidStretchSendButton(
-                    isEnabled: !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    action: sendMessage
-                )
+                HStack(spacing: 10) {
+                    TextField(L10n.tr("chat.message.placeholder"), text: $draft)
+                        .focused($isInputFocused)
+                        .textFieldStyle(.plain)
+                        .padding(.leading, 14)
+                        .padding(.trailing, 10)
+                        .frame(height: 38)
+                        .background(composerInputBackground, in: Capsule(style: .continuous))
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(composerStroke, lineWidth: 1)
+                        )
+                        .overlay(alignment: .topLeading) {
+                            Capsule(style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            .white.opacity(colorScheme == .dark ? 0.18 : 0.55),
+                                            .clear
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .padding(1)
+                                .blendMode(.screen)
+                        }
+                        .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.06), radius: 8, y: 3)
+                        // - swipe up to focus/open keyboard
+                        // - swipe down to dismiss keyboard
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 18)
+                                .onEnded { value in
+                                    handleInputSwipe(value)
+                                }
+                        )
+
+                    LiquidStretchSendButton(
+                        isEnabled: !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending,
+                        action: sendMessage
+                    )
+                }
             }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
+            .background(composerBarBackground)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.06))
+                    .frame(height: 1)
+            }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -130,9 +164,28 @@ struct ChatDetailView: View {
     private func sendMessage() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        // New outgoing messages are timestamped at send time.
-        messages.append(ChatMessage(id: UUID(), text: text, isMe: true, time: Self.timeFormatter.string(from: Date())))
+        // Clear optimistically for a snappy composer, then restore the draft if the send fails.
         draft = ""
+        sendErrorMessage = nil
+        isSending = true
+
+        Task {
+            do {
+                let dto = try await services.backend.sendMessage(threadId: thread.remoteId, text: text)
+                let message = ChatMessage(id: dto.id, text: dto.text, isMe: dto.isMe, time: dto.time)
+                await MainActor.run {
+                    messages.append(message)
+                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                    isSending = false
+                }
+            } catch {
+                await MainActor.run {
+                    draft = text
+                    sendErrorMessage = L10n.tr("chat.error.sendFailed")
+                    isSending = false
+                }
+            }
+        }
     }
 
     private func copyMessageText(_ text: String) {
@@ -164,12 +217,87 @@ struct ChatDetailView: View {
         isOutgoing ? AnyShapeStyle(outgoingTextColor) : AnyShapeStyle(.primary)
     }
 
-    private var composerBackground: Color {
-        Color(uiColor: colorScheme == .dark ? .secondarySystemBackground : .systemBackground)
+    private var composerInputBackground: some ShapeStyle {
+        AnyShapeStyle(
+            LinearGradient(
+                colors: colorScheme == .dark
+                ? [
+                    Color.white.opacity(0.10),
+                    Color.white.opacity(0.04)
+                ]
+                : [
+                    Color.white.opacity(0.82),
+                    Color.white.opacity(0.44)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
     }
 
     private var composerStroke: Color {
-        colorScheme == .dark ? .white.opacity(0.14) : .black.opacity(0.10)
+        colorScheme == .dark ? .white.opacity(0.18) : .white.opacity(0.70)
+    }
+
+    @ViewBuilder
+    private var composerBarBackground: some View {
+        if #available(iOS 26.0, *) {
+            // Use native Liquid Glass only on iOS 26+, and keep the existing material fallback below.
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.interactive(true), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.orange.opacity(colorScheme == .dark ? 0.05 : 0.08),
+                                    Color.cyan.opacity(colorScheme == .dark ? 0.04 : 0.06),
+                                    .clear
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                }
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.0 : 0.06), radius: 16, y: 5)
+        } else {
+            ZStack {
+                if colorScheme == .dark {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                } else {
+                    Rectangle()
+                        .fill(.regularMaterial)
+                }
+
+                LinearGradient(
+                    colors: [
+                        .white.opacity(colorScheme == .dark ? 0.06 : 0.42),
+                        .white.opacity(0.04),
+                        .clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.orange.opacity(colorScheme == .dark ? 0.07 : 0.10),
+                                Color.cyan.opacity(colorScheme == .dark ? 0.05 : 0.08),
+                                .clear
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.0 : 0.08), radius: 18, y: 6)
+        }
     }
 
     private func messageBubbleBackground(isOutgoing: Bool) -> AnyShapeStyle {
@@ -199,7 +327,9 @@ struct ChatDetailView: View {
             )
         }
 
-        return AnyShapeStyle(Color(uiColor: colorScheme == .dark ? .secondarySystemBackground : .systemGray6))
+        return AnyShapeStyle(
+            Color(uiColor: colorScheme == .dark ? .secondarySystemBackground : .systemGray6)
+        )
     }
 
     private func messageBubbleStroke(isOutgoing: Bool) -> Color {
@@ -215,10 +345,4 @@ struct ChatDetailView: View {
         return isOutgoing ? .orange.opacity(0.10) : .black.opacity(0.05)
     }
 
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "it_IT")
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
 }

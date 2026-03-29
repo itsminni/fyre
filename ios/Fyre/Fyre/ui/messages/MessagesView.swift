@@ -9,15 +9,16 @@ import SwiftUI
 import UIKit
 
 // Simple chat models used only for the UI layer in this test
-struct ChatMessage: Identifiable {
+struct ChatMessage: Identifiable, Hashable {
     let id: UUID
     let text: String
     let isMe: Bool
     let time: String
 }
 
-struct ChatThread: Identifiable {
+struct ChatThread: Identifiable, Hashable {
     let id: UUID
+    let remoteId: String
     let name: String
     let avatar: String
     let isOnline: Bool
@@ -38,6 +39,7 @@ struct MessagesView: View {
     // Local UI state for the list of threads
     @State private var threads: [ChatThread] = []
     @State private var threadPendingDeletion: ChatThread?
+    @State private var reloadToken = UUID()
 
     var body: some View {
         NavigationStack {
@@ -90,11 +92,15 @@ struct MessagesView: View {
                 )
             }
         }
-        .task {
-            // Load threads once when view appears
-            if threads.isEmpty {
-                await loadThreads()
-            }
+        .task(id: reloadToken) {
+            await loadThreads()
+        }
+        .refreshable {
+            await loadThreads()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fyreThreadsDidChange)) { _ in
+            // Swipe matches and chat sends publish this signal so the inbox can refresh lazily.
+            reloadToken = UUID()
         }
     }
 
@@ -104,6 +110,7 @@ struct MessagesView: View {
             threads = dtos.map { dto in
                 ChatThread(
                     id: dto.id,
+                    remoteId: dto.remoteId,
                     name: dto.name,
                     avatar: dto.avatar,
                     isOnline: dto.isOnline,
