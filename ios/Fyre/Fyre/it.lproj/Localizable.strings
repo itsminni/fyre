@@ -21,13 +21,18 @@
 
 "error.signup.emailInUse" = "Esiste gia un account con questa email.";
 "error.auth.invalidEmail" = "Inserisci un indirizzo email valido.";
+"error.auth.configurationMissing" = "La configurazione Appwrite manca in questa build. Controlla Config.plist nel bundle dell'app.";
+"error.auth.invalidPasswordLength" = "La password deve avere almeno 8 caratteri.";
+"error.auth.requestFailed" = "Impossibile contattare il server adesso. Riprova.";
 "error.login.userNotFound" = "Nessun account trovato con questa email.";
+"error.login.invalidCredentials" = "Email o password non valide.";
 "error.login.invalidPassword" = "Password errata.";
 
 "home.navigationTitle" = "Scopri";
 "home.empty.title" = "Fine profili";
-"home.empty.description" = "Hai visto tutti i profili demo.";
+"home.empty.description" = "Hai visto tutti i profili disponibili per ora.";
 "home.skip.accessibility" = "Salta";
+"home.swipe.error" = "Impossibile aggiornare lo swipe adesso. Riprova.";
 
 "tab.home" = "Home";
 "tab.messages" = "Messaggi";
@@ -44,6 +49,7 @@
 "messages.delete.confirmMessage" = "Vuoi eliminare la chat con %@? L'azione la rimuove solo dalla lista anteprima.";
 
 "chat.copy" = "Copia";
+"chat.error.sendFailed" = "Impossibile inviare il messaggio adesso. Riprova.";
 "chat.message.placeholder" = "Messaggio";
 
 "account.section.profile" = "Profilo";
@@ -76,6 +82,7 @@
 "profile.photo.action" = "Scegli foto";
 "profile.firstName" = "Nome";
 "profile.lastName" = "Cognome";
+"profile.city" = "Città";
 "profile.birthDate" = "Data di nascita";
 "profile.orientation" = "Orientamento";
 "profile.orientation.straight" = "Etero";
@@ -117,10 +124,12 @@
 "profile.error.emptyName" = "Il nome non puo essere vuoto.";
 "profile.error.emptyFirstName" = "Il nome non puo essere vuoto.";
 "profile.error.emptyLastName" = "Il cognome non puo essere vuoto.";
+"profile.error.emptyCity" = "La citta non puo essere vuota.";
 "profile.error.completeRequiredFields" = "Compila tutti i campi obbligatori.";
 "profile.error.invalidAge" = "Devi avere almeno 18 anni.";
 "profile.error.orientationRequired" = "L'orientamento e obbligatorio.";
 "profile.error.noCurrentUser" = "Effettua di nuovo l'accesso.";
+"profile.error.saveFailed" = "Impossibile salvare il profilo adesso. Riprova.";
 
 "events.section.mainEvent" = "Evento principale";
 "events.section.info" = "Info evento";
@@ -176,6 +185,7 @@
 "events.error.alreadyRegistered" = "Sei gia iscritto a questo evento.";
 "events.error.alreadyWaitlisted" = "Sei gia in waiting list.";
 "events.error.notRegistered" = "Non risulti iscritto a questo evento.";
+"events.error.requestFailed" = "Impossibile aggiornare l'evento adesso. Riprova.";
 "events.status.confirmed" = "Stato: Confermato";
 "events.status.waitlisted" = "Stato: In waiting list";
 "events.status.cancelled" = "Stato: Annullato";

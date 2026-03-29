@@ -21,13 +21,18 @@
 
 "error.signup.emailInUse" = "An account with this email already exists.";
 "error.auth.invalidEmail" = "Please enter a valid email address.";
+"error.auth.configurationMissing" = "Appwrite configuration is missing from this build. Check Config.plist in the app bundle.";
+"error.auth.invalidPasswordLength" = "Password must be at least 8 characters.";
+"error.auth.requestFailed" = "Unable to contact the server right now. Please try again.";
 "error.login.userNotFound" = "No account found with this email.";
+"error.login.invalidCredentials" = "Invalid email or password.";
 "error.login.invalidPassword" = "Incorrect password.";
 
 "home.navigationTitle" = "Discover";
 "home.empty.title" = "No more profiles";
-"home.empty.description" = "You have seen all demo profiles.";
+"home.empty.description" = "You have seen all available profiles for now.";
 "home.skip.accessibility" = "Skip";
+"home.swipe.error" = "Unable to update the swipe right now. Please try again.";
 
 "tab.home" = "Home";
 "tab.messages" = "Messages";
@@ -44,6 +49,7 @@
 "messages.delete.confirmMessage" = "Delete the chat with %@? This action only removes it from the preview list.";
 
 "chat.copy" = "Copy";
+"chat.error.sendFailed" = "Unable to send the message right now. Please try again.";
 "chat.message.placeholder" = "Message";
 
 "account.section.profile" = "Profile";
@@ -76,6 +82,7 @@
 "profile.photo.action" = "Choose photo";
 "profile.firstName" = "First name";
 "profile.lastName" = "Last name";
+"profile.city" = "City";
 "profile.birthDate" = "Date of birth";
 "profile.orientation" = "Orientation";
 "profile.orientation.straight" = "Straight";
@@ -117,10 +124,12 @@
 "profile.error.emptyName" = "Name cannot be empty.";
 "profile.error.emptyFirstName" = "First name cannot be empty.";
 "profile.error.emptyLastName" = "Last name cannot be empty.";
+"profile.error.emptyCity" = "City cannot be empty.";
 "profile.error.completeRequiredFields" = "Please complete all required fields.";
 "profile.error.invalidAge" = "Age must be 18 or older.";
 "profile.error.orientationRequired" = "Orientation is required.";
 "profile.error.noCurrentUser" = "Please sign in again.";
+"profile.error.saveFailed" = "Unable to save your profile right now. Please try again.";
 
 "events.section.mainEvent" = "Main event";
 "events.section.info" = "Event info";
@@ -176,6 +185,7 @@
 "events.error.alreadyRegistered" = "You are already registered for this event.";
 "events.error.alreadyWaitlisted" = "You are already in the waiting list.";
 "events.error.notRegistered" = "You are not registered for this event.";
+"events.error.requestFailed" = "Unable to update the event right now. Please try again.";
 "events.status.confirmed" = "Status: Confirmed";
 "events.status.waitlisted" = "Status: In waiting list";
 "events.status.cancelled" = "Status: Cancelled";
