@@ -10,6 +10,7 @@ import SwiftUI
 // In-memory profile card data used by the demo swipe experience.
 private struct SwipeProfile: Identifiable {
     let id = UUID()
+    let remoteUserId: String?
     let name: String
     let age: Int
     let bio: String
@@ -28,6 +29,9 @@ struct SwipeHomeView: View {
     @State private var profiles: [SwipeProfile] = []
     @State private var dragOffset: CGSize = .zero
     @State private var isAnimatingDecision = false
+    @State private var isSubmittingSwipe = false
+    @State private var swipeErrorMessage: String?
+    @State private var selectedThread: ChatThread?
 
     var body: some View {
         NavigationStack {
@@ -43,7 +47,7 @@ struct SwipeHomeView: View {
                                 }
                                 .onEnded { value in
                                     if abs(value.translation.width) > 120 {
-                                        animateDecision(value.translation.width > 0 ? .right : .left)
+                                        commitDecision(value.translation.width > 0 ? .right : .left)
                                     } else {
                                         withAnimation(.spring()) {
                                             dragOffset = .zero
@@ -61,7 +65,7 @@ struct SwipeHomeView: View {
 
                 HStack(spacing: 20) {
                     Button {
-                        animateDecision(.left)
+                        commitDecision(.left)
                     } label: {
                         Image(systemName: "forward.fill")
                             .font(.title3.weight(.bold))
@@ -76,10 +80,10 @@ struct SwipeHomeView: View {
                             .shadow(color: controlShadow, radius: 10, y: 5)
                     }
                     .accessibilityLabel(L10n.tr("home.skip.accessibility"))
-                    .disabled(isAnimatingDecision || profiles.isEmpty)
+                    .disabled(isAnimatingDecision || isSubmittingSwipe || profiles.isEmpty)
 
                     Button {
-                        animateDecision(.right)
+                        commitDecision(.right)
                     } label: {
                         Image(systemName: "flame.fill")
                             .font(.title3.weight(.bold))
@@ -93,11 +97,21 @@ struct SwipeHomeView: View {
                             .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.20 : 0.14), radius: 12, y: 6)
                     }
                     .accessibilityLabel(L10n.tr("app.name"))
-                    .disabled(isAnimatingDecision || profiles.isEmpty)
+                    .disabled(isAnimatingDecision || isSubmittingSwipe || profiles.isEmpty)
+                }
+
+                if let swipeErrorMessage {
+                    Text(swipeErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding()
             .navigationTitle(L10n.tr("home.navigationTitle"))
+            .navigationDestination(item: $selectedThread) { thread in
+                ChatDetailView(thread: thread)
+            }
         }
         .task(id: discoverFilterID) {
             await loadProfiles()
@@ -136,9 +150,14 @@ struct SwipeHomeView: View {
         .shadow(color: cardSurfaceShadow, radius: colorScheme == .dark ? 16 : 12, y: colorScheme == .dark ? 8 : 5)
     }
 
-    private func animateDecision(_ direction: DecisionDirection) {
-        guard !profiles.isEmpty, !isAnimatingDecision else { return }
+    private func commitDecision(_ direction: DecisionDirection) {
+        guard let profile = profiles.first, !isAnimatingDecision, !isSubmittingSwipe else { return }
+        animateDecision(direction, for: profile)
+    }
+
+    private func animateDecision(_ direction: DecisionDirection, for profile: SwipeProfile) {
         isAnimatingDecision = true
+        swipeErrorMessage = nil
 
         // Push the top card out, then remove it from the stack.
         let targetX: CGFloat = direction == .left ? -180 : 180
@@ -147,9 +166,16 @@ struct SwipeHomeView: View {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            profiles.removeFirst()
+            if !profiles.isEmpty {
+                profiles.removeFirst()
+            }
             dragOffset = .zero
             isAnimatingDecision = false
+
+            // Keep the card interaction feeling immediate, then persist the decision in the background.
+            Task {
+                await submitDecision(direction, for: profile)
+            }
         }
     }
 
@@ -159,9 +185,49 @@ struct SwipeHomeView: View {
             let preferredAudience = store.currentUser?.showMe ?? .everyone
             profiles = dtos
                 .filter { preferredAudience.matches($0.gender) }
-                .map { SwipeProfile(name: $0.name, age: $0.age, bio: $0.bio) }
+                .map {
+                    SwipeProfile(
+                        remoteUserId: $0.remoteUserId,
+                        name: $0.name,
+                        age: $0.age,
+                        bio: $0.bio
+                    )
+                }
         } catch {
             profiles = []
+        }
+    }
+
+    @MainActor
+    private func submitDecision(_ direction: DecisionDirection, for profile: SwipeProfile) async {
+        guard let remoteUserId = profile.remoteUserId else { return }
+
+        isSubmittingSwipe = true
+        defer { isSubmittingSwipe = false }
+
+        do {
+            let decision: SwipeDecisionDTO = direction == .right ? .liked : .passed
+            let matchedThread = try await services.backend.submitSwipe(otherUserId: remoteUserId, decision: decision)
+
+            // A mutual like returns the already-created thread so we can jump straight into chat.
+            guard let dto = matchedThread else { return }
+
+            let displayName = dto.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || dto.name == "Match"
+                ? profile.name
+                : dto.name
+            selectedThread = ChatThread(
+                id: dto.id,
+                remoteId: dto.remoteId,
+                name: displayName,
+                avatar: dto.avatar,
+                isOnline: dto.isOnline,
+                messages: dto.messages.map {
+                    ChatMessage(id: $0.id, text: $0.text, isMe: $0.isMe, time: $0.time)
+                }
+            )
+            NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+        } catch {
+            swipeErrorMessage = L10n.tr("home.swipe.error")
         }
     }
 
