@@ -185,26 +185,46 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId) 
   const threadId = uniqueId();
   const permissions = participantPermissions([currentUserId, otherUserId]);
 
-  await createRow(config, config.threadsTableId, threadId, {
-    threadId,
-    createdByUserId: currentUserId,
-    subject: "Fyre match",
-    status: "active",
-    lastMessageText: null,
-    lastMessageAt: null
-  }, permissions);
+  try {
+    await createRow(config, config.threadsTableId, threadId, {
+      threadId,
+      createdByUserId: currentUserId,
+      subject: "Fyre match",
+      status: "active",
+      lastMessageText: null,
+      lastMessageAt: null
+    }, permissions);
+  } catch (err) {
+    throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
+  }
 
-  await createRow(config, config.threadParticipantsTableId, uniqueId(), {
-    threadId,
-    userId: currentUserId,
-    lastReadAt: null
-  }, permissions);
+  try {
+    await createRow(config, config.threadParticipantsTableId, uniqueId(), {
+      threadId,
+      userId: currentUserId,
+      role: "member",
+      lastReadAt: null,
+      muted: false,
+      pinned: false,
+      notificationsEnabled: true
+    }, permissions);
+  } catch (err) {
+    throw new Error(`Failed creating current-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+  }
 
-  await createRow(config, config.threadParticipantsTableId, uniqueId(), {
-    threadId,
-    userId: otherUserId,
-    lastReadAt: null
-  }, permissions);
+  try {
+    await createRow(config, config.threadParticipantsTableId, uniqueId(), {
+      threadId,
+      userId: otherUserId,
+      role: "member",
+      lastReadAt: null,
+      muted: false,
+      pinned: false,
+      notificationsEnabled: true
+    }, permissions);
+  } catch (err) {
+    throw new Error(`Failed creating other-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+  }
 
   return threadId;
 }

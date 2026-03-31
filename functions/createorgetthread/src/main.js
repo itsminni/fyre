@@ -17,26 +17,46 @@ export default async ({ req, res, error }) => {
     const threadId = uniqueId();
     const threadPermissions = participantPermissions([currentUserId, otherUserId]);
 
-    await createRow(config, config.threadsTableId, threadId, {
-      threadId,
-      createdByUserId: currentUserId,
-      subject: "Fyre match",
-      status: "active",
-      lastMessageText: null,
-      lastMessageAt: null
-    }, threadPermissions);
+    try {
+      await createRow(config, config.threadsTableId, threadId, {
+        threadId,
+        createdByUserId: currentUserId,
+        subject: "Fyre match",
+        status: "active",
+        lastMessageText: null,
+        lastMessageAt: null
+      }, threadPermissions);
+    } catch (err) {
+      throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
+    }
 
-    await createRow(config, config.threadParticipantsTableId, uniqueId(), {
-      threadId,
-      userId: currentUserId,
-      lastReadAt: null
-    }, threadPermissions);
+    try {
+      await createRow(config, config.threadParticipantsTableId, uniqueId(), {
+        threadId,
+        userId: currentUserId,
+        role: "member",
+        lastReadAt: null,
+        muted: false,
+        pinned: false,
+        notificationsEnabled: true
+      }, threadPermissions);
+    } catch (err) {
+      throw new Error(`Failed creating current-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+    }
 
-    await createRow(config, config.threadParticipantsTableId, uniqueId(), {
-      threadId,
-      userId: otherUserId,
-      lastReadAt: null
-    }, threadPermissions);
+    try {
+      await createRow(config, config.threadParticipantsTableId, uniqueId(), {
+        threadId,
+        userId: otherUserId,
+        role: "member",
+        lastReadAt: null,
+        muted: false,
+        pinned: false,
+        notificationsEnabled: true
+      }, threadPermissions);
+    } catch (err) {
+      throw new Error(`Failed creating other-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+    }
 
     return res.json({ threadId }, 200);
   } catch (err) {
