@@ -2,7 +2,7 @@ export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
     const body = parseBody(req);
-    const currentUserId = requiredHeader(req, "x-appwrite-user-id");
+    const currentUserId = resolveCurrentUserId(req, body);
     const otherUserId = asString(body.otherUserId);
     const decision = asDecision(body.decision);
 
@@ -136,6 +136,22 @@ function requiredHeader(req, name) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function resolveCurrentUserId(req, body) {
+  const headerValue = req.headers?.["x-appwrite-user-id"]
+    ?? req.headers?.["X-Appwrite-User-Id"]
+    ?? req.headers?.["X-APPWRITE-USER-ID"];
+  if (headerValue) {
+    return Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  }
+
+  const bodyValue = asString(body.currentUserId);
+  if (bodyValue) {
+    return bodyValue;
+  }
+
+  throw new Error("Missing current user id");
+}
+
 function resolveApiKey(req) {
   const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
   if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
@@ -171,6 +187,7 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId) 
 
   await createRow(config, config.threadsTableId, threadId, {
     threadId,
+    createdByUserId: currentUserId,
     lastMessageText: null,
     lastMessageAt: null
   }, permissions);

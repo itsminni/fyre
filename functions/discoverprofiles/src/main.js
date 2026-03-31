@@ -1,7 +1,8 @@
 export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
-    const currentUserId = requiredHeader(req, "x-appwrite-user-id");
+    const body = parseBody(req);
+    const currentUserId = resolveCurrentUserId(req, body);
 
     // Build a minimal discover payload server-side so the client does not need full profile read access.
     const [profiles, swipes, matches] = await Promise.all([
@@ -77,6 +78,38 @@ function requiredHeader(req, name) {
     throw new Error(`Missing header ${name}`);
   }
   return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveCurrentUserId(req, body) {
+  const headerValue = req.headers?.["x-appwrite-user-id"]
+    ?? req.headers?.["X-Appwrite-User-Id"]
+    ?? req.headers?.["X-APPWRITE-USER-ID"];
+  if (headerValue) {
+    return Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  }
+
+  const bodyValue = typeof body.currentUserId === "string" ? body.currentUserId.trim() : "";
+  if (bodyValue) {
+    return bodyValue;
+  }
+
+  throw new Error("Missing current user id");
+}
+
+function parseBody(req) {
+  if (req.bodyJson && typeof req.bodyJson === "object") {
+    return req.bodyJson;
+  }
+
+  if (!req.bodyText) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(req.bodyText);
+  } catch {
+    return {};
+  }
 }
 
 function resolveApiKey(req) {

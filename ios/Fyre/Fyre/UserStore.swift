@@ -670,7 +670,9 @@ final class UserStore: @unchecked Sendable {
         do {
             remoteMainEventState = try await appwriteService.fetchMainEventState(for: currentUser)
         } catch {
-            debugLog("Remote event refresh failed: \(String(describing: error))")
+            if !isCancelledNetworkError(error) {
+                debugLog("Remote event refresh failed: \(String(describing: error))")
+            }
         }
     }
 
@@ -1060,6 +1062,21 @@ final class UserStore: @unchecked Sendable {
     @MainActor
     private func eventRequestErrorMessage() -> String {
         L10n.tr("events.error.requestFailed")
+    }
+
+    private func isCancelledNetworkError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            return urlError.code == .cancelled
+        }
+
+        if let serviceError = error as? AppwriteServiceError,
+           case let .network(innerError) = serviceError,
+           let urlError = innerError as? URLError {
+            return urlError.code == .cancelled
+        }
+
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
     private func debugLog(_ message: String) {

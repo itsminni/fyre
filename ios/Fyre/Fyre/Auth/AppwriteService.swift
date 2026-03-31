@@ -10,6 +10,7 @@ struct MainEventRemoteState: Sendable {
 actor AppwriteService {
     private let configuration: AppwriteConfiguration
     private let session: URLSession
+    private var cachedFunctionJWT: (value: String, expiresAt: Date)?
 
     init(configuration: AppwriteConfiguration) {
         self.configuration = configuration
@@ -56,6 +57,7 @@ actor AppwriteService {
             expectedStatusCodes: [204]
         )
         clearCookies()
+        cachedFunctionJWT = nil
     }
 
     func updateProfile(for user: User) async throws -> User {
@@ -179,7 +181,7 @@ actor AppwriteService {
     }
 
     func createOrGetThread(otherUserId: String) async throws -> String {
-        let response = try await executeFunction(
+        let response = try await executeUserFunction(
             functionId: configuration.createOrGetThreadFunctionId,
             body: ["otherUserId": otherUserId]
         )
@@ -202,7 +204,7 @@ actor AppwriteService {
     func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
         // Prefer the server-side projection when available so discover can stay privacy-safe.
         if let functionId = configuration.discoverProfilesFunctionId {
-            let response = try await executeFunction(functionId: functionId, body: [:])
+            let response = try await executeUserFunction(functionId: functionId, body: [:])
             if let profiles = response["profiles"] as? [[String: Any]] {
                 let mappedProfiles = profiles.compactMap(makeDiscoverProfileDTO(from:))
                 return mappedProfiles
@@ -264,7 +266,7 @@ actor AppwriteService {
             throw AppwriteServiceError.api(statusCode: 400, message: "chat.error.sendFailed", type: "validation")
         }
 
-        let response = try await executeFunction(
+        let response = try await executeUserFunction(
             functionId: configuration.sendMessageFunctionId,
             body: [
                 "threadId": threadId,
@@ -290,7 +292,7 @@ actor AppwriteService {
         }
 
         // The backend owns match detection so two clients can't create duplicate chats on race conditions.
-        let response = try await executeFunction(
+        let response = try await executeUserFunction(
             functionId: functionId,
             body: [
                 "otherUserId": otherUserId,
@@ -656,6 +658,19 @@ actor AppwriteService {
         return accountId
     }
 
+    private func executeUserFunction(functionId: String, body: [String: Any]) async throws -> [String: Any] {
+        var payload = body
+        if payload["currentUserId"] == nil,
+           let currentUserId = try await fetchCurrentAccountId(required: true) {
+            payload["currentUserId"] = currentUserId
+        }
+
+        if let response = try await executeFunctionDirectly(functionId: functionId, body: payload) {
+            return response
+        }
+        return try await executeFunction(functionId: functionId, body: payload)
+    }
+
     private func executeFunction(functionId: String, body: [String: Any]) async throws -> [String: Any] {
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let bodyString = String(decoding: bodyData, as: UTF8.self)
@@ -681,6 +696,75 @@ actor AppwriteService {
         }
 
         return try await waitForExecution(functionId: functionId, executionId: executionId)
+    }
+
+    private func executeFunctionDirectly(functionId: String, body: [String: Any]) async throws -> [String: Any]? {
+        guard let directURL = generatedFunctionURL(functionId: functionId) else {
+            return nil
+        }
+
+        let jwt = try await fetchFunctionJWT()
+        var request = URLRequest(url: directURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(configuration.projectId, forHTTPHeaderField: "X-Appwrite-Project")
+        request.setValue(jwt, forHTTPHeaderField: "X-Appwrite-User-JWT")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw AppwriteServiceError.invalidResponse
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                throw makeAPIError(from: data, statusCode: httpResponse.statusCode)
+            }
+
+            if data.isEmpty {
+                return [:]
+            }
+
+            return try decodeJSONObject(from: data)
+        } catch let error as AppwriteServiceError {
+            throw error
+        } catch {
+            throw AppwriteServiceError.network(error)
+        }
+    }
+
+    private func fetchFunctionJWT() async throws -> String {
+        if let cachedFunctionJWT, cachedFunctionJWT.expiresAt > Date() {
+            return cachedFunctionJWT.value
+        }
+
+        let response = try await sendJSONObjectRequest(
+            method: "POST",
+            pathComponents: ["account", "jwts"],
+            jsonBody: [
+                "duration": 900
+            ],
+            expectedStatusCodes: [201]
+        )
+
+        guard let jwt = stringValue(forKey: "jwt", in: response) else {
+            throw AppwriteServiceError.invalidResponse
+        }
+
+        let expiresAt = Date().addingTimeInterval(14 * 60)
+        cachedFunctionJWT = (value: jwt, expiresAt: expiresAt)
+        return jwt
+    }
+
+    private func generatedFunctionURL(functionId: String) -> URL? {
+        guard let host = configuration.endpointURL.host else { return nil }
+        let segments = host.split(separator: ".")
+        guard segments.count >= 4, segments[1] == "cloud", segments[2] == "appwrite", segments[3] == "io" else {
+            return nil
+        }
+
+        let region = String(segments[0])
+        return URL(string: "https://\(functionId).\(region).appwrite.run")
     }
 
     private func waitForExecution(functionId: String, executionId: String) async throws -> [String: Any] {
@@ -1191,6 +1275,7 @@ actor AppwriteService {
     }
 
     private func clearCookies() {
+        cachedFunctionJWT = nil
         guard let host = configuration.endpointURL.host,
               let cookies = HTTPCookieStorage.shared.cookies else { return }
 
