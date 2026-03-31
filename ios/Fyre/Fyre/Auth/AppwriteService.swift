@@ -665,9 +665,13 @@ actor AppwriteService {
             payload["currentUserId"] = currentUserId
         }
 
-        if let response = try await executeFunctionDirectly(functionId: functionId, body: payload) {
+        if let response = try await executeFunctionDirectly(functionId: functionId, body: payload),
+           !response.isEmpty {
             return response
         }
+#if DEBUG
+        debugPrint("Direct function invoke returned no JSON payload for \(functionId). Falling back to execution polling.")
+#endif
         return try await executeFunction(functionId: functionId, body: payload)
     }
 
@@ -700,6 +704,9 @@ actor AppwriteService {
 
     private func executeFunctionDirectly(functionId: String, body: [String: Any]) async throws -> [String: Any]? {
         guard let directURL = generatedFunctionURL(functionId: functionId) else {
+#if DEBUG
+            debugPrint("Unable to derive generated Appwrite function URL for \(functionId) from endpoint \(configuration.endpointURL.absoluteString)")
+#endif
             return nil
         }
 
@@ -707,8 +714,8 @@ actor AppwriteService {
         var request = URLRequest(url: directURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(configuration.projectId, forHTTPHeaderField: "X-Appwrite-Project")
-        request.setValue(jwt, forHTTPHeaderField: "X-Appwrite-User-JWT")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(jwt, forHTTPHeaderField: "x-appwrite-user-jwt")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         do {
@@ -718,17 +725,31 @@ actor AppwriteService {
             }
 
             guard (200..<300).contains(httpResponse.statusCode) else {
+#if DEBUG
+                let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+                debugPrint("Direct function invoke failed for \(functionId) @ \(directURL.absoluteString) status=\(httpResponse.statusCode) body=\(rawBody)")
+#endif
                 throw makeAPIError(from: data, statusCode: httpResponse.statusCode)
             }
 
             if data.isEmpty {
+#if DEBUG
+                debugPrint("Direct function invoke returned empty body for \(functionId) @ \(directURL.absoluteString)")
+#endif
                 return [:]
             }
 
+#if DEBUG
+            let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+            debugPrint("Direct function invoke succeeded for \(functionId) @ \(directURL.absoluteString) body=\(rawBody)")
+#endif
             return try decodeJSONObject(from: data)
         } catch let error as AppwriteServiceError {
             throw error
         } catch {
+#if DEBUG
+            debugPrint("Direct function invoke network error for \(functionId) @ \(directURL.absoluteString): \(error.localizedDescription)")
+#endif
             throw AppwriteServiceError.network(error)
         }
     }
@@ -757,6 +778,10 @@ actor AppwriteService {
     }
 
     private func generatedFunctionURL(functionId: String) -> URL? {
+        if let configuredURL = configuredFunctionURL(functionId: functionId) {
+            return configuredURL
+        }
+
         guard let host = configuration.endpointURL.host else { return nil }
         let segments = host.split(separator: ".")
         guard segments.count >= 4, segments[1] == "cloud", segments[2] == "appwrite", segments[3] == "io" else {
@@ -764,7 +789,41 @@ actor AppwriteService {
         }
 
         let region = String(segments[0])
-        return URL(string: "https://\(functionId).\(region).appwrite.run")
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "\(functionId).\(region).appwrite.run"
+        // Appwrite Functions domains default to the "empty" response type unless type=json is requested.
+        components.queryItems = [
+            URLQueryItem(name: "type", value: "json")
+        ]
+        return components.url
+    }
+
+    private func configuredFunctionURL(functionId: String) -> URL? {
+        let configuredURL: URL?
+
+        if configuration.discoverProfilesFunctionId == functionId {
+            configuredURL = configuration.discoverProfilesFunctionDomain
+        } else if configuration.recordSwipeFunctionId == functionId {
+            configuredURL = configuration.recordSwipeFunctionDomain
+        } else if configuration.createOrGetThreadFunctionId == functionId {
+            configuredURL = configuration.createOrGetThreadFunctionDomain
+        } else if configuration.sendMessageFunctionId == functionId {
+            configuredURL = configuration.sendMessageFunctionDomain
+        } else {
+            configuredURL = nil
+        }
+
+        guard var components = configuredURL.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else {
+            return nil
+        }
+
+        var queryItems = components.queryItems ?? []
+        if !queryItems.contains(where: { $0.name == "type" }) {
+            queryItems.append(URLQueryItem(name: "type", value: "json"))
+        }
+        components.queryItems = queryItems
+        return components.url
     }
 
     private func waitForExecution(functionId: String, executionId: String) async throws -> [String: Any] {
@@ -1430,5 +1489,24 @@ enum AppwriteServiceError: Error, @unchecked Sendable {
 
     var isUnauthorized: Bool {
         statusCode == 401
+    }
+}
+
+extension AppwriteServiceError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case let .api(statusCode, message, type):
+            return "Appwrite API error \(statusCode) (\(type ?? "unknown")): \(message ?? "No message")"
+        case .invalidResponse:
+            return "Invalid response from Appwrite."
+        case let .decoding(error):
+            return "Failed to decode Appwrite response: \(error.localizedDescription)"
+        case let .network(error):
+            return "Network error while talking to Appwrite: \(error.localizedDescription)"
+        case .missingAccountId:
+            return "Missing current Appwrite account id."
+        case let .missingConfiguration(key):
+            return "Missing Appwrite configuration: \(key)"
+        }
     }
 }

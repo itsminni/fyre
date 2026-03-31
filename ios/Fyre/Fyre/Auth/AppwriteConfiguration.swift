@@ -18,6 +18,10 @@ struct AppwriteConfiguration: Sendable {
     let sendMessageFunctionId: String
     let recordSwipeFunctionId: String?
     let discoverProfilesFunctionId: String?
+    let createOrGetThreadFunctionDomain: URL?
+    let sendMessageFunctionDomain: URL?
+    let recordSwipeFunctionDomain: URL?
+    let discoverProfilesFunctionDomain: URL?
     let endpointURL: URL
 
     static func load(bundle: Bundle = .main) throws -> AppwriteConfiguration {
@@ -50,6 +54,10 @@ struct AppwriteConfiguration: Sendable {
         let sendMessageFunctionId = try stringValue(forKey: "APPWRITE_SEND_MESSAGE_FUNCTION_ID", in: dictionary)
         let recordSwipeFunctionId = optionalStringValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_ID", in: dictionary)
         let discoverProfilesFunctionId = optionalStringValue(forKey: "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID", in: dictionary)
+        let createOrGetThreadFunctionDomain = try optionalURLValue(forKey: "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_DOMAIN", in: dictionary)
+        let sendMessageFunctionDomain = try optionalURLValue(forKey: "APPWRITE_SEND_MESSAGE_FUNCTION_DOMAIN", in: dictionary)
+        let recordSwipeFunctionDomain = try optionalURLValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_DOMAIN", in: dictionary)
+        let discoverProfilesFunctionDomain = try optionalURLValue(forKey: "APPWRITE_DISCOVER_PROFILES_FUNCTION_DOMAIN", in: dictionary)
 
         guard let endpointURL = URL(string: publicEndpoint) else {
             throw AppwriteConfigurationError.invalidEndpoint(publicEndpoint)
@@ -74,6 +82,10 @@ struct AppwriteConfiguration: Sendable {
             sendMessageFunctionId: sendMessageFunctionId,
             recordSwipeFunctionId: recordSwipeFunctionId,
             discoverProfilesFunctionId: discoverProfilesFunctionId,
+            createOrGetThreadFunctionDomain: createOrGetThreadFunctionDomain,
+            sendMessageFunctionDomain: sendMessageFunctionDomain,
+            recordSwipeFunctionDomain: recordSwipeFunctionDomain,
+            discoverProfilesFunctionDomain: discoverProfilesFunctionDomain,
             endpointURL: endpointURL
         )
     }
@@ -98,6 +110,19 @@ struct AppwriteConfiguration: Sendable {
 
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
+    }
+
+    private static func optionalURLValue(forKey key: String, in dictionary: [String: Any]) throws -> URL? {
+        guard let value = optionalStringValue(forKey: key, in: dictionary) else {
+            return nil
+        }
+
+        let normalizedValue = value.contains("://") ? value : "https://\(value)"
+        guard let url = URL(string: normalizedValue) else {
+            throw AppwriteConfigurationError.invalidEndpoint(normalizedValue)
+        }
+
+        return url
     }
 }
 

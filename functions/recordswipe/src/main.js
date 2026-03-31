@@ -188,6 +188,8 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId) 
   await createRow(config, config.threadsTableId, threadId, {
     threadId,
     createdByUserId: currentUserId,
+    subject: "Fyre match",
+    status: "active",
     lastMessageText: null,
     lastMessageAt: null
   }, permissions);

@@ -236,7 +236,11 @@ struct SwipeHomeView: View {
             )
             NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
         } catch {
+#if DEBUG
+            swipeErrorMessage = error.localizedDescription
+#else
             swipeErrorMessage = L10n.tr("home.swipe.error")
+#endif
         }
     }
 
