@@ -4,6 +4,7 @@ export default async ({ req, res, error }) => {
     const body = parseBody(req);
     const currentUserId = resolveCurrentUserId(req, body);
     const otherUserId = asString(body.otherUserId);
+    const otherUserName = asString(body.otherUserName);
 
     if (!otherUserId || otherUserId === currentUserId) {
       return res.json({ message: "Invalid participant" }, 400);
@@ -11,6 +12,13 @@ export default async ({ req, res, error }) => {
 
     const existingThreadId = await findExistingThreadIdByParticipants(config, currentUserId, otherUserId);
     if (existingThreadId) {
+      await maybeRefreshThreadSubject(
+        config,
+        existingThreadId,
+        currentUserId,
+        otherUserName,
+        participantPermissions([currentUserId, otherUserId])
+      );
       return res.json({ threadId: existingThreadId }, 200);
     }
 
@@ -21,7 +29,7 @@ export default async ({ req, res, error }) => {
       await createRow(config, config.threadsTableId, threadId, {
         threadId,
         createdByUserId: currentUserId,
-        subject: "Fyre match",
+        subject: otherUserName ?? "Fyre match",
         status: "active",
         lastMessageText: null,
         lastMessageAt: null
@@ -193,6 +201,40 @@ async function createRow(config, tableId, rowId, data, permissions) {
     data,
     permissions
   });
+}
+
+async function updateRow(config, tableId, rowId, data, permissions) {
+  return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
+    data,
+    permissions
+  });
+}
+
+async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions) {
+  const subject = asString(otherUserName);
+  if (!subject) {
+    return;
+  }
+
+  try {
+    const threadRow = await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${config.threadsTableId}/rows/${threadId}`);
+    const currentSubject = asString(threadRow.subject);
+
+    if (currentSubject && currentSubject !== "Match" && currentSubject !== "Fyre match") {
+      return;
+    }
+
+    await updateRow(config, config.threadsTableId, threadId, {
+      threadId,
+      createdByUserId: threadRow.createdByUserId ?? currentUserId,
+      subject,
+      status: threadRow.status ?? "active",
+      lastMessageText: threadRow.lastMessageText ?? null,
+      lastMessageAt: threadRow.lastMessageAt ?? null
+    }, permissions);
+  } catch {
+    // Best-effort subject repair only; do not fail thread creation because of a cosmetic label.
+  }
 }
 
 async function request(config, method, path, body, queries = []) {

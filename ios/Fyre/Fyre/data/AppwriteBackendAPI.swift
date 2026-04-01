@@ -23,6 +23,10 @@ struct AppwriteBackendAPI: BackendAPI {
         try await service.fetchThreads()
     }
 
+    func fetchThread(threadId: String) async throws -> ThreadDTO? {
+        try await service.fetchThreadDTO(threadId: threadId)
+    }
+
     func createOrGetThread(otherUserId: String) async throws -> ThreadDTO {
         // Thread creation stays strict so a real match never lands in a mock conversation by mistake.
         try await service.createOrGetThreadDTO(otherUserId: otherUserId)
@@ -32,7 +36,7 @@ struct AppwriteBackendAPI: BackendAPI {
         try await service.sendMessage(threadId: threadId, text: text)
     }
 
-    func submitSwipe(otherUserId: String, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
-        try await service.submitSwipe(otherUserId: otherUserId, decision: decision)
+    func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
+        try await service.submitSwipe(otherUserId: otherUserId, otherUserName: otherUserName, decision: decision)
     }
 }

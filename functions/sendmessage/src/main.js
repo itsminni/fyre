@@ -23,26 +23,47 @@ export default async ({ req, res, error }) => {
 
     const now = new Date().toISOString();
     const messageId = uniqueId();
-    await createRow(config, config.messagesTableId, messageId, {
-      threadId,
-      senderUserId: currentUserId,
-      text,
-      createdAt: now
-    }, participantIds.map((userId) => `read("user:${userId}")`));
+    try {
+      await createRow(config, config.messagesTableId, messageId, {
+        threadId,
+        senderUserId: currentUserId,
+        text,
+        createdAt: now
+      }, participantIds.map((userId) => `read("user:${userId}")`));
+    } catch (err) {
+      throw new Error(`Failed creating row in ${config.messagesTableId}: ${err?.message ?? err}`);
+    }
 
     // Update the thread preview immediately so inbox ordering stays in sync with the latest message.
-    await updateRow(config, config.threadsTableId, threadId, {
-      lastMessageText: text,
-      lastMessageAt: now
-    });
+    try {
+      const threadRow = await getRow(config, config.threadsTableId, threadId);
+      await updateRow(config, config.threadsTableId, threadId, {
+        threadId,
+        createdByUserId: threadRow?.createdByUserId ?? currentUserId,
+        subject: threadRow?.subject ?? null,
+        status: threadRow?.status ?? "active",
+        lastMessageText: text,
+        lastMessageAt: now
+      });
+    } catch (err) {
+      throw new Error(`Failed updating row in ${config.threadsTableId}: ${err?.message ?? err}`);
+    }
 
     const currentParticipant = participantRows.find((row) => row.userId === currentUserId);
     if (currentParticipant?.$id) {
-      await updateRow(config, config.threadParticipantsTableId, currentParticipant.$id, {
-        threadId,
-        userId: currentUserId,
-        lastReadAt: now
-      });
+      try {
+        await updateRow(config, config.threadParticipantsTableId, currentParticipant.$id, {
+          threadId,
+          userId: currentUserId,
+          role: currentParticipant.role ?? "member",
+          lastReadAt: now,
+          muted: currentParticipant.muted ?? false,
+          pinned: currentParticipant.pinned ?? false,
+          notificationsEnabled: currentParticipant.notificationsEnabled ?? true
+        });
+      } catch (err) {
+        throw new Error(`Failed updating current-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+      }
     }
 
     return res.json({ messageId, text, createdAt: now }, 200);
@@ -137,6 +158,10 @@ async function createRow(config, tableId, rowId, data, permissions) {
     data,
     permissions
   });
+}
+
+async function getRow(config, tableId, rowId) {
+  return request(config, "GET", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`);
 }
 
 async function updateRow(config, tableId, rowId, data) {

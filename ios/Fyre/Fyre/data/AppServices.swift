@@ -46,6 +46,11 @@ private struct UnavailableBackendAPI: BackendAPI {
         throw APIError.configuration(reason)
     }
 
+    func fetchThread(threadId: String) async throws -> ThreadDTO? {
+        _ = threadId
+        throw APIError.configuration(reason)
+    }
+
     func createOrGetThread(otherUserId: String) async throws -> ThreadDTO {
         _ = otherUserId
         throw APIError.configuration(reason)
@@ -57,8 +62,9 @@ private struct UnavailableBackendAPI: BackendAPI {
         throw APIError.configuration(reason)
     }
 
-    func submitSwipe(otherUserId: String, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
+    func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
         _ = otherUserId
+        _ = otherUserName
         _ = decision
         throw APIError.configuration(reason)
     }

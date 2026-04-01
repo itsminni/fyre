@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import Combine
 
 // Simple chat models used only for the UI layer in this test
 struct ChatMessage: Identifiable, Hashable {
@@ -36,10 +37,12 @@ struct ChatThread: Identifiable, Hashable {
 struct MessagesView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isVisible = false
     // Local UI state for the list of threads
     @State private var threads: [ChatThread] = []
     @State private var threadPendingDeletion: ChatThread?
     @State private var reloadToken = UUID()
+    private let refreshTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
@@ -98,6 +101,18 @@ struct MessagesView: View {
         .refreshable {
             await loadThreads()
         }
+        .onAppear {
+            isVisible = true
+        }
+        .onDisappear {
+            isVisible = false
+        }
+        .onReceive(refreshTimer) { _ in
+            guard isVisible else { return }
+            Task {
+                await loadThreads()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .fyreThreadsDidChange)) { _ in
             // Swipe matches and chat sends publish this signal so the inbox can refresh lazily.
             reloadToken = UUID()
@@ -107,11 +122,21 @@ struct MessagesView: View {
     private func loadThreads() async {
         do {
             let dtos = try await services.backend.fetchThreads()
+            let existingNames = Dictionary(uniqueKeysWithValues: threads.map { ($0.remoteId, $0.name) })
             threads = dtos.map { dto in
+                let resolvedName: String
+                if isPlaceholderThreadName(dto.name),
+                   let cachedName = existingNames[dto.remoteId],
+                   !isPlaceholderThreadName(cachedName) {
+                    resolvedName = cachedName
+                } else {
+                    resolvedName = dto.name
+                }
+
                 ChatThread(
                     id: dto.id,
                     remoteId: dto.remoteId,
-                    name: dto.name,
+                    name: resolvedName,
                     avatar: dto.avatar,
                     isOnline: dto.isOnline,
                     messages: dto.messages.map {
@@ -122,6 +147,11 @@ struct MessagesView: View {
         } catch {
             threads = []
         }
+    }
+
+    private func isPlaceholderThreadName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == "Match" || trimmed == "Fyre match"
     }
 
     private func deleteThread(_ thread: ChatThread) {

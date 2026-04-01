@@ -68,9 +68,10 @@ extension APIError: LocalizedError {
 protocol BackendAPI: Sendable {
     func fetchDiscoverProfiles() async throws -> [ProfileDTO]
     func fetchThreads() async throws -> [ThreadDTO]
+    func fetchThread(threadId: String) async throws -> ThreadDTO?
     func createOrGetThread(otherUserId: String) async throws -> ThreadDTO
     func sendMessage(threadId: String, text: String) async throws -> MessageDTO
-    func submitSwipe(otherUserId: String, decision: SwipeDecisionDTO) async throws -> ThreadDTO?
+    func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO?
 }
 
 extension Notification.Name {

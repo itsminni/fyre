@@ -201,6 +201,10 @@ actor AppwriteService {
         return thread
     }
 
+    func fetchThreadDTO(threadId: String) async throws -> ThreadDTO? {
+        try await fetchThread(threadId: threadId)
+    }
+
     func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
         // Prefer the server-side projection when available so discover can stay privacy-safe.
         if let functionId = configuration.discoverProfilesFunctionId {
@@ -286,18 +290,23 @@ actor AppwriteService {
         )
     }
 
-    func submitSwipe(otherUserId: String, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
+    func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
         guard let functionId = configuration.recordSwipeFunctionId else {
             throw AppwriteServiceError.missingConfiguration("APPWRITE_RECORD_SWIPE_FUNCTION_ID")
         }
 
         // The backend owns match detection so two clients can't create duplicate chats on race conditions.
+        var payload: [String: Any] = [
+            "otherUserId": otherUserId,
+            "decision": decision.rawValue
+        ]
+        if let otherUserName, !otherUserName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["otherUserName"] = otherUserName
+        }
+
         let response = try await executeUserFunction(
             functionId: functionId,
-            body: [
-                "otherUserId": otherUserId,
-                "decision": decision.rawValue
-            ]
+            body: payload
         )
 
         let isMatch = boolValue(forKey: "matched", in: response) ?? false
@@ -349,7 +358,10 @@ actor AppwriteService {
             makeMessageDTO(from: row, currentAccountId: resolvedCurrentAccountId)
         }
 
-        let threadName = displayName(from: profileRow)
+        let threadName = displayName(
+            from: profileRow,
+            fallback: stringValue(forKey: "subject", in: threadRow)
+        )
         let lastMessageAt = dateValue(forKey: "lastMessageAt", in: threadRow)
             ?? messageRows.compactMap { dateValue(forKey: "createdAt", in: $0) }.last
             ?? .distantPast
@@ -477,7 +489,23 @@ actor AppwriteService {
     private func fetchProfileRow(id rowId: String) async throws -> [String: Any]? {
         guard !rowId.isEmpty else { return nil }
 
-        return try await fetchRowIfAccessible(tableId: configuration.profilesTableId, rowId: rowId)
+        if let row = try await fetchRowIfAccessible(tableId: configuration.profilesTableId, rowId: rowId) {
+            return row
+        }
+
+        do {
+            let rows = try await listRows(
+                tableId: configuration.profilesTableId,
+                queries: [
+                    AppwriteQuery.equal("userId", values: [rowId])
+                ]
+            )
+
+            return rows.first
+        } catch let error as AppwriteServiceError
+            where error.statusCode == 401 || error.statusCode == 403 || error.statusCode == 404 {
+            return nil
+        }
     }
 
     private func fetchRowIfAccessible(tableId: String, rowId: String) async throws -> [String: Any]? {
@@ -1146,7 +1174,7 @@ actor AppwriteService {
         )
     }
 
-    private func displayName(from profileRow: [String: Any]?) -> String {
+    private func displayName(from profileRow: [String: Any]?, fallback: String? = nil) -> String {
         let firstName = stringValue(forKey: "firstName", in: profileRow) ?? ""
         let lastName = stringValue(forKey: "lastName", in: profileRow) ?? ""
         let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1159,6 +1187,13 @@ actor AppwriteService {
            let localPart = email.split(separator: "@").first,
            !localPart.isEmpty {
             return String(localPart)
+        }
+
+        if let fallback {
+            let trimmedFallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedFallback.isEmpty, trimmedFallback != "Fyre match" {
+                return trimmedFallback
+            }
         }
 
         return "Match"

@@ -4,6 +4,7 @@ export default async ({ req, res, error }) => {
     const body = parseBody(req);
     const currentUserId = resolveCurrentUserId(req, body);
     const otherUserId = asString(body.otherUserId);
+    const otherUserName = asString(body.otherUserName);
     const decision = asDecision(body.decision);
 
     if (!otherUserId || otherUserId === currentUserId || !decision) {
@@ -48,12 +49,14 @@ export default async ({ req, res, error }) => {
 
     const userIds = [currentUserId, otherUserId].sort();
     const matchKey = userIds.join(":");
+    const permissions = participantPermissions(userIds);
     const existingMatch = await findSingleRow(config, config.matchesTableId, [
       equal("matchKey", [matchKey]),
       limit(1)
     ]);
 
     if (existingMatch?.threadId) {
+      await maybeRefreshThreadSubject(config, existingMatch.threadId, currentUserId, otherUserName, permissions);
       return res.json({
         matched: true,
         matchId: existingMatch.$id,
@@ -61,8 +64,7 @@ export default async ({ req, res, error }) => {
       }, 200);
     }
 
-    const threadId = await createThreadWithParticipants(config, currentUserId, otherUserId);
-    const permissions = participantPermissions(userIds);
+    const threadId = await createThreadWithParticipants(config, currentUserId, otherUserId, otherUserName);
 
     if (existingMatch?.$id) {
       await updateRow(config, config.matchesTableId, existingMatch.$id, {
@@ -176,9 +178,16 @@ function swipePermissions(userId) {
   ];
 }
 
-async function createThreadWithParticipants(config, currentUserId, otherUserId) {
+async function createThreadWithParticipants(config, currentUserId, otherUserId, otherUserName) {
   const existingThreadId = await findExistingThreadIdByParticipants(config, currentUserId, otherUserId);
   if (existingThreadId) {
+    await maybeRefreshThreadSubject(
+      config,
+      existingThreadId,
+      currentUserId,
+      otherUserName,
+      participantPermissions([currentUserId, otherUserId])
+    );
     return existingThreadId;
   }
 
@@ -189,7 +198,7 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId) 
     await createRow(config, config.threadsTableId, threadId, {
       threadId,
       createdByUserId: currentUserId,
-      subject: "Fyre match",
+      subject: otherUserName ?? "Fyre match",
       status: "active",
       lastMessageText: null,
       lastMessageAt: null
@@ -227,6 +236,33 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId) 
   }
 
   return threadId;
+}
+
+async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions) {
+  const subject = asString(otherUserName);
+  if (!subject) {
+    return;
+  }
+
+  try {
+    const threadRow = await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${config.threadsTableId}/rows/${threadId}`);
+    const currentSubject = asString(threadRow.subject);
+
+    if (currentSubject && currentSubject !== "Match" && currentSubject !== "Fyre match") {
+      return;
+    }
+
+    await updateRow(config, config.threadsTableId, threadId, {
+      threadId,
+      createdByUserId: threadRow.createdByUserId ?? currentUserId,
+      subject,
+      status: threadRow.status ?? "active",
+      lastMessageText: threadRow.lastMessageText ?? null,
+      lastMessageAt: threadRow.lastMessageAt ?? null
+    }, permissions);
+  } catch {
+    // Best-effort subject repair only; do not fail a valid match because of a cosmetic label.
+  }
 }
 
 async function findSingleRow(config, tableId, queries) {

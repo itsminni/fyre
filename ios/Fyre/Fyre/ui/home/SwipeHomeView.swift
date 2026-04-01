@@ -216,7 +216,11 @@ struct SwipeHomeView: View {
 
         do {
             let decision: SwipeDecisionDTO = direction == .right ? .liked : .passed
-            let matchedThread = try await services.backend.submitSwipe(otherUserId: remoteUserId, decision: decision)
+            let matchedThread = try await services.backend.submitSwipe(
+                otherUserId: remoteUserId,
+                otherUserName: profile.name,
+                decision: decision
+            )
 
             // A mutual like returns the already-created thread so we can jump straight into chat.
             guard let dto = matchedThread else { return }
