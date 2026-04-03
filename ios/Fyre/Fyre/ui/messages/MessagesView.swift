@@ -7,7 +7,6 @@
 
 import SwiftUI
 import UIKit
-import Combine
 
 // Simple chat models used only for the UI layer in this test
 struct ChatMessage: Identifiable, Hashable {
@@ -37,12 +36,12 @@ struct ChatThread: Identifiable, Hashable {
 struct MessagesView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isVisible = false
     // Local UI state for the list of threads
     @State private var threads: [ChatThread] = []
     @State private var threadPendingDeletion: ChatThread?
     @State private var reloadToken = UUID()
-    private let refreshTimer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
+    @State private var realtimeSubscription: AppwriteRealtimeSubscription?
+    @State private var realtimeReloadTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -102,16 +101,10 @@ struct MessagesView: View {
             await loadThreads()
         }
         .onAppear {
-            isVisible = true
+            startRealtime()
         }
         .onDisappear {
-            isVisible = false
-        }
-        .onReceive(refreshTimer) { _ in
-            guard isVisible else { return }
-            Task {
-                await loadThreads()
-            }
+            stopRealtime()
         }
         .onReceive(NotificationCenter.default.publisher(for: .fyreThreadsDidChange)) { _ in
             // Swipe matches and chat sends publish this signal so the inbox can refresh lazily.
@@ -133,7 +126,7 @@ struct MessagesView: View {
                     resolvedName = dto.name
                 }
 
-                ChatThread(
+                return ChatThread(
                     id: dto.id,
                     remoteId: dto.remoteId,
                     name: resolvedName,
@@ -145,7 +138,9 @@ struct MessagesView: View {
                 )
             }
         } catch {
-            threads = []
+#if DEBUG
+            debugPrint("Inbox refresh failed: \(error.localizedDescription)")
+#endif
         }
     }
 
@@ -160,6 +155,37 @@ struct MessagesView: View {
 
     private var separatorTint: Color {
         colorScheme == .dark ? .white.opacity(0.14) : .black.opacity(0.10)
+    }
+
+    private func startRealtime() {
+        guard realtimeSubscription == nil else { return }
+
+        realtimeSubscription = AppwriteRealtimeService.makeInboxSubscription(
+            onChange: {
+                scheduleRealtimeReload()
+            },
+            onError: { error in
+#if DEBUG
+                debugPrint("Inbox realtime error: \(error.localizedDescription)")
+#endif
+            }
+        )
+    }
+
+    private func stopRealtime() {
+        realtimeReloadTask?.cancel()
+        realtimeReloadTask = nil
+        realtimeSubscription?.cancel()
+        realtimeSubscription = nil
+    }
+
+    private func scheduleRealtimeReload() {
+        realtimeReloadTask?.cancel()
+        realtimeReloadTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            await loadThreads()
+        }
     }
 }
 

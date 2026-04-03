@@ -7,7 +7,6 @@
 
 import SwiftUI
 import UIKit
-import Combine
 
 struct ChatDetailView: View {
     @Environment(AppServices.self) private var services
@@ -20,8 +19,9 @@ struct ChatDetailView: View {
     @State private var draft = ""
     @State private var sendErrorMessage: String?
     @State private var isSending = false
+    @State private var realtimeSubscription: AppwriteRealtimeSubscription?
+    @State private var realtimeReloadTask: Task<Void, Never>?
     @FocusState private var isInputFocused: Bool
-    private let refreshTimer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     init(thread: ChatThread) {
         self.thread = thread
@@ -103,24 +103,15 @@ struct ChatDetailView: View {
                         .padding(.vertical, 12)
                         .background(composerFieldChrome)
 
-                    Button(action: sendMessage) {
-                        ZStack {
-                            Circle()
-                                .fill(canSendMessage ? Color.accentColor : Color(uiColor: .tertiarySystemFill))
-
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(canSendMessage ? Color.white : Color.secondary)
-                        }
-                        .frame(width: 38, height: 38)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canSendMessage)
+                    LiquidStretchSendButton(
+                        isEnabled: canSendMessage,
+                        action: sendMessage
+                    )
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
             .background(composerChrome)
         }
         .navigationTitle("")
@@ -143,11 +134,10 @@ struct ChatDetailView: View {
         }
         .task {
             await reloadThread()
+            startRealtime()
         }
-        .onReceive(refreshTimer) { _ in
-            Task {
-                await reloadThread()
-            }
+        .onDisappear {
+            stopRealtime()
         }
     }
 
@@ -198,26 +188,21 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private var composerChrome: some View {
-        if #available(iOS 26.0, *) {
-            Color.clear
-                .glassEffect(.regular, in: Rectangle())
-                .overlay(alignment: .top) {
-                    Divider()
-                }
-        } else {
-            Color(uiColor: .systemBackground)
-                .overlay(alignment: .top) {
-                    Divider()
-                }
-        }
+        Color(uiColor: .systemBackground)
+            .overlay(alignment: .top) {
+                Divider()
+            }
     }
 
     @ViewBuilder
     private var composerFieldChrome: some View {
         if #available(iOS 26.0, *) {
             Capsule(style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular, in: Capsule(style: .continuous))
+                .fill(Color(uiColor: .secondarySystemBackground))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(colorScheme == .dark ? 0.12 : 0.30), lineWidth: 1)
+                )
         } else {
             Capsule(style: .continuous)
                 .fill(Color(uiColor: .secondarySystemFill))
@@ -302,6 +287,39 @@ struct ChatDetailView: View {
 #if DEBUG
             debugPrint("Chat refresh failed for \(thread.remoteId): \(error.localizedDescription)")
 #endif
+        }
+    }
+
+    private func startRealtime() {
+        guard realtimeSubscription == nil else { return }
+
+        realtimeSubscription = AppwriteRealtimeService.makeChatSubscription(
+            threadId: thread.remoteId,
+            onChange: {
+                NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                scheduleRealtimeReload()
+            },
+            onError: { error in
+#if DEBUG
+                debugPrint("Chat realtime error for \(thread.remoteId): \(error.localizedDescription)")
+#endif
+            }
+        )
+    }
+
+    private func stopRealtime() {
+        realtimeReloadTask?.cancel()
+        realtimeReloadTask = nil
+        realtimeSubscription?.cancel()
+        realtimeSubscription = nil
+    }
+
+    private func scheduleRealtimeReload() {
+        realtimeReloadTask?.cancel()
+        realtimeReloadTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            await reloadThread()
         }
     }
 

@@ -270,13 +270,27 @@ actor AppwriteService {
             throw AppwriteServiceError.api(statusCode: 400, message: "chat.error.sendFailed", type: "validation")
         }
 
-        let response = try await executeUserFunction(
-            functionId: configuration.sendMessageFunctionId,
-            body: [
-                "threadId": threadId,
-                "text": trimmed
-            ]
-        )
+        let attemptedAt = Date()
+        let response: [String: Any]
+
+        do {
+            response = try await executeUserFunction(
+                functionId: configuration.sendMessageFunctionId,
+                body: [
+                    "threadId": threadId,
+                    "text": trimmed
+                ]
+            )
+        } catch let error as AppwriteServiceError where error.statusCode == 500 {
+            if let recoveredMessage = try await recoverRecentlySentMessage(
+                threadId: threadId,
+                text: trimmed,
+                notBefore: attemptedAt.addingTimeInterval(-12)
+            ) {
+                return recoveredMessage
+            }
+            throw error
+        }
 
         let remoteMessageId = stringValue(forKey: "messageId", in: response) ?? UUID().uuidString
         let createdAt = dateValue(forKey: "createdAt", in: response) ?? Date()
@@ -381,6 +395,51 @@ actor AppwriteService {
             isOnline: false,
             messages: sortedMessages
         )
+    }
+
+    private func recoverRecentlySentMessage(threadId: String, text: String, notBefore: Date) async throws -> MessageDTO? {
+        guard let currentAccountId = try await fetchCurrentAccountId(required: false) else {
+            return nil
+        }
+
+        let rows = try await listRows(
+            tableId: configuration.messagesTableId,
+            queries: [
+                AppwriteQuery.equal("threadId", values: [threadId]),
+                AppwriteQuery.orderAsc("createdAt"),
+            ]
+        )
+
+        for row in rows.reversed() {
+            guard stringValue(forKey: "senderUserId", in: row) == currentAccountId else {
+                continue
+            }
+
+            let rowText = stringValue(forKey: "text", in: row) ?? ""
+            guard rowText == text else {
+                continue
+            }
+
+            let createdAt = dateValue(forKey: "createdAt", in: row)
+                ?? dateValue(forKey: "$createdAt", in: row)
+                ?? .distantPast
+            guard createdAt >= notBefore else {
+                continue
+            }
+
+            guard let remoteId = stringValue(forKey: "$id", in: row) else {
+                continue
+            }
+
+            return MessageDTO(
+                id: stableUUID(from: remoteId),
+                text: rowText,
+                isMe: true,
+                time: Self.messageTimeFormatter.string(from: createdAt)
+            )
+        }
+
+        return nil
     }
 
     private func ensureProfileRow(for user: User) async throws -> User {

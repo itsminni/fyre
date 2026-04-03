@@ -46,7 +46,7 @@ export default async ({ req, res, error }) => {
         lastMessageAt: now
       });
     } catch (err) {
-      throw new Error(`Failed updating row in ${config.threadsTableId}: ${err?.message ?? err}`);
+      error(`Non-fatal thread preview update failure in ${config.threadsTableId}: ${err?.message ?? err}`);
     }
 
     const currentParticipant = participantRows.find((row) => row.userId === currentUserId);
@@ -62,7 +62,7 @@ export default async ({ req, res, error }) => {
           notificationsEnabled: currentParticipant.notificationsEnabled ?? true
         });
       } catch (err) {
-        throw new Error(`Failed updating current-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+        error(`Non-fatal participant update failure in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
       }
     }
 
