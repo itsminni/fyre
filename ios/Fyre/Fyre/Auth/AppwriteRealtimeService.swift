@@ -23,11 +23,43 @@ struct AppwriteRealtimeEvent {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    func dateValue(forKey key: String) -> Date? {
+        guard let rawValue = payload[key] as? String else {
+            return nil
+        }
+        return Self.dateFormatter.date(from: rawValue)
+            ?? Self.fallbackDateFormatter.date(from: rawValue)
+    }
+
     var isMutation: Bool {
         events.contains { event in
             event.contains(".create") || event.contains(".update") || event.contains(".delete")
         }
     }
+
+    var isCreate: Bool {
+        events.contains { $0.contains(".create") }
+    }
+
+    var isUpdate: Bool {
+        events.contains { $0.contains(".update") }
+    }
+
+    var isDelete: Bool {
+        events.contains { $0.contains(".delete") }
+    }
+
+    private static let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let fallbackDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 }
 
 @MainActor
@@ -128,6 +160,7 @@ final class AppwriteRealtimeSubscription {
         request.setValue(configuration.projectId, forHTTPHeaderField: "X-Appwrite-Project")
         request.setValue("1.8.0", forHTTPHeaderField: "X-Appwrite-Response-Format")
 
+        // Realtime relies on the existing Appwrite session cookie, so subscriptions keep following login/logout.
         if let cookies = HTTPCookieStorage.shared.cookies(for: configuration.endpointURL),
            !cookies.isEmpty {
             let headers = HTTPCookie.requestHeaderFields(with: cookies)
@@ -144,6 +177,7 @@ final class AppwriteRealtimeSubscription {
         components?.scheme = configuration.endpointURL.scheme == "http" ? "ws" : "wss"
         components?.path = configuration.endpointURL.path + "/realtime"
 
+        // Channels are encoded directly in the initial URL so reconnects re-subscribe without extra round-trips.
         var queryItems = [URLQueryItem(name: "project", value: configuration.projectId)]
         queryItems.append(contentsOf: channels.map { URLQueryItem(name: "channels[]", value: $0) })
         components?.queryItems = queryItems
@@ -198,7 +232,7 @@ enum AppwriteRealtimeService {
     @MainActor
     static func makeChatSubscription(
         threadId: String,
-        onChange: @escaping @MainActor () -> Void,
+        onEvent: @escaping @MainActor (AppwriteRealtimeEvent) -> Void,
         onError: @escaping @MainActor (Error) -> Void = { _ in }
     ) -> AppwriteRealtimeSubscription? {
         guard let configuration = try? AppwriteConfiguration.load() else {
@@ -207,13 +241,16 @@ enum AppwriteRealtimeService {
 
         let subscription = AppwriteRealtimeSubscription(
             configuration: configuration,
-            channels: [configuration.messagesRealtimeChannel],
+            channels: [
+                configuration.messagesRealtimeChannel,
+                configuration.threadParticipantsRealtimeChannel
+            ],
             onEvent: { event in
                 guard event.isMutation,
                       event.stringValue(forKey: "threadId") == threadId else {
                     return
                 }
-                onChange()
+                onEvent(event)
             },
             onError: onError
         )
