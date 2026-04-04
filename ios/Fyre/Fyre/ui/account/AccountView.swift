@@ -7,6 +7,7 @@
 
 import SwiftUI
 import PhotosUI
+import UIKit
 
 private struct PendingChatBackgroundPreview: Identifiable {
     let id = UUID()
@@ -65,8 +66,13 @@ struct AccountView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("settings_theme_mode") private var themeMode = "system"
     @AppStorage("settings_notifications_enabled") private var notificationsEnabled = true
+    @AppStorage("settings_notifications_matches") private var matchNotificationsEnabled = true
+    @AppStorage("settings_notifications_messages") private var messageNotificationsEnabled = true
+    @AppStorage("settings_notifications_event_reminders") private var eventReminderNotificationsEnabled = true
     @AppStorage("settings_show_age") private var showAge = true
     @AppStorage("settings_show_distance") private var showDistance = true
+    @AppStorage("settings_show_intent") private var showIntent = true
+    @AppStorage("settings_show_interests") private var showInterests = true
     @AppStorage("settings_chat_background_style") private var chatBackgroundStyle = ChatBackgroundStyle.defaultDark.rawValue
     @AppStorage("settings_chat_background_brightness") private var chatBackgroundBrightness = 0.0
     @AppStorage("settings_chat_background_color_1") private var chatBackgroundColor1Hex = "#3F4755"
@@ -393,18 +399,18 @@ struct AccountView: View {
                     }
                 }
 
-                AccountCard(title: L10n.tr("profile.section.preferences"), icon: "slider.horizontal.3") {
+                AccountCard(
+                    title: L10n.tr("profile.section.discovery"),
+                    subtitle: L10n.tr("profile.section.discoveryHint"),
+                    icon: "scope"
+                ) {
                     VStack(spacing: 14) {
-                        ProfileTextField(title: L10n.tr("profile.city"), text: $city)
+                        ProfileTextField(
+                            title: L10n.tr("profile.city"),
+                            subtitle: L10n.tr("profile.city.hint"),
+                            text: $city
+                        )
                         ProfileTextField(title: L10n.tr("profile.bio"), text: $bio)
-
-                        ProfilePickerField(
-                            title: L10n.tr("profile.orientation"),
-                            selection: $orientation,
-                            options: UserOrientation.allCases
-                        ) { option in
-                            L10n.tr(option.localizationKey)
-                        }
 
                         ProfilePickerField(
                             title: L10n.tr("profile.intent"),
@@ -428,6 +434,23 @@ struct AccountView: View {
                         )
 
                         ProfileDistanceField(maxDistanceKm: $maxDistanceKm)
+                    }
+                }
+
+                AccountCard(
+                    title: L10n.tr("profile.section.preferences"),
+                    subtitle: L10n.tr("profile.section.preferencesHint"),
+                    icon: "slider.horizontal.3"
+                ) {
+                    VStack(spacing: 14) {
+                        ProfilePickerField(
+                            title: L10n.tr("profile.orientation"),
+                            selection: $orientation,
+                            options: UserOrientation.allCases
+                        ) { option in
+                            L10n.tr(option.localizationKey)
+                        }
+
                         ProfileToggleField(title: L10n.tr("profile.smokes"), isOn: $smokes)
                         ProfileToggleField(title: L10n.tr("profile.drinks"), isOn: $drinks)
                         ProfileTextField(title: L10n.tr("profile.interests"), text: $interests)
@@ -550,11 +573,30 @@ struct AccountView: View {
             VStack(spacing: 18) {
                 AccountCard(
                     title: L10n.tr("account.section.preferences"),
+                    subtitle: L10n.tr("account.preferences.hint"),
                     icon: "slider.horizontal.3"
                 ) {
                     VStack(spacing: 14) {
-                        SettingsToggleField(title: L10n.tr("account.showAge"), isOn: $showAge)
-                        SettingsToggleField(title: L10n.tr("account.showDistance"), isOn: $showDistance)
+                        SettingsToggleField(
+                            title: L10n.tr("account.showAge"),
+                            subtitle: L10n.tr("account.showAge.hint"),
+                            isOn: $showAge
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showDistance"),
+                            subtitle: L10n.tr("account.showDistance.hint"),
+                            isOn: $showDistance
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showIntent"),
+                            subtitle: L10n.tr("account.showIntent.hint"),
+                            isOn: $showIntent
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showInterests"),
+                            subtitle: L10n.tr("account.showInterests.hint"),
+                            isOn: $showInterests
+                        )
                     }
                 }
             }
@@ -571,10 +613,44 @@ struct AccountView: View {
             VStack(spacing: 18) {
                 AccountCard(
                     title: L10n.tr("account.notifications"),
+                    subtitle: L10n.tr("account.notifications.hint"),
                     icon: "bell.fill"
                 ) {
                     VStack(spacing: 14) {
-                        SettingsToggleField(title: L10n.tr("account.notifications"), isOn: $notificationsEnabled)
+                        SettingsToggleField(
+                            title: L10n.tr("account.notifications"),
+                            subtitle: L10n.tr("account.notifications.masterHint"),
+                            isOn: $notificationsEnabled
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.notifications.matches"),
+                            subtitle: L10n.tr("account.notifications.matches.hint"),
+                            isOn: $matchNotificationsEnabled
+                        )
+                        .disabled(!notificationsEnabled)
+                        .opacity(notificationsEnabled ? 1 : 0.45)
+
+                        SettingsToggleField(
+                            title: L10n.tr("account.notifications.messages"),
+                            subtitle: L10n.tr("account.notifications.messages.hint"),
+                            isOn: $messageNotificationsEnabled
+                        )
+                        .disabled(!notificationsEnabled)
+                        .opacity(notificationsEnabled ? 1 : 0.45)
+
+                        SettingsToggleField(
+                            title: L10n.tr("account.notifications.events"),
+                            subtitle: L10n.tr("account.notifications.events.hint"),
+                            isOn: $eventReminderNotificationsEnabled
+                        )
+                        .disabled(!notificationsEnabled)
+                        .opacity(notificationsEnabled ? 1 : 0.45)
+
+                        Button(action: openSystemNotificationSettings) {
+                            Label(L10n.tr("account.notifications.openSettings"), systemImage: "arrow.up.right.square")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(AccountPrimaryButtonStyle())
                     }
                 }
             }
@@ -1011,6 +1087,14 @@ struct AccountView: View {
             : L10n.tr("profile.security.mailFailed")
         }
     }
+
+    private func openSystemNotificationSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            return
+        }
+
+        openURL(url)
+    }
 }
 
 private struct AccountCard<Content: View>: View {
@@ -1080,6 +1164,7 @@ private struct ProfileReadOnlyRow: View {
 
 private struct ProfileTextField: View {
     let title: String
+    var subtitle: String? = nil
     @Binding var text: String
 
     var body: some View {
@@ -1087,6 +1172,12 @@ private struct ProfileTextField: View {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
+
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             TextField(title, text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -1146,7 +1237,7 @@ private struct ProfileMultiSelectField<Option: Identifiable & Hashable>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
+            Text(title + ":")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
 
@@ -1186,14 +1277,26 @@ private struct ProfileAgeRangeField: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            Stepper("\(L10n.tr("profile.ageRange.min")): \(minAge)", value: $minAge, in: 18...80)
-                .onChange(of: minAge) { _, newValue in
-                    if maxAge < newValue {
-                        maxAge = newValue
-                    }
+            ProfileValueMenuField(
+                title: L10n.tr("profile.ageRange.min"),
+                selection: $minAge,
+                options: Array(18...maxAge)
+            ) { value in
+                "\(value)"
+            }
+            .onChange(of: minAge) { _, newValue in
+                if maxAge < newValue {
+                    maxAge = newValue
                 }
+            }
 
-            Stepper("\(L10n.tr("profile.ageRange.max")): \(maxAge)", value: $maxAge, in: minAge...80)
+            ProfileValueMenuField(
+                title: L10n.tr("profile.ageRange.max"),
+                selection: $maxAge,
+                options: Array(minAge...80)
+            ) { value in
+                "\(value)"
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -1204,13 +1307,25 @@ private struct ProfileAgeRangeField: View {
 private struct ProfileDistanceField: View {
     @Binding var maxDistanceKm: Int
 
+    private let options = [5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 150, 200, 300]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.tr("profile.maxDistanceKm"))
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            Stepper("\(maxDistanceKm) km", value: $maxDistanceKm, in: 5...300, step: 5)
+            Text(L10n.tr("profile.maxDistanceKm.hint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ProfileValueMenuField(
+                title: L10n.tr("profile.maxDistanceKm"),
+                selection: $maxDistanceKm,
+                options: options
+            ) { value in
+                "\(value) km"
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -1218,14 +1333,60 @@ private struct ProfileDistanceField: View {
     }
 }
 
+private struct ProfileValueMenuField<Value: Hashable>: View {
+    let title: String
+    @Binding var selection: Value
+    let options: [Value]
+    let titleForOption: (Value) -> String
+
+    var body: some View {
+        Menu {
+            Picker(title, selection: $selection) {
+                ForEach(options, id: \.self) { option in
+                    Text(titleForOption(option)).tag(option)
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 0)
+
+                Text(titleForOption(selection))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct SettingsToggleField: View {
     let title: String
+    var subtitle: String? = nil
     @Binding var isOn: Bool
 
     var body: some View {
         Toggle(isOn: $isOn) {
-            Text(title)
-                .font(.subheadline)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline)
+
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

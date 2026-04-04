@@ -479,7 +479,7 @@ actor AppwriteService {
         user.birthDate = dateValue(forKey: "birthDate", in: profileRow)
         user.gender = genderValue(for: stringValue(forKey: "gender", in: profileRow))
         user.orientation = orientationValue(for: stringValue(forKey: "orientation", in: profileRow))
-        user.preferredGenders = genderListValue(for: stringValue(forKey: "preferredGenders", in: profileRow))
+        user.preferredGenders = genderListValue(for: profileRow?["preferredGenders"])
         user.minPreferredAge = intValue(forKey: "minPreferredAge", in: profileRow)
         user.maxPreferredAge = intValue(forKey: "maxPreferredAge", in: profileRow)
         user.maxDistanceKm = intValue(forKey: "maxDistanceKm", in: profileRow)
@@ -1173,7 +1173,7 @@ actor AppwriteService {
             "birthDate": nullOrDateString(user.birthDate),
             "gender": nullOrString(stringValue(for: user.gender)),
             "orientation": nullOrString(stringValue(for: user.orientation)),
-            "preferredGenders": nullOrString(csvString(for: user.resolvedPreferredGenders)),
+            "preferredGenders": genderArrayValue(for: user.resolvedPreferredGenders),
             "minPreferredAge": user.resolvedMinPreferredAge,
             "maxPreferredAge": user.resolvedMaxPreferredAge,
             "maxDistanceKm": user.resolvedMaxDistanceKm,
@@ -1344,12 +1344,12 @@ actor AppwriteService {
     }
 
     private func genderValue(for rawValue: String?) -> UserGender? {
-        switch rawValue {
+        switch rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "male":
             return .male
         case "female":
             return .female
-        case "nonBinary":
+        case "nonbinary":
             return .nonBinary
         case "other":
             return .other
@@ -1422,20 +1422,36 @@ actor AppwriteService {
         }
     }
 
-    private func genderListValue(for rawValue: String?) -> [UserGender] {
-        guard let rawValue else { return [] }
+    private func genderListValue(for rawValue: Any?) -> [UserGender] {
+        if let values = rawValue as? [String] {
+            return values.compactMap(genderValue(for:))
+        }
 
-        return rawValue
-            .split(separator: ",")
-            .compactMap { genderValue(for: String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+        if let values = rawValue as? [Any] {
+            return values
+                .compactMap { $0 as? String }
+                .compactMap(genderValue(for:))
+        }
+
+        if let rawValue = rawValue as? String {
+            return rawValue
+                .split(separator: ",")
+                .compactMap { genderValue(for: String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+
+        return []
     }
 
-    private func csvString(for genders: [UserGender]) -> String? {
+    private func genderArrayValue(for genders: [UserGender]) -> Any {
         let values = UserGender.allCases
             .filter { genders.contains($0) }
             .compactMap { stringValue(for: $0) }
-        guard !values.isEmpty else { return nil }
-        return values.joined(separator: ",")
+
+        if values.isEmpty {
+            return NSNull()
+        }
+
+        return values
     }
 
     private func interestListValue(for rawValue: String?) -> [String] {

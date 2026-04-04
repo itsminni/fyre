@@ -106,14 +106,14 @@ struct User: Codable, Sendable {
     var avatarFileId: String?
     var profileImageData: Data?
 
-    var displayName: String {
+    nonisolated var displayName: String {
         let first = firstName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let last = lastName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let full = "\(first) \(last)".trimmingCharacters(in: .whitespacesAndNewlines)
         return full.isEmpty ? email : full
     }
 
-    var resolvedPreferredGenders: [UserGender] {
+    nonisolated var resolvedPreferredGenders: [UserGender] {
         let explicit = preferredGenders ?? []
         if !explicit.isEmpty {
             return UserGender.allCases.filter { explicit.contains($0) }
@@ -121,27 +121,27 @@ struct User: Codable, Sendable {
         return UserStore.defaultPreferredGenders
     }
 
-    var resolvedMinPreferredAge: Int {
+    nonisolated var resolvedMinPreferredAge: Int {
         min(max(minPreferredAge ?? 18, 18), 80)
     }
 
-    var resolvedMaxPreferredAge: Int {
+    nonisolated var resolvedMaxPreferredAge: Int {
         max(min(maxPreferredAge ?? 35, 80), resolvedMinPreferredAge)
     }
 
-    var resolvedMaxDistanceKm: Int {
+    nonisolated var resolvedMaxDistanceKm: Int {
         min(max(maxDistanceKm ?? 50, 5), 300)
     }
 
-    var normalizedBio: String {
+    nonisolated var normalizedBio: String {
         bio?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    var normalizedInterests: String {
+    nonisolated var normalizedInterests: String {
         interests?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    var isProfileComplete: Bool {
+    nonisolated var isProfileComplete: Bool {
         guard let firstName, !firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard let city, !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard let birthDate, UserStore.age(from: birthDate) >= 18 else { return false }
@@ -630,14 +630,15 @@ final class UserStore: @unchecked Sendable {
         let shouldRefreshCoordinates = existingCity.caseInsensitiveCompare(normalizedCity) != .orderedSame
             || user.latitude == nil
             || user.longitude == nil
-        let coordinates: (latitude: Double, longitude: Double)
+        let resolvedLocation: (displayName: String, latitude: Double, longitude: Double)
         if !shouldRefreshCoordinates,
            let latitude = user.latitude,
-           let longitude = user.longitude {
-            coordinates = (latitude, longitude)
+           let longitude = user.longitude,
+           !existingCity.isEmpty {
+            resolvedLocation = (existingCity, latitude, longitude)
         } else {
             do {
-                coordinates = try await Self.coordinates(for: normalizedCity)
+                resolvedLocation = try await Self.resolvedCity(for: normalizedCity)
             } catch {
                 return L10n.tr("profile.error.cityLookupFailed")
             }
@@ -651,15 +652,15 @@ final class UserStore: @unchecked Sendable {
         user.firstName = first
         user.lastName = last
         user.gender = nextGender
-        user.city = normalizedCity
+        user.city = resolvedLocation.displayName
         user.birthDate = birthDate
         user.orientation = orientation
         user.preferredGenders = normalizedPreferredGenders
         user.minPreferredAge = normalizedMinAge
         user.maxPreferredAge = normalizedMaxAge
         user.maxDistanceKm = normalizedMaxDistanceKm
-        user.latitude = coordinates.latitude
-        user.longitude = coordinates.longitude
+        user.latitude = resolvedLocation.latitude
+        user.longitude = resolvedLocation.longitude
         user.smokes = smokes
         user.drinks = drinks
         user.bio = normalizedBio
@@ -1005,22 +1006,48 @@ final class UserStore: @unchecked Sendable {
         return true
     }
 
-    static func age(from birthDate: Date) -> Int {
+    nonisolated static func age(from birthDate: Date) -> Int {
         Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year ?? 0
     }
 
-    static var defaultPreferredGenders: [UserGender] { UserGender.allCases }
+    nonisolated static var defaultPreferredGenders: [UserGender] { UserGender.allCases }
 
     @MainActor
-    private static func coordinates(for city: String) async throws -> (latitude: Double, longitude: Double) {
+    private static func resolvedCity(for city: String) async throws -> (displayName: String, latitude: Double, longitude: Double) {
         let placemarks = try await CLGeocoder().geocodeAddressString(city)
-        guard let coordinate = placemarks
-            .compactMap(\.location?.coordinate)
-            .first else {
+        guard let placemark = placemarks.first,
+              let coordinate = placemark.location?.coordinate else {
             throw CLError(.geocodeFoundNoResult)
         }
 
-        return (coordinate.latitude, coordinate.longitude)
+        return (
+            normalizedCityName(from: placemark, fallback: city),
+            coordinate.latitude,
+            coordinate.longitude
+        )
+    }
+
+    private static func normalizedCityName(from placemark: CLPlacemark, fallback: String) -> String {
+        let primaryName = [
+            placemark.locality,
+            placemark.subAdministrativeArea,
+            placemark.administrativeArea,
+            placemark.name
+        ]
+        .lazy
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .first(where: { !$0.isEmpty })
+
+        let country = placemark.country?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = [primaryName, country]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+
+        if !components.isEmpty {
+            return Array(NSOrderedSet(array: components)).compactMap { $0 as? String }.joined(separator: ", ")
+        }
+
+        return fallback.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Persistence helpers

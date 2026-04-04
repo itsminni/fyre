@@ -29,6 +29,10 @@ struct SwipeHomeView: View {
     @Environment(AppServices.self) private var services
     @Environment(UserStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("settings_show_age") private var showAge = true
+    @AppStorage("settings_show_distance") private var showDistance = true
+    @AppStorage("settings_show_intent") private var showIntent = true
+    @AppStorage("settings_show_interests") private var showInterests = true
     @State private var profiles: [SwipeProfile] = []
     @State private var dragOffset: CGSize = .zero
     @State private var isAnimatingDecision = false
@@ -132,10 +136,10 @@ struct SwipeHomeView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("\(profile.name), \(profile.age)")
+                    Text(nameLine(for: profile))
                         .font(.title3.bold())
 
-                    if let distanceKm = profile.distanceKm {
+                    if showDistance, let distanceKm = profile.distanceKm {
                         tag(text: "\(distanceKm) km", accent: .orange)
                     }
 
@@ -145,7 +149,7 @@ struct SwipeHomeView: View {
                     }
                 }
 
-                if let intent = profile.intent {
+                if showIntent, let intent = profile.intent {
                     tag(text: L10n.tr(intent.localizationKey), accent: .orange)
                 }
 
@@ -153,7 +157,7 @@ struct SwipeHomeView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(4)
 
-                if !profile.interests.isEmpty {
+                if showInterests, !profile.interests.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(Array(profile.interests.prefix(4)), id: \.self) { interest in
@@ -375,5 +379,12 @@ struct SwipeHomeView: View {
 
     private var primaryControlStroke: Color {
         colorScheme == .dark ? .orange.opacity(0.28) : .orange.opacity(0.34)
+    }
+
+    private func nameLine(for profile: SwipeProfile) -> String {
+        if showAge {
+            return "\(profile.name), \(profile.age)"
+        }
+        return profile.name
     }
 }

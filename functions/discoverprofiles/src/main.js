@@ -172,9 +172,9 @@ function projectDiscoverProfile(row, distanceKm) {
     firstName: row.firstName ?? null,
     lastName: row.lastName ?? null,
     birthDate: row.birthDate ?? null,
-    gender: row.gender ?? null,
+    gender: normalizeGender(row.gender),
     city: row.city ?? null,
-    intent: row.intent ?? null,
+    intent: normalizeIntent(row.intent),
     distanceKm: roundedDistance(distanceKm),
     bio: firstNonEmpty([row.bio]),
     interests: firstNonEmpty([row.interests]),
@@ -230,12 +230,15 @@ async function fetchProfile(config, userId) {
 }
 
 function normalizeGender(value) {
-  switch (asString(value)) {
+  switch (asString(value)?.replace(/[\s_-]/g, "").toLowerCase()) {
     case "male":
+      return "male";
     case "female":
-    case "nonBinary":
+      return "female";
+    case "nonbinary":
+      return "nonbinary";
     case "other":
-      return value.trim();
+      return "other";
     default:
       return null;
   }
@@ -254,16 +257,18 @@ function normalizeIntent(value) {
 }
 
 function parsePreferredGenders(rawValue) {
-  const explicit = asString(rawValue)
-    ?.split(",")
-    .map((item) => normalizeGender(item))
-    .filter(Boolean);
+  const explicit = Array.isArray(rawValue)
+    ? rawValue.map((item) => normalizeGender(item)).filter(Boolean)
+    : asString(rawValue)
+      ?.split(",")
+      .map((item) => normalizeGender(item))
+      .filter(Boolean);
 
   if (explicit?.length) {
     return Array.from(new Set(explicit));
   }
 
-  return ["male", "female", "nonBinary", "other"];
+  return ["male", "female", "nonbinary", "other"];
 }
 
 function interestTokens(rawValue) {

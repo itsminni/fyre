@@ -283,9 +283,39 @@ enum AppwriteRealtimeService {
         subscription.start()
         return subscription
     }
+
+    @MainActor
+    static func makeNotificationSubscription(
+        onEvent: @escaping @MainActor (AppwriteRealtimeEvent) -> Void,
+        onError: @escaping @MainActor (Error) -> Void = { _ in }
+    ) -> AppwriteRealtimeSubscription? {
+        guard let configuration = try? AppwriteConfiguration.load() else {
+            return nil
+        }
+
+        var channels = [
+            configuration.messagesRealtimeChannel,
+            configuration.threadParticipantsRealtimeChannel
+        ]
+        if let matchesChannel = configuration.matchesRealtimeChannel {
+            channels.append(matchesChannel)
+        }
+
+        let subscription = AppwriteRealtimeSubscription(
+            configuration: configuration,
+            channels: channels,
+            onEvent: { event in
+                guard event.isMutation else { return }
+                onEvent(event)
+            },
+            onError: onError
+        )
+        subscription.start()
+        return subscription
+    }
 }
 
-private extension AppwriteConfiguration {
+extension AppwriteConfiguration {
     var messagesRealtimeChannel: String {
         "tablesdb.\(databaseId).tables.\(messagesTableId).rows"
     }
@@ -296,5 +326,10 @@ private extension AppwriteConfiguration {
 
     var threadParticipantsRealtimeChannel: String {
         "tablesdb.\(databaseId).tables.\(threadParticipantsTableId).rows"
+    }
+
+    var matchesRealtimeChannel: String? {
+        guard let matchesTableId, !matchesTableId.isEmpty else { return nil }
+        return "tablesdb.\(databaseId).tables.\(matchesTableId).rows"
     }
 }

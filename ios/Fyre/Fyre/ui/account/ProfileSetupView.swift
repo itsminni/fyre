@@ -11,6 +11,8 @@ import PhotosUI
 struct ProfileSetupView: View {
     @Environment(UserStore.self) private var store
 
+    private static let distanceOptions = [5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 150, 200, 300]
+
     @State private var firstName = ""
     @State private var lastName = ""
     @State private var city = ""
@@ -48,7 +50,13 @@ struct ProfileSetupView: View {
                 Section(L10n.tr("profile.section.required")) {
                     labeledField(L10n.tr("profile.firstName"), text: $firstName, isRequired: true)
                     labeledField(L10n.tr("profile.lastName"), text: $lastName)
-                    labeledField(L10n.tr("profile.city"), text: $city, isRequired: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        labeledField(L10n.tr("profile.city"), text: $city, isRequired: true)
+
+                        Text(L10n.tr("profile.city.hint"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
                     DatePicker(
                         L10n.tr("profile.birthDate"),
@@ -80,7 +88,7 @@ struct ProfileSetupView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
-                        fieldLabel(L10n.tr("profile.preferredGenders"), isRequired: true)
+                        fieldLabel(L10n.tr("profile.preferredGenders") + ":", isRequired: true)
 
                         ForEach(UserGender.allCases) { option in
                             Toggle(isOn: preferredGenderBinding(for: option)) {
@@ -90,29 +98,33 @@ struct ProfileSetupView: View {
                     }
                     .padding(.vertical, 4)
 
-                    Stepper(
-                        "\(L10n.tr("profile.ageRange.min")): \(minPreferredAge)",
-                        value: $minPreferredAge,
-                        in: 18...80
-                    )
+                    Picker(L10n.tr("profile.ageRange.min"), selection: $minPreferredAge) {
+                        ForEach(18...maxPreferredAge, id: \.self) { age in
+                            Text("\(age)").tag(age)
+                        }
+                    }
                     .onChange(of: minPreferredAge) { _, newValue in
                         if maxPreferredAge < newValue {
                             maxPreferredAge = newValue
                         }
                     }
 
-                    Stepper(
-                        "\(L10n.tr("profile.ageRange.max")): \(maxPreferredAge)",
-                        value: $maxPreferredAge,
-                        in: minPreferredAge...80
-                    )
+                    Picker(L10n.tr("profile.ageRange.max"), selection: $maxPreferredAge) {
+                        ForEach(minPreferredAge...80, id: \.self) { age in
+                            Text("\(age)").tag(age)
+                        }
+                    }
 
-                    Stepper(
-                        "\(L10n.tr("profile.maxDistanceKm")): \(maxDistanceKm) km",
-                        value: $maxDistanceKm,
-                        in: 5...300,
-                        step: 5
-                    )
+                    Picker(L10n.tr("profile.maxDistanceKm"), selection: $maxDistanceKm) {
+                        ForEach(Self.distanceOptions, id: \.self) { distance in
+                            Text("\(distance) km").tag(distance)
+                        }
+                    }
+
+                    Text(L10n.tr("profile.maxDistanceKm.hint"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
                     multilineField(L10n.tr("profile.interests"), text: $interests)
                 }
 

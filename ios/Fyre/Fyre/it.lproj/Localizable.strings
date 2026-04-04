@@ -120,7 +120,23 @@
 "account.sendButtonGradient.color3" = "Colore 3";
 "account.notifications" = "Notifiche";
 "account.showAge" = "Mostra età";
+"account.showAge.hint" = "Mostra l'età nelle card discovery.";
 "account.showDistance" = "Mostra distanza";
+"account.showDistance.hint" = "Mostra la distanza stimata in km nelle card discovery.";
+"account.showIntent" = "Mostra obiettivo";
+"account.showIntent.hint" = "Mostra cosa cerca il profilo nelle card discovery.";
+"account.showInterests" = "Mostra interessi";
+"account.showInterests.hint" = "Mostra i tag principali degli interessi nelle card discovery.";
+"account.preferences.hint" = "Queste impostazioni cambiano solo come vedi le card dentro l'app.";
+"account.notifications.hint" = "Notifiche locali per match, nuovi messaggi e promemoria eventi.";
+"account.notifications.masterHint" = "Attiva o disattiva tutte le notifiche di Fyre.";
+"account.notifications.matches" = "Nuovi match";
+"account.notifications.matches.hint" = "Mostra una notifica quando un like reciproco crea un match.";
+"account.notifications.messages" = "Nuovi messaggi";
+"account.notifications.messages.hint" = "Mostra una notifica quando qualcuno scrive in una tua chat.";
+"account.notifications.events" = "Promemoria eventi";
+"account.notifications.events.hint" = "Ricordati il giorno prima di un evento a cui sei iscritto.";
+"account.notifications.openSettings" = "Apri Impostazioni iPhone";
 
 "profile.gender" = "Genere";
 "profile.gender.unspecified" = "Seleziona genere";
@@ -134,6 +150,7 @@
 "profile.firstName" = "Nome";
 "profile.lastName" = "Cognome";
 "profile.city" = "Città";
+"profile.city.hint" = "I km sono calcolati dalla località verificata.";
 "profile.birthDate" = "Data di nascita";
 "profile.bio" = "Bio";
 "profile.intent" = "Cerco";
@@ -142,11 +159,12 @@
 "profile.intent.friendship" = "Amicizia";
 "profile.intent.notSure" = "Non lo so ancora";
 "profile.interests" = "Interessi";
-"profile.preferredGenders" = "Mostrami persone come";
+"profile.preferredGenders" = "Show me";
 "profile.ageRange" = "Fascia d'età";
 "profile.ageRange.min" = "Età minima";
 "profile.ageRange.max" = "Età massima";
 "profile.maxDistanceKm" = "Distanza massima";
+"profile.maxDistanceKm.hint" = "Questa distanza è calcolata dalla tua città verificata.";
 "profile.orientation" = "Orientamento";
 "profile.orientation.straight" = "Etero";
 "profile.orientation.gay" = "Gay";
@@ -162,7 +180,9 @@
 "profile.section.informationHint" = "Questi dati restano bloccati dopo il setup. Invia una mail al supporto a support@example.com se devono essere modificati.";
 "profile.section.required" = "Obbligatorio";
 "profile.section.discovery" = "Scoperta";
+"profile.section.discoveryHint" = "Questi campi cambiano chi vedi e quanto i profili risultano rilevanti.";
 "profile.section.preferences" = "Preferenze";
+"profile.section.preferencesHint" = "Questi dettagli restano modificabili.";
 "profile.email" = "Email";
 "profile.security.resetDescription" = "Per resettare la password, invia una mail al supporto a support@example.com includendo l'email del profilo qui sotto.";
 "profile.security.resetAction" = "Richiedi reset password";
@@ -188,6 +208,14 @@
 "profile.error.cityLookupFailed" = "Non riesco a trovare questa città. Prova un formato più chiaro, per esempio \"Roma, Italia\".";
 "profile.error.noCurrentUser" = "Effettua di nuovo l'accesso.";
 "profile.error.saveFailed" = "Impossibile salvare il profilo adesso. Riprova.";
+"notifications.match.title" = "È un match";
+"notifications.match.body.generic" = "Qualcuno ti ha ricambiato su Fyre.";
+"notifications.match.body.named" = "Hai fatto match con %@.";
+"notifications.message.title" = "Nuovo messaggio";
+"notifications.message.body.generic" = "%@ ti ha scritto un nuovo messaggio.";
+"notifications.message.body.text" = "%@: %@";
+"notifications.eventReminder.title" = "Evento domani";
+"notifications.eventReminder.body" = "%@ inizia domani alle %@.";
 
 "events.section.mainEvent" = "Evento principale";
 "events.section.info" = "Info evento";
