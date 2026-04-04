@@ -68,6 +68,19 @@ private struct ChatBottomAnchorReader: View {
     }
 }
 
+private struct LegacyHeaderButtonFrameModifier: ViewModifier {
+    let isLegacy: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isLegacy {
+            content.frame(width: 44, height: 44, alignment: .center)
+        } else {
+            content
+        }
+    }
+}
+
 private enum AttachmentPickerMode {
     case media
     case photos
@@ -238,14 +251,37 @@ struct ChatDetailView: View {
                 .ignoresSafeArea()
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            chatHeaderOverlay
+            if !usesModernChatChrome {
+                chatHeaderOverlay
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composerChromeOverlay
+            if usesModernChatChrome {
+                composerOverlay
+            } else {
+                composerChromeOverlay
+            }
         }
+        .navigationTitle(navigationTitleText)
+        .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(usesModernChatChrome ? .visible : .hidden, for: .navigationBar)
         .modifier(ChatDetailTabBarHidingModifier())
+        .toolbar {
+            if usesModernChatChrome {
+                ToolbarItem(placement: .topBarLeading) {
+                    chatHeaderBackButton
+                }
+
+                ToolbarItem(placement: .principal) {
+                    chatHeaderPrincipal
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    chatHeaderTrailingMenu
+                }
+            }
+        }
         .task {
             await reloadThread()
             startRealtime()
@@ -372,7 +408,7 @@ struct ChatDetailView: View {
         } label: {
             Image(systemName: "chevron.backward")
                 .font(.body.weight(.semibold))
-                .frame(width: 44, height: 44, alignment: .center)
+                .modifier(LegacyHeaderButtonFrameModifier(isLegacy: !usesModernChatChrome))
         }
         .buttonStyle(.plain)
         .tint(.primary)
@@ -422,7 +458,7 @@ struct ChatDetailView: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.body.weight(.semibold))
-                .frame(width: 44, height: 44, alignment: .center)
+                .modifier(LegacyHeaderButtonFrameModifier(isLegacy: !usesModernChatChrome))
         }
         .tint(.primary)
         .accessibilityLabel("More options")
