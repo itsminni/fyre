@@ -4,9 +4,18 @@ export default async ({ req, res, error }) => {
     const body = parseBody(req);
     const currentUserId = resolveCurrentUserId(req, body);
     const threadId = asString(body.threadId);
-    const text = asString(body.text);
+    const text = asOptionalString(body.text);
+    const replyToMessageId = asString(body.replyToMessageId);
+    const messageType = asString(body.messageType) ?? "text";
+    const attachmentFileId = asString(body.attachmentFileId);
+    const attachmentName = asOptionalString(body.attachmentName);
+    const attachmentMimeType = asOptionalString(body.attachmentMimeType);
+    const attachmentSize = asOptionalNumber(body.attachmentSize);
+    const attachmentWidth = asOptionalNumber(body.attachmentWidth);
+    const attachmentHeight = asOptionalNumber(body.attachmentHeight);
+    const attachmentDuration = asOptionalNumber(body.attachmentDuration);
 
-    if (!threadId || !text) {
+    if (!threadId || (!text && !attachmentFileId)) {
       return res.json({ message: "Missing payload" }, 400);
     }
 
@@ -21,6 +30,26 @@ export default async ({ req, res, error }) => {
       return res.json({ message: "Forbidden" }, 403);
     }
 
+    if (attachmentFileId) {
+      if (!config.chatAttachmentsBucketId) {
+        throw new Error("Missing environment variable APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID");
+      }
+
+      try {
+        const file = await getFile(config, attachmentFileId);
+        const permissions = participantIds.map((userId) => `read("user:${userId}")`);
+        permissions.push(`update("user:${currentUserId}")`);
+        permissions.push(`delete("user:${currentUserId}")`);
+
+        await updateFile(config, attachmentFileId, {
+          name: file.name,
+          permissions
+        });
+      } catch (err) {
+        throw new Error(`Failed updating attachment permissions: ${err?.message ?? err}`);
+      }
+    }
+
     const now = new Date().toISOString();
     const messageId = uniqueId();
     try {
@@ -28,6 +57,15 @@ export default async ({ req, res, error }) => {
         threadId,
         senderUserId: currentUserId,
         text,
+        messageType,
+        attachmentFileId,
+        attachmentName,
+        attachmentMimeType,
+        attachmentSize,
+        attachmentWidth,
+        attachmentHeight,
+        attachmentDuration,
+        replyToMessageId,
         createdAt: now
       }, participantIds.map((userId) => `read("user:${userId}")`));
     } catch (err) {
@@ -36,13 +74,14 @@ export default async ({ req, res, error }) => {
 
     // Update the thread preview immediately so inbox ordering stays in sync with the latest message.
     try {
+      const previewText = text ?? attachmentName ?? defaultAttachmentPreview(messageType);
       const threadRow = await getRow(config, config.threadsTableId, threadId);
       await updateRow(config, config.threadsTableId, threadId, {
         threadId,
         createdByUserId: threadRow?.createdByUserId ?? currentUserId,
         subject: threadRow?.subject ?? null,
         status: threadRow?.status ?? "active",
-        lastMessageText: text,
+        lastMessageText: previewText,
         lastMessageAt: now
       });
     } catch (err) {
@@ -66,7 +105,20 @@ export default async ({ req, res, error }) => {
       }
     }
 
-    return res.json({ messageId, text, createdAt: now }, 200);
+    return res.json({
+      messageId,
+      text,
+      messageType,
+      attachmentFileId,
+      attachmentName,
+      attachmentMimeType,
+      attachmentSize,
+      attachmentWidth,
+      attachmentHeight,
+      attachmentDuration,
+      replyToMessageId,
+      createdAt: now
+    }, 200);
   } catch (err) {
     error(String(err?.stack ?? err));
     return res.json({ message: "Unable to send message" }, 500);
@@ -81,7 +133,8 @@ function getConfig(req) {
     databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
     threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
     threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
-    messagesTableId: requiredEnv("APPWRITE_MESSAGES_TABLE_ID")
+    messagesTableId: requiredEnv("APPWRITE_MESSAGES_TABLE_ID"),
+    chatAttachmentsBucketId: optionalEnv("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID")
   };
 }
 
@@ -107,6 +160,11 @@ function requiredEnv(name) {
     throw new Error(`Missing environment variable ${name}`);
   }
   return value;
+}
+
+function optionalEnv(name) {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function requiredHeader(req, name) {
@@ -164,6 +222,14 @@ async function getRow(config, tableId, rowId) {
   return request(config, "GET", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`);
 }
 
+async function getFile(config, fileId) {
+  return request(config, "GET", `/storage/buckets/${config.chatAttachmentsBucketId}/files/${fileId}`);
+}
+
+async function updateFile(config, fileId, data) {
+  return request(config, "PATCH", `/storage/buckets/${config.chatAttachmentsBucketId}/files/${fileId}`, data);
+}
+
 async function updateRow(config, tableId, rowId, data) {
   return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
     data
@@ -209,4 +275,36 @@ function uniqueId() {
 
 function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asOptionalString(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function asOptionalNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function defaultAttachmentPreview(messageType) {
+  switch (messageType) {
+    case "image":
+      return "Photo";
+    case "video":
+      return "Video";
+    case "file":
+      return "File";
+    default:
+      return "Attachment";
+  }
 }
