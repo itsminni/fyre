@@ -27,20 +27,35 @@ struct AccountView: View {
         let favoriteMovie: String
     }
 
-    private enum AccountSection: String, CaseIterable, Identifiable {
-        case profile
+    private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
+        case account
+        case preferences
+        case notifications
         case security
+        case appearance
         case events
-        case settings
 
         var id: String { rawValue }
 
         var titleKey: String {
             switch self {
-            case .profile: return "account.segment.profile"
-            case .security: return "account.segment.security"
-            case .events: return "account.segment.events"
-            case .settings: return "account.segment.settings"
+            case .account: return "account.menu.account"
+            case .preferences: return "account.section.preferences"
+            case .notifications: return "account.notifications"
+            case .security: return "profile.section.security"
+            case .appearance: return "account.section.appearance"
+            case .events: return "account.section.events"
+            }
+        }
+
+        var iconName: String {
+            switch self {
+            case .account: return "key.fill"
+            case .preferences: return "slider.horizontal.3"
+            case .notifications: return "bell.fill"
+            case .security: return "lock.fill"
+            case .appearance: return "paintpalette.fill"
+            case .events: return "calendar.badge.clock"
             }
         }
     }
@@ -53,13 +68,15 @@ struct AccountView: View {
     @AppStorage("settings_show_distance") private var showDistance = true
     @AppStorage("settings_chat_background_style") private var chatBackgroundStyle = ChatBackgroundStyle.defaultDark.rawValue
     @AppStorage("settings_chat_background_brightness") private var chatBackgroundBrightness = 0.0
+    @AppStorage("settings_chat_background_color_1") private var chatBackgroundColor1Hex = "#3F4755"
+    @AppStorage("settings_chat_background_color_2") private var chatBackgroundColor2Hex = "#8B7A74"
+    @AppStorage("settings_chat_background_color_3") private var chatBackgroundColor3Hex = "#B9A89B"
     @AppStorage("settings_chat_outgoing_bubble_palette") private var outgoingBubblePalette = ChatBubblePalette.default.rawValue
     @AppStorage("settings_chat_incoming_bubble_palette") private var incomingBubblePalette = ChatBubblePalette.default.rawValue
     @AppStorage("settings_send_button_color_1") private var sendButtonColor1Hex = "#FF9A00"
     @AppStorage("settings_send_button_color_2") private var sendButtonColor2Hex = "#FF8A1F"
     @AppStorage("settings_send_button_color_3") private var sendButtonColor3Hex = "#E14D33"
 
-    @State private var selectedSection: AccountSection = .profile
     @State private var firstName = ""
     @State private var lastName = ""
     @State private var city = ""
@@ -99,30 +116,9 @@ struct AccountView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 8) {
-                Picker("", selection: $selectedSection) {
-                    ForEach(AccountSection.allCases) { section in
-                        Text(L10n.tr(section.titleKey)).tag(section)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.top, 4)
-
-                Group {
-                    switch selectedSection {
-                    case .profile:
-                        profileSettings
-                    case .security:
-                        securitySettings
-                    case .events:
-                        eventsSettings
-                    case .settings:
-                        appSettings
-                    }
-                }
-            }
+            settingsHome
             .navigationTitle(L10n.tr("tab.account"))
+            .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 fillFromUser()
                 chatBackgroundStyleSelection = chatBackgroundStyle
@@ -180,6 +176,7 @@ struct AccountView: View {
                 ChatBackgroundConfirmationView(
                     preview: preview,
                     brightness: $chatBackgroundBrightness,
+                    backgroundGradientColors: chatBackgroundGradientColors,
                     outgoingPalette: ChatBubblePalette(rawValue: outgoingBubblePalette) ?? .default,
                     incomingPalette: ChatBubblePalette(rawValue: incomingBubblePalette) ?? .default,
                     onCancel: {
@@ -191,6 +188,129 @@ struct AccountView: View {
                         pendingChatBackgroundPreview = nil
                     }
                 )
+            }
+            .navigationDestination(for: SettingsDestination.self) { destination in
+                settingsDestinationView(destination)
+                    .navigationTitle(L10n.tr(destination.titleKey))
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+    }
+
+    private var settingsHome: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                profileHubHeader
+
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionEyebrow(L10n.tr("account.segment.settings"))
+                    settingsNavigationList
+                }
+
+                eventsHubCard
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 28)
+        }
+        .scrollIndicators(.hidden)
+        .background(accountBackground.ignoresSafeArea())
+    }
+
+    private var profileHubHeader: some View {
+        VStack(spacing: 12) {
+            profileAvatar(size: 96)
+
+            Text(store.currentUser?.displayName ?? "Fyre")
+                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private var settingsNavigationList: some View {
+        VStack(spacing: 0) {
+            ForEach(Array([
+                SettingsDestination.account,
+                .preferences,
+                .notifications,
+                .security,
+                .appearance
+            ].enumerated()), id: \.element) { index, destination in
+                NavigationLink(value: destination) {
+                    settingsNavigationRow(destination)
+                }
+                .buttonStyle(.plain)
+
+                if index < 4 {
+                    Divider()
+                        .overlay(.white.opacity(0.08))
+                        .padding(.leading, 64)
+                }
+            }
+        }
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var eventsHubCard: some View {
+        AccountCard(
+            title: L10n.tr("account.section.events"),
+            icon: SettingsDestination.events.iconName
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                let recent = Array(store.currentUserUpcomingEventHistory.prefix(2))
+                if recent.isEmpty {
+                    Text(L10n.tr("account.events.empty"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(recent) { item in
+                        EventHistoryRow(item: item)
+                    }
+                }
+
+                NavigationLink(value: SettingsDestination.events) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+
+                        Text(L10n.tr("account.events.openAll"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        Spacer(minLength: 0)
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func settingsDestinationView(_ destination: SettingsDestination) -> some View {
+        Group {
+            switch destination {
+            case .account:
+                profileSettings
+            case .preferences:
+                preferencesSettings
+            case .notifications:
+                notificationSettings
+            case .security:
+                securitySettings
+            case .appearance:
+                appearanceSettings
+            case .events:
+                eventsSettings
             }
         }
     }
@@ -299,7 +419,7 @@ struct AccountView: View {
         .background(accountBackground.ignoresSafeArea())
     }
 
-    private var appSettings: some View {
+    private var appearanceSettings: some View {
         ScrollView {
             VStack(spacing: 18) {
                 AccountCard(
@@ -330,6 +450,13 @@ struct AccountView: View {
                             let style = ChatBackgroundStyle(rawValue: option) ?? .defaultDark
                             return L10n.tr(style.localizationKey)
                         }
+
+                        ChatBackgroundGradientSettings(
+                            colorOne: chatBackgroundColorOneBinding,
+                            colorTwo: chatBackgroundColorTwoBinding,
+                            colorThree: chatBackgroundColorThreeBinding,
+                            onApply: applyCustomChatBackgroundGradient
+                        )
 
                         SettingsPickerField(
                             title: L10n.tr("account.chatBubble.outgoing"),
@@ -364,15 +491,45 @@ struct AccountView: View {
                         }
                     }
                 }
+            }
+            .padding(.horizontal)
+            .padding(.top, 2)
+            .padding(.bottom, 28)
+        }
+        .scrollIndicators(.hidden)
+        .background(accountBackground.ignoresSafeArea())
+    }
 
+    private var preferencesSettings: some View {
+        ScrollView {
+            VStack(spacing: 18) {
                 AccountCard(
                     title: L10n.tr("account.section.preferences"),
                     icon: "slider.horizontal.3"
                 ) {
                     VStack(spacing: 14) {
-                        SettingsToggleField(title: L10n.tr("account.notifications"), isOn: $notificationsEnabled)
                         SettingsToggleField(title: L10n.tr("account.showAge"), isOn: $showAge)
                         SettingsToggleField(title: L10n.tr("account.showDistance"), isOn: $showDistance)
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 2)
+            .padding(.bottom, 28)
+        }
+        .scrollIndicators(.hidden)
+        .background(accountBackground.ignoresSafeArea())
+    }
+
+    private var notificationSettings: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                AccountCard(
+                    title: L10n.tr("account.notifications"),
+                    icon: "bell.fill"
+                ) {
+                    VStack(spacing: 14) {
+                        SettingsToggleField(title: L10n.tr("account.notifications"), isOn: $notificationsEnabled)
                     }
                 }
             }
@@ -465,6 +622,36 @@ struct AccountView: View {
         )
     }
 
+    private var chatBackgroundGradientColors: [Color] {
+        [
+            Color(hex: chatBackgroundColor1Hex),
+            Color(hex: chatBackgroundColor2Hex),
+            Color(hex: chatBackgroundColor3Hex)
+        ]
+        .compactMap { $0 }
+    }
+
+    private var chatBackgroundColorOneBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: chatBackgroundColor1Hex) ?? Color(red: 0.25, green: 0.28, blue: 0.33) },
+            set: { chatBackgroundColor1Hex = $0.hexRGB ?? "#3F4755" }
+        )
+    }
+
+    private var chatBackgroundColorTwoBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: chatBackgroundColor2Hex) ?? Color(red: 0.55, green: 0.48, blue: 0.46) },
+            set: { chatBackgroundColor2Hex = $0.hexRGB ?? "#8B7A74" }
+        )
+    }
+
+    private var chatBackgroundColorThreeBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: chatBackgroundColor3Hex) ?? Color(red: 0.73, green: 0.66, blue: 0.61) },
+            set: { chatBackgroundColor3Hex = $0.hexRGB ?? "#B9A89B" }
+        )
+    }
+
     private var sendButtonColorTwoBinding: Binding<Color> {
         Binding(
             get: { Color(hex: sendButtonColor2Hex) ?? Color(red: 1.0, green: 0.54, blue: 0.12) },
@@ -521,47 +708,51 @@ struct AccountView: View {
     }
 
     @ViewBuilder
-    private func settingsActionRow(title: String, systemImage: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.headline)
-                .foregroundStyle(.orange)
-                .frame(width: 20)
-
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    private func sectionEyebrow(_ title: String) -> some View {
+        Text(title)
+            .font(.title3.weight(.bold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 4)
     }
 
     @ViewBuilder
-    private func settingsCompactActionButton(title: String, systemImage: String, isDestructive: Bool = false) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.headline)
-                .foregroundStyle(isDestructive ? .red : .orange)
+    private func settingsNavigationRow(_ destination: SettingsDestination) -> some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.white.opacity(0.04))
+                .frame(width: 34, height: 34)
+                .overlay {
+                    Image(systemName: destination.iconName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
 
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isDestructive ? .red : .primary)
-                .lineLimit(2)
+            Text(L10n.tr(destination.titleKey))
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.primary)
 
             Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 15)
+        .contentShape(Rectangle())
     }
 
     private func applyChatBackgroundStyle(_ style: ChatBackgroundStyle) {
         chatBackgroundStyle = style.rawValue
         chatBackgroundStyleSelection = style.rawValue
         chatBackgroundSettingsMessage = nil
+        chatBackgroundSettingsMessageIsError = false
+    }
+
+    private func applyCustomChatBackgroundGradient() {
+        chatBackgroundStyle = ChatBackgroundStyle.customGradient.rawValue
+        chatBackgroundStyleSelection = ChatBackgroundStyle.customGradient.rawValue
+        chatBackgroundSettingsMessage = L10n.tr("account.chatBackground.customApplied")
         chatBackgroundSettingsMessageIsError = false
     }
 
@@ -959,6 +1150,85 @@ private struct SendButtonGradientSettings: View {
     }
 }
 
+private struct ChatBackgroundGradientSettings: View {
+    @Binding var colorOne: Color
+    @Binding var colorTwo: Color
+    @Binding var colorThree: Color
+    let onApply: () -> Void
+
+    @State private var draftColorOne: Color
+    @State private var draftColorTwo: Color
+    @State private var draftColorThree: Color
+
+    init(
+        colorOne: Binding<Color>,
+        colorTwo: Binding<Color>,
+        colorThree: Binding<Color>,
+        onApply: @escaping () -> Void
+    ) {
+        self._colorOne = colorOne
+        self._colorTwo = colorTwo
+        self._colorThree = colorThree
+        self.onApply = onApply
+        _draftColorOne = State(initialValue: colorOne.wrappedValue)
+        _draftColorTwo = State(initialValue: colorTwo.wrappedValue)
+        _draftColorThree = State(initialValue: colorThree.wrappedValue)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("account.chatBackgroundGradient"))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color1"), color: $draftColorOne)
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color2"), color: $draftColorTwo)
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color3"), color: $draftColorThree)
+            }
+
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [draftColorOne, draftColorTwo, draftColorThree],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(height: 88)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    Text(L10n.tr("chat.message.placeholder"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
+
+            Button(L10n.tr("common.apply")) {
+                colorOne = draftColorOne
+                colorTwo = draftColorTwo
+                colorThree = draftColorThree
+                onApply()
+            }
+            .buttonStyle(AccountPrimaryButtonStyle())
+            .disabled(!hasPendingChanges)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var hasPendingChanges: Bool {
+        draftColorOne.hexRGB != colorOne.hexRGB
+            || draftColorTwo.hexRGB != colorTwo.hexRGB
+            || draftColorThree.hexRGB != colorThree.hexRGB
+    }
+}
+
 private struct SendButtonColorSwatch: View {
     let title: String
     @Binding var color: Color
@@ -1011,6 +1281,7 @@ private struct AccountPrimaryButtonStyle: ButtonStyle {
 private struct ChatBackgroundConfirmationView: View {
     let preview: PendingChatBackgroundPreview
     @Binding var brightness: Double
+    let backgroundGradientColors: [Color]
     let outgoingPalette: ChatBubblePalette
     let incomingPalette: ChatBubblePalette
     let onCancel: () -> Void
@@ -1056,7 +1327,10 @@ private struct ChatBackgroundConfirmationView: View {
 
     @ViewBuilder
     private var previewBackground: some View {
-        preview.style.backgroundView(colorScheme: colorScheme)
+        preview.style.backgroundView(
+            colorScheme: colorScheme,
+            customGradientColors: backgroundGradientColors
+        )
         .brightness(brightness)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()

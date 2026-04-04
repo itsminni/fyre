@@ -161,6 +161,7 @@ enum ChatBackgroundStyle: String, CaseIterable, Identifiable {
     case ember
     case ocean
     case forest
+    case customGradient
 
     var id: String { rawValue }
 
@@ -176,11 +177,13 @@ enum ChatBackgroundStyle: String, CaseIterable, Identifiable {
             return "account.chatBackground.ocean"
         case .forest:
             return "account.chatBackground.forest"
+        case .customGradient:
+            return "account.chatBackground.custom"
         }
     }
 
     @ViewBuilder
-    func backgroundView(colorScheme: ColorScheme) -> some View {
+    func backgroundView(colorScheme: ColorScheme, customGradientColors: [Color] = []) -> some View {
         switch self {
         case .defaultDark:
             Color(uiColor: .systemBackground)
@@ -294,6 +297,58 @@ enum ChatBackgroundStyle: String, CaseIterable, Identifiable {
                     .blur(radius: 80)
                     .offset(x: 140, y: 260)
             }
+
+        case .customGradient:
+            let colors = resolvedCustomGradientColors(customGradientColors, colorScheme: colorScheme)
+
+            ZStack {
+                LinearGradient(
+                    colors: colors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                Circle()
+                    .fill(colors.first?.opacity(colorScheme == .dark ? 0.22 : 0.16) ?? .clear)
+                    .frame(width: 280, height: 280)
+                    .blur(radius: 80)
+                    .offset(x: -140, y: -220)
+
+                Circle()
+                    .fill(colors.last?.opacity(colorScheme == .dark ? 0.18 : 0.12) ?? .clear)
+                    .frame(width: 320, height: 320)
+                    .blur(radius: 96)
+                    .offset(x: 150, y: 260)
+            }
         }
+    }
+
+    private func resolvedCustomGradientColors(_ colors: [Color], colorScheme: ColorScheme) -> [Color] {
+        let filtered = Array(colors.prefix(3))
+        if filtered.count >= 3 {
+            return filtered
+        }
+
+        if filtered.count == 2 {
+            return [filtered[0], filtered[1], filtered[1]]
+        }
+
+        if filtered.count == 1 {
+            return [filtered[0], filtered[0], filtered[0]]
+        }
+
+        if colorScheme == .dark {
+            return [
+                Color(red: 0.20, green: 0.23, blue: 0.30),
+                Color(red: 0.45, green: 0.38, blue: 0.39),
+                Color(red: 0.67, green: 0.56, blue: 0.50)
+            ]
+        }
+
+        return [
+            Color(red: 0.91, green: 0.93, blue: 0.97),
+            Color(red: 0.86, green: 0.80, blue: 0.81),
+            Color(red: 0.94, green: 0.89, blue: 0.85)
+        ]
     }
 }

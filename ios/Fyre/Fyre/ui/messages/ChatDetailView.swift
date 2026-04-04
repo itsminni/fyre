@@ -51,6 +51,9 @@ struct ChatDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("settings_chat_background_style") private var chatBackgroundStyle = ChatBackgroundStyle.defaultDark.rawValue
     @AppStorage("settings_chat_background_brightness") private var chatBackgroundBrightness = 0.0
+    @AppStorage("settings_chat_background_color_1") private var chatBackgroundColor1Hex = "#3F4755"
+    @AppStorage("settings_chat_background_color_2") private var chatBackgroundColor2Hex = "#8B7A74"
+    @AppStorage("settings_chat_background_color_3") private var chatBackgroundColor3Hex = "#B9A89B"
     @AppStorage("settings_chat_outgoing_bubble_palette") private var outgoingBubblePalette = ChatBubblePalette.default.rawValue
     @AppStorage("settings_chat_incoming_bubble_palette") private var incomingBubblePalette = ChatBubblePalette.default.rawValue
     @AppStorage("settings_send_button_color_1") private var sendButtonColor1Hex = "#FF9A00"
@@ -106,6 +109,8 @@ struct ChatDetailView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
                             let bubblePosition = bubblePosition(for: index)
+                            let bubbleHorizontalPadding = bubbleHorizontalPadding(for: message)
+                            let bubbleVerticalPadding = bubbleVerticalPadding(for: message)
                             VStack(spacing: 0) {
                                 if shouldShowDateSeparator(before: index) {
                                     Text(dateSeparatorLabel(for: message.sentAt))
@@ -114,7 +119,7 @@ struct ChatDetailView: View {
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 7)
                                         .background(.ultraThinMaterial, in: Capsule())
-                                        .padding(.top, index == 0 ? 6 : 14)
+                                        .padding(.top, index == 0 ? 0 : 14)
                                         .padding(.bottom, 10)
                                         .frame(maxWidth: .infinity)
                                 }
@@ -122,40 +127,64 @@ struct ChatDetailView: View {
                                 HStack(alignment: .bottom, spacing: 0) {
                                     if message.isMe { Spacer(minLength: 40) }
                                     VStack(alignment: message.isMe ? .trailing : .leading, spacing: 3) {
-                                        VStack(alignment: .leading, spacing: message.replyPreviewText == nil ? 0 : 8) {
-                                            if let replyPreviewText = message.replyPreviewText {
-                                                replyInlinePreview(
-                                                    sender: replySenderLabel(for: message),
-                                                    text: replyPreviewText,
-                                                    isOutgoing: message.isMe
-                                                )
-                                            }
+                                        Group {
+                                            if isImageOnlyMessage(message) {
+                                                if let attachment = message.attachment {
+                                                    messageAttachmentView(
+                                                        attachment: attachment,
+                                                        messageType: message.messageType
+                                                    )
+                                                }
+                                            } else {
+                                                VStack(alignment: .leading, spacing: message.replyPreviewText == nil ? 0 : 8) {
+                                                    if let replyPreviewText = message.replyPreviewText {
+                                                        replyInlinePreview(
+                                                            sender: replySenderLabel(for: message),
+                                                            text: replyPreviewText,
+                                                            isOutgoing: message.isMe
+                                                        )
+                                                    }
 
-                                            if let attachment = message.attachment {
-                                                messageAttachmentView(
-                                                    attachment: attachment,
-                                                    messageType: message.messageType
-                                                )
-                                            }
+                                                    if let attachment = message.attachment {
+                                                        messageAttachmentView(
+                                                            attachment: attachment,
+                                                            messageType: message.messageType
+                                                        )
+                                                    }
 
-                                            if !message.text.isEmpty {
-                                                Text(message.text)
-                                                    .font(.body)
-                                                    .multilineTextAlignment(.leading)
-                                                    .foregroundStyle(messageTextStyle(isOutgoing: message.isMe))
+                                                    if !message.text.isEmpty {
+                                                        Text(message.text)
+                                                            .font(.body)
+                                                            .multilineTextAlignment(.leading)
+                                                            .foregroundStyle(messageTextStyle(isOutgoing: message.isMe))
+                                                    }
+                                                }
                                             }
                                         }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            messageBubbleChrome(
-                                                isOutgoing: message.isMe,
-                                                position: bubblePosition
-                                            )
-                                        )
+                                        .padding(.horizontal, isImageOnlyMessage(message) ? 0 : bubbleHorizontalPadding)
+                                        .padding(.vertical, isImageOnlyMessage(message) ? 0 : bubbleVerticalPadding)
+                                        .background {
+                                            if !isImageOnlyMessage(message) {
+                                                messageBubbleChrome(
+                                                    isOutgoing: message.isMe,
+                                                    position: bubblePosition
+                                                )
+                                            }
+                                        }
                                         .fixedSize(horizontal: false, vertical: true)
-                                        .frame(maxWidth: messageMaxWidth, alignment: message.isMe ? .trailing : .leading)
-                                        .shadow(color: messageBubbleShadow(isOutgoing: message.isMe), radius: colorScheme == .dark ? 0 : 6, y: colorScheme == .dark ? 0 : 3)
+                                        .frame(
+                                            maxWidth: isImageOnlyMessage(message)
+                                                ? min(messageMaxWidth + 24, 292)
+                                                : messageMaxWidth,
+                                            alignment: message.isMe ? .trailing : .leading
+                                        )
+                                        .shadow(
+                                            color: isImageOnlyMessage(message)
+                                                ? .black.opacity(colorScheme == .dark ? 0.26 : 0.12)
+                                                : messageBubbleShadow(isOutgoing: message.isMe),
+                                            radius: isImageOnlyMessage(message) ? 12 : (colorScheme == .dark ? 0 : 6),
+                                            y: isImageOnlyMessage(message) ? 6 : (colorScheme == .dark ? 0 : 3)
+                                        )
                                         .contextMenu {
                                             Button {
                                                 replyingToMessage = message
@@ -299,28 +328,22 @@ struct ChatDetailView: View {
             activeChatBackground
                 .ignoresSafeArea()
         }
-        .overlay(alignment: .top) {
-            if #unavailable(iOS 26.0) {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .frame(height: 108)
-                    .overlay(alignment: .bottom) {
-                        Rectangle()
-                            .fill(colorScheme == .dark ? .white.opacity(0.28) : .black.opacity(0.16))
-                            .frame(height: 1)
-                    }
-                    .ignoresSafeArea(edges: .top)
-                    .allowsHitTesting(false)
+        .overlay(alignment: .bottom) {
+            if #available(iOS 26.0, *) {
+                composerOverlay
+                    .padding(.bottom, composerOverlayBottomInset)
+                    .ignoresSafeArea(.container, edges: .bottom)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composerOverlay
+            if #unavailable(iOS 26.0) {
+                composerOverlay
+            }
         }
         .navigationTitle(navigationTitleText)
         .navigationBarTitleDisplayMode(.inline)
-        .background {
-            ChatTabBarVisibilityController(isHidden: true)
-        }
+        .modifier(ChatDetailTabBarHidingModifier())
+        .modifier(ChatDetailNavigationBarModifier(colorScheme: colorScheme))
         .toolbar {
             if #unavailable(iOS 26.0) {
                 ToolbarItem(placement: .principal) {
@@ -581,7 +604,10 @@ struct ChatDetailView: View {
     @ViewBuilder
     private var activeChatBackground: some View {
         let selectedStyle = ChatBackgroundStyle(rawValue: chatBackgroundStyle) ?? .defaultDark
-        selectedStyle.backgroundView(colorScheme: colorScheme)
+        selectedStyle.backgroundView(
+            colorScheme: colorScheme,
+            customGradientColors: customBackgroundGradientColors
+        )
             .brightness(chatBackgroundBrightness)
     }
 
@@ -622,19 +648,19 @@ struct ChatDetailView: View {
             return 6
         }
 
-        return 10
+        return 8
     }
 
     private var messageListTopInset: CGFloat {
-        if #available(iOS 26.0, *) {
-            return 20
-        }
-
-        return 28
+        0
     }
 
     private var messageListBottomInset: CGFloat {
-        var inset: CGFloat = 92
+        if #unavailable(iOS 26.0) {
+            return 10
+        }
+
+        var inset: CGFloat = 76 + composerOverlayBottomInset
 
         if replyingToMessage != nil {
             inset += 56
@@ -664,7 +690,11 @@ struct ChatDetailView: View {
     }
 
     private var scrollToLatestButtonBottomPadding: CGFloat {
-        var padding: CGFloat = 84
+        if #unavailable(iOS 26.0) {
+            return 18
+        }
+
+        var padding: CGFloat = 68 + composerOverlayBottomInset
 
         if replyingToMessage != nil {
             padding += 60
@@ -896,6 +926,27 @@ struct ChatDetailView: View {
         .compactMap { $0 }
     }
 
+    private var customBackgroundGradientColors: [Color] {
+        [
+            Color(hex: chatBackgroundColor1Hex),
+            Color(hex: chatBackgroundColor2Hex),
+            Color(hex: chatBackgroundColor3Hex)
+        ]
+        .compactMap { $0 }
+    }
+
+    private var composerOverlayBottomInset: CGFloat {
+        max(windowSafeAreaBottomInset - 8, 6)
+    }
+
+    private var windowSafeAreaBottomInset: CGFloat {
+        let windowScene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        let keyWindow = windowScene?.windows.first(where: \.isKeyWindow)
+        return keyWindow?.safeAreaInsets.bottom ?? 0
+    }
+
     private func messageTextStyle(isOutgoing: Bool) -> AnyShapeStyle {
         let palette = isOutgoing ? outgoingBubbleStyle : incomingBubbleStyle
         return AnyShapeStyle(palette.textColor(colorScheme: colorScheme, isOutgoing: isOutgoing))
@@ -930,6 +981,40 @@ struct ChatDetailView: View {
         return isOutgoing ? .orange.opacity(0.10) : .black.opacity(0.05)
     }
 
+    private func bubbleHorizontalPadding(for message: ChatMessage) -> CGFloat {
+        if isImageOnlyMessage(message) {
+            return 5
+        }
+
+        if isAttachmentOnlyMessage(message) {
+            return 8
+        }
+
+        return 12
+    }
+
+    private func bubbleVerticalPadding(for message: ChatMessage) -> CGFloat {
+        if isImageOnlyMessage(message) {
+            return 5
+        }
+
+        if isAttachmentOnlyMessage(message) {
+            return 6
+        }
+
+        return 8
+    }
+
+    private func isAttachmentOnlyMessage(_ message: ChatMessage) -> Bool {
+        message.attachment != nil
+            && message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && message.replyPreviewText == nil
+    }
+
+    private func isImageOnlyMessage(_ message: ChatMessage) -> Bool {
+        isAttachmentOnlyMessage(message) && message.messageType == .image
+    }
+
     private func replyPreviewBackground(isOutgoing: Bool) -> Color {
         if isOutgoing {
             return .white.opacity(colorScheme == .dark ? 0.10 : 0.20)
@@ -962,6 +1047,19 @@ struct ChatDetailView: View {
             return message.attachment?.name ?? L10n.tr("chat.attachment.file")
         case .text:
             return ""
+        }
+    }
+
+    private func attachmentPreviewTitle(for attachment: PendingChatAttachment) -> String {
+        switch attachment.type {
+        case .image:
+            return L10n.tr("chat.attachment.photo")
+        case .video:
+            return L10n.tr("chat.attachment.video")
+        case .file:
+            return L10n.tr("chat.attachment.file")
+        case .text:
+            return L10n.tr("chat.attachment.file")
         }
     }
 
@@ -1119,41 +1217,58 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private func composerIntegratedAttachmentPreview(_ attachment: PendingChatAttachment) -> some View {
-        ZStack(alignment: .topTrailing) {
+        HStack(spacing: 8) {
             Group {
                 if let previewImage = attachment.previewImage {
                     Image(uiImage: previewImage)
+                        .interpolation(.high)
+                        .antialiased(true)
                         .resizable()
                         .scaledToFill()
                 } else {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.white.opacity(colorScheme == .dark ? 0.06 : 0.08))
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(.white.opacity(colorScheme == .dark ? 0.08 : 0.10))
                         .overlay {
                             Image(systemName: attachment.type == .video ? "video.fill" : "doc.fill")
-                                .font(.headline)
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.orange)
                         }
                 }
             }
             .frame(width: 42, height: 42)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.white.opacity(colorScheme == .dark ? 0.10 : 0.12), lineWidth: 1)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachmentPreviewTitle(for: attachment))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(attachment.fileName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
             Button {
                 pendingAttachment = nil
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white, .black.opacity(0.35))
-                    .background(Color.black.opacity(0.18), in: Circle())
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .background(.white.opacity(colorScheme == .dark ? 0.10 : 0.14), in: Circle())
             }
             .buttonStyle(.plain)
-            .offset(x: 5, y: -5)
         }
-        .padding(.trailing, 2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: 172)
+        .background(.white.opacity(colorScheme == .dark ? 0.06 : 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(colorScheme == .dark ? 0.08 : 0.10), lineWidth: 1)
+        }
     }
 
     private var attachmentTray: some View {
@@ -1265,9 +1380,13 @@ struct ChatDetailView: View {
         switch messageType {
         case .image:
             RemoteChatAttachmentImage(fileId: attachment.fileId)
-                .frame(maxWidth: min(messageMaxWidth, 240), maxHeight: 240)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .frame(maxWidth: min(messageMaxWidth + 24, 292), maxHeight: 292)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(.white.opacity(colorScheme == .dark ? 0.12 : 0.18), lineWidth: 1)
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .onTapGesture {
                     openAttachmentPreview(attachment, as: .image)
                 }
@@ -1397,7 +1516,11 @@ struct ChatDetailView: View {
     }
 
     private func topSpacing(for index: Int) -> CGFloat {
-        isGroupedWithPrevious(for: index) ? 2 : 10
+        if isGroupedWithPrevious(for: index) {
+            return 2
+        }
+
+        return index == 0 ? 0 : 10
     }
 
     private func bottomSpacing(for index: Int) -> CGFloat {
@@ -1736,7 +1859,7 @@ struct ChatDetailView: View {
             image.draw(in: CGRect(origin: .zero, size: image.size))
         }
 
-        guard let data = normalized.jpegData(compressionQuality: 0.9) else {
+        guard let data = normalized.jpegData(compressionQuality: 0.96) else {
             sendErrorMessage = ChatBackgroundAssetStoreError.invalidImage.localizedDescription
             return
         }
@@ -1838,7 +1961,7 @@ private struct PendingChatAttachment {
         let size = data.count
 
         if contentType.conforms(to: .image), let image = UIImage(data: data) {
-            let jpegData = image.jpegData(compressionQuality: 0.9) ?? data
+            let jpegData = image.jpegData(compressionQuality: 0.96) ?? data
             let jpegFileName = normalizedFileName(from: fileName, contentType: .jpeg)
             return PendingChatAttachment(
                 data: jpegData,
@@ -1895,6 +2018,43 @@ private struct PendingChatAttachment {
         }
 
         return "\(resolvedBaseName).\(resolvedExt)"
+    }
+}
+
+private struct ChatDetailTabBarHidingModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.background {
+                ChatTabBarVisibilityController(isHidden: true)
+            }
+        } else {
+            content.toolbar(.hidden, for: .tabBar)
+        }
+    }
+}
+
+private struct ChatDetailNavigationBarModifier: ViewModifier {
+    let colorScheme: ColorScheme
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+        } else {
+            content
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarBackground(navigationBarBackground, for: .navigationBar)
+                .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
+        }
+    }
+
+    private var navigationBarBackground: some ShapeStyle {
+        if colorScheme == .dark {
+            return AnyShapeStyle(.regularMaterial)
+        }
+
+        return AnyShapeStyle(Color(uiColor: .systemBackground))
     }
 }
 
@@ -2018,6 +2178,8 @@ private struct RemoteChatAttachmentImage: View {
             if let image {
                 Image(uiImage: image)
                     .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
                     .scaledToFill()
             } else {
                 Rectangle()
@@ -2032,7 +2194,7 @@ private struct RemoteChatAttachmentImage: View {
             do {
                 if let data = try await services.backend.fetchAttachmentData(fileId: fileId),
                    let loadedImage = UIImage(data: data) {
-                    image = loadedImage
+                    image = loadedImage.preparingForDisplay() ?? loadedImage
                 }
             } catch {
 #if DEBUG
@@ -2192,6 +2354,11 @@ private struct MessageReadInfoSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                Section(L10n.tr("chat.messageInfo.content")) {
+                    messageContentView
+                        .listRowBackground(Color.clear)
+                }
+
                 Section {
                     infoRow(
                         title: L10n.tr("chat.messageInfo.sent"),
@@ -2213,6 +2380,91 @@ private struct MessageReadInfoSheet: View {
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var messageContentView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let attachment = message.attachment {
+                messageAttachmentSummary(attachment)
+            }
+
+            let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedText.isEmpty {
+                Text(trimmedText)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func messageAttachmentSummary(_ attachment: MessageAttachmentDTO) -> some View {
+        switch message.messageType {
+        case .image:
+            HStack(spacing: 12) {
+                RemoteChatAttachmentImage(fileId: attachment.fileId)
+                    .frame(width: 76, height: 76)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(.white.opacity(0.10), lineWidth: 1)
+                    }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.tr("chat.attachment.photo"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    if let name = attachment.name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+        case .video, .file:
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.white.opacity(0.06))
+                    .frame(width: 76, height: 76)
+                    .overlay {
+                        Image(systemName: message.messageType == .video ? "video.fill" : "doc.fill")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(message.messageType == .video ? L10n.tr("chat.attachment.video") : L10n.tr("chat.attachment.file"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    if let name = attachment.name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else if let mimeType = attachment.mimeType, !mimeType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(mimeType)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+        case .text:
+            EmptyView()
         }
     }
 

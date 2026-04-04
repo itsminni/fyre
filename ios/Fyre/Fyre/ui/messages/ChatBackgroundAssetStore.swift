@@ -25,7 +25,7 @@ enum ChatBackgroundAssetStore {
 
     @discardableResult
     static func saveImage(_ image: UIImage) throws -> String {
-        guard let normalizedData = image.jpegData(compressionQuality: 0.88) else {
+        guard let normalizedData = image.jpegData(compressionQuality: 0.94) else {
             throw ChatBackgroundAssetStoreError.encodingFailed
         }
 
@@ -45,7 +45,7 @@ enum ChatBackgroundAssetStore {
 
     static func normalizedImage(_ image: UIImage) -> UIImage {
         let format = image.imageRendererFormat
-        format.scale = 1
+        format.scale = max(image.scale, UIScreen.main.scale)
         return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
             image.draw(in: CGRect(origin: .zero, size: image.size))
         }

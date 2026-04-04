@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 const DEFAULT_MATCH_SUBJECT = "Fyre match";
 const PLACEHOLDER_MATCH_SUBJECTS = new Set(["Match", DEFAULT_MATCH_SUBJECT]);
 
@@ -80,8 +82,8 @@ export default async ({ req, res, error }) => {
       return res.json({ matched: true, matchId: existingMatch.$id, threadId }, 200);
     }
 
-    const matchId = uniqueId();
-    await createRow(config, config.matchesTableId, matchId, {
+    const matchId = stableMatchRowId(userIds);
+    await createOrReuseMatchRow(config, matchId, {
       matchKey,
       userAId: userIds[0],
       userBId: userIds[1],
@@ -182,6 +184,7 @@ function swipePermissions(userId) {
 }
 
 async function createThreadWithParticipants(config, currentUserId, otherUserId, otherUserName) {
+  const participantIds = [currentUserId, otherUserId].sort();
   const existingThreadId = await findExistingThreadIdByParticipants(config, currentUserId, otherUserId);
   if (existingThreadId) {
     await maybeRefreshThreadSubject(
@@ -189,14 +192,23 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId, 
       existingThreadId,
       currentUserId,
       otherUserName,
-      participantPermissions([currentUserId, otherUserId])
+      participantPermissions(participantIds)
     );
     return existingThreadId;
   }
 
-  const threadId = uniqueId();
-  const permissions = participantPermissions([currentUserId, otherUserId]);
+  const permissions = participantPermissions(participantIds);
+  const threadId = stableThreadRowId(participantIds);
+  await createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions);
 
+  await ensureThreadParticipant(config, threadId, currentUserId, permissions);
+  await ensureThreadParticipant(config, threadId, otherUserId, permissions);
+  await maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions);
+
+  return threadId;
+}
+
+async function createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions) {
   try {
     await createRow(config, config.threadsTableId, threadId, {
       threadId,
@@ -207,38 +219,58 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId, 
       lastMessageAt: null
     }, permissions);
   } catch (err) {
-    throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
-  }
-
-  try {
-    await createRow(config, config.threadParticipantsTableId, uniqueId(), {
-      threadId,
-      userId: currentUserId,
-      role: "member",
-      lastReadAt: null,
-      muted: false,
-      pinned: false,
-      notificationsEnabled: true
-    }, permissions);
-  } catch (err) {
-    throw new Error(`Failed creating current-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
-  }
-
-  try {
-    await createRow(config, config.threadParticipantsTableId, uniqueId(), {
-      threadId,
-      userId: otherUserId,
-      role: "member",
-      lastReadAt: null,
-      muted: false,
-      pinned: false,
-      notificationsEnabled: true
-    }, permissions);
-  } catch (err) {
-    throw new Error(`Failed creating other-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+    if (!isAlreadyExistsError(err)) {
+      throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
+    }
   }
 
   return threadId;
+}
+
+async function ensureThreadParticipant(config, threadId, userId, permissions) {
+  const existingParticipant = await findSingleRow(config, config.threadParticipantsTableId, [
+    equal("threadId", [threadId]),
+    equal("userId", [userId]),
+    limit(1)
+  ]);
+
+  if (existingParticipant?.$id) {
+    return existingParticipant.$id;
+  }
+
+  const participantRowId = stableParticipantRowId(threadId, userId);
+
+  try {
+    const participantRow = await createRow(config, config.threadParticipantsTableId, participantRowId, {
+      threadId,
+      userId,
+      role: "member",
+      lastReadAt: null,
+      muted: false,
+      pinned: false,
+      notificationsEnabled: true
+    }, permissions);
+    return participantRow?.$id ?? null;
+  } catch (err) {
+    if (isAlreadyExistsError(err)) {
+      return participantRowId;
+    }
+    throw new Error(`Failed creating participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+  }
+}
+
+async function createOrReuseMatchRow(config, matchId, data, permissions) {
+  try {
+    await createRow(config, config.matchesTableId, matchId, data, permissions);
+  } catch (err) {
+    if (!isAlreadyExistsError(err)) {
+      throw new Error(`Failed creating row in ${config.matchesTableId}: ${err?.message ?? err}`);
+    }
+
+    await updateRow(config, config.matchesTableId, matchId, data, permissions);
+  }
+
+  return matchId;
 }
 
 async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions) {
@@ -368,7 +400,28 @@ function limit(value) {
 }
 
 function uniqueId() {
-  return crypto.randomUUID().replaceAll("-", "");
+  return randomUUID().replaceAll("-", "");
+}
+
+function isAlreadyExistsError(err) {
+  const message = String(err?.message ?? err ?? "").toLowerCase();
+  return message.includes("already exists");
+}
+
+function stableThreadRowId(userIds) {
+  return stableRowId("th", userIds.join(":"));
+}
+
+function stableParticipantRowId(threadId, userId) {
+  return stableRowId("tp", `${threadId}:${userId}`);
+}
+
+function stableMatchRowId(userIds) {
+  return stableRowId("mt", userIds.join(":"));
+}
+
+function stableRowId(prefix, seed) {
+  return `${prefix}_${createHash("sha256").update(seed).digest("hex").slice(0, 32)}`;
 }
 
 function asString(value) {

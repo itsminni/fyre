@@ -37,7 +37,7 @@
 "tab.home" = "Home";
 "tab.messages" = "Messages";
 "tab.events" = "Events";
-"tab.account" = "Account";
+"tab.account" = "Profile";
 
 "messages.navigationTitle" = "Messages";
 "messages.empty.title" = "No chats yet";
@@ -65,14 +65,16 @@
 "chat.error.sendFailed" = "Unable to send the message right now. Please try again.";
 "chat.message.placeholder" = "Message";
 "chat.messageInfo.title" = "Message info";
+"chat.messageInfo.content" = "Content";
 "chat.messageInfo.sent" = "Sent";
 "chat.messageInfo.read" = "Read";
 "chat.messageInfo.unread" = "Not read yet";
 
 "account.section.profile" = "Profile";
-"account.section.settings" = "App settings";
+"account.section.settings" = "Settings";
 "account.section.appearance" = "Appearance";
-"account.section.preferences" = "App preferences";
+"account.section.preferences" = "Preferences";
+"account.menu.account" = "Account";
 "account.segment.profile" = "Profile";
 "account.segment.app" = "Settings";
 "account.segment.settings" = "Settings";
@@ -88,6 +90,7 @@
 "account.chatBackground.ember" = "Ember";
 "account.chatBackground.ocean" = "Ocean";
 "account.chatBackground.forest" = "Forest";
+"account.chatBackground.custom" = "Custom";
 "account.chatBackground.hint" = "Select a default style or choose a custom image, then confirm it in full-screen preview.";
 "account.chatBackground.gallery" = "Choose from Photos";
 "account.chatBackground.files" = "Choose from Files";
@@ -103,6 +106,7 @@
 "account.chatBubble.emerald" = "Emerald";
 "account.chatBubble.graphite" = "Graphite";
 "account.sendButtonGradient" = "Send button gradient";
+"account.chatBackgroundGradient" = "Chat background gradient";
 "account.sendButtonGradient.color1" = "Color 1";
 "account.sendButtonGradient.color2" = "Color 2";
 "account.sendButtonGradient.color3" = "Color 3";
@@ -250,7 +254,7 @@
 "events.admin.field.registrationClosesAt" = "Registration closes at";
 "events.admin.field.cancellationClosesAt" = "Cancellation closes at";
 "events.admin.access" = "Access";
-"events.admin.access.subtitle" = "If you set event-specific admins here, only they will manage this event. Leave both fields empty to keep the global whitelist.";
+"events.admin.access.subtitle" = "Set event-specific admin emails here. Leave this field empty to keep the global whitelist.";
 "events.admin.field.adminEmails" = "Admin emails";
 "events.admin.field.adminUserIds" = "Admin user IDs";
 "events.admin.success.updated" = "Event updated.";

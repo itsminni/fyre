@@ -37,7 +37,7 @@
 "tab.home" = "Home";
 "tab.messages" = "Messaggi";
 "tab.events" = "Eventi";
-"tab.account" = "Account";
+"tab.account" = "Profilo";
 
 "messages.navigationTitle" = "Messaggi";
 "messages.empty.title" = "Nessuna chat";
@@ -65,14 +65,16 @@
 "chat.error.sendFailed" = "Impossibile inviare il messaggio adesso. Riprova.";
 "chat.message.placeholder" = "Messaggio";
 "chat.messageInfo.title" = "Info messaggio";
+"chat.messageInfo.content" = "Contenuto";
 "chat.messageInfo.sent" = "Inviato";
 "chat.messageInfo.read" = "Letto";
 "chat.messageInfo.unread" = "Non ancora letto";
 
 "account.section.profile" = "Profilo";
-"account.section.settings" = "Impostazioni app";
+"account.section.settings" = "Impostazioni";
 "account.section.appearance" = "Aspetto";
-"account.section.preferences" = "Preferenze app";
+"account.section.preferences" = "Preferenze";
+"account.menu.account" = "Account";
 "account.segment.profile" = "Profilo";
 "account.segment.app" = "Impostazioni";
 "account.segment.settings" = "Impostazioni";
@@ -92,6 +94,7 @@
 "account.chatBackground.ember" = "Brace";
 "account.chatBackground.ocean" = "Oceano";
 "account.chatBackground.forest" = "Foresta";
+"account.chatBackground.custom" = "Custom";
 "account.chatBackground.hint" = "Seleziona uno sfondo di default oppure scegli un'immagine personalizzata, poi confermala nella preview a schermo intero.";
 "account.chatBackground.gallery" = "Scegli da Foto";
 "account.chatBackground.files" = "Scegli da File";
@@ -107,6 +110,7 @@
 "account.chatBubble.emerald" = "Smeraldo";
 "account.chatBubble.graphite" = "Grafite";
 "account.sendButtonGradient" = "Gradiente tasto invio";
+"account.chatBackgroundGradient" = "Gradiente sfondo chat";
 "account.sendButtonGradient.color1" = "Colore 1";
 "account.sendButtonGradient.color2" = "Colore 2";
 "account.sendButtonGradient.color3" = "Colore 3";
@@ -250,7 +254,7 @@
 "events.admin.field.registrationClosesAt" = "Chiusura iscrizioni";
 "events.admin.field.cancellationClosesAt" = "Chiusura disdetta";
 "events.admin.access" = "Accesso";
-"events.admin.access.subtitle" = "Se imposti admin specifici qui, solo loro gestiranno questo evento. Lascia entrambi i campi vuoti per mantenere la whitelist globale.";
+"events.admin.access.subtitle" = "Imposta qui le email admin specifiche per questo evento. Lascia il campo vuoto per mantenere la whitelist globale.";
 "events.admin.field.adminEmails" = "Email admin";
 "events.admin.field.adminUserIds" = "User ID admin";
 "events.admin.success.updated" = "Evento aggiornato.";

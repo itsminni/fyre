@@ -92,7 +92,6 @@ struct EventDetailView: View {
     @State private var adminCancellationClosesAt = Date().addingTimeInterval(48 * 60 * 60)
     @State private var adminUsesRegistrationClose = false
     @State private var adminUsesCancellationClose = false
-    @State private var adminScopedUserIds = ""
     @State private var adminScopedEmails = ""
     @State private var adminLookup = ""
     @State private var adminAddStatus: EventHistoryStatus = .confirmed
@@ -316,8 +315,13 @@ struct EventDetailView: View {
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
 
-                                adminInputField(L10n.tr("events.admin.field.adminEmails"), text: $adminScopedEmails, capitalization: .never, axis: .vertical)
-                                adminInputField(L10n.tr("events.admin.field.adminUserIds"), text: $adminScopedUserIds, capitalization: .never, axis: .vertical)
+                                adminInputField(
+                                    L10n.tr("events.admin.field.adminEmails"),
+                                    text: $adminScopedEmails,
+                                    capitalization: .never,
+                                    disableAutocorrection: true,
+                                    axis: .vertical
+                                )
 
                                 Button {
                                     saveAdminChanges()
@@ -479,7 +483,6 @@ struct EventDetailView: View {
         adminRegistrationClosesAt = adminState.registrationClosesAt ?? adminState.startsAt.addingTimeInterval(-(24 * 60 * 60))
         adminUsesCancellationClose = adminState.cancellationClosesAt != nil
         adminCancellationClosesAt = adminState.cancellationClosesAt ?? adminState.startsAt.addingTimeInterval(-(48 * 60 * 60))
-        adminScopedUserIds = adminState.adminUserIds
         adminScopedEmails = adminState.adminEmails
     }
 
@@ -495,7 +498,7 @@ struct EventDetailView: View {
             femaleLimit: max(0, adminFemaleLimit),
             registrationClosesAt: adminUsesRegistrationClose ? adminRegistrationClosesAt : nil,
             cancellationClosesAt: adminUsesCancellationClose ? adminCancellationClosesAt : nil,
-            adminUserIds: adminScopedUserIds.trimmingCharacters(in: .whitespacesAndNewlines),
+            adminUserIds: "",
             adminEmails: adminScopedEmails.trimmingCharacters(in: .whitespacesAndNewlines)
         )
 
@@ -618,7 +621,6 @@ struct EventDetailView: View {
             String(adminState.femaleLimit),
             adminState.registrationClosesAt.map { String($0.timeIntervalSince1970) } ?? "nil",
             adminState.cancellationClosesAt.map { String($0.timeIntervalSince1970) } ?? "nil",
-            adminState.adminUserIds,
             adminState.adminEmails
         ].joined(separator: "|")
     }
@@ -628,11 +630,12 @@ struct EventDetailView: View {
         _ title: String,
         text: Binding<String>,
         capitalization: TextInputAutocapitalization = .sentences,
+        disableAutocorrection: Bool = false,
         axis: Axis = .horizontal
     ) -> some View {
         TextField(title, text: text, axis: axis)
             .textInputAutocapitalization(capitalization)
-            .autocorrectionDisabled(capitalization == .never)
+            .autocorrectionDisabled(disableAutocorrection)
             .lineLimit(axis == .vertical ? 4 : 1)
             .padding(12)
             .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))

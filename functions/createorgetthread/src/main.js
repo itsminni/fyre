@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 const DEFAULT_MATCH_SUBJECT = "Fyre match";
 const PLACEHOLDER_MATCH_SUBJECTS = new Set(["Match", DEFAULT_MATCH_SUBJECT]);
 
@@ -25,49 +27,14 @@ export default async ({ req, res, error }) => {
       return res.json({ threadId: existingThreadId }, 200);
     }
 
-    const threadId = uniqueId();
-    const threadPermissions = participantPermissions([currentUserId, otherUserId]);
+    const participantIds = [currentUserId, otherUserId].sort();
+    const threadPermissions = participantPermissions(participantIds);
+    const threadId = stableThreadRowId(participantIds);
+    await createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, threadPermissions);
 
-    try {
-      await createRow(config, config.threadsTableId, threadId, {
-        threadId,
-        createdByUserId: currentUserId,
-        subject: otherUserName ?? DEFAULT_MATCH_SUBJECT,
-        status: "active",
-        lastMessageText: null,
-        lastMessageAt: null
-      }, threadPermissions);
-    } catch (err) {
-      throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
-    }
-
-    try {
-      await createRow(config, config.threadParticipantsTableId, uniqueId(), {
-        threadId,
-        userId: currentUserId,
-        role: "member",
-        lastReadAt: null,
-        muted: false,
-        pinned: false,
-        notificationsEnabled: true
-      }, threadPermissions);
-    } catch (err) {
-      throw new Error(`Failed creating current-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
-    }
-
-    try {
-      await createRow(config, config.threadParticipantsTableId, uniqueId(), {
-        threadId,
-        userId: otherUserId,
-        role: "member",
-        lastReadAt: null,
-        muted: false,
-        pinned: false,
-        notificationsEnabled: true
-      }, threadPermissions);
-    } catch (err) {
-      throw new Error(`Failed creating other-user participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
-    }
+    await ensureThreadParticipant(config, threadId, currentUserId, threadPermissions);
+    await ensureThreadParticipant(config, threadId, otherUserId, threadPermissions);
+    await maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, threadPermissions);
 
     return res.json({ threadId }, 200);
   } catch (err) {
@@ -213,6 +180,62 @@ async function updateRow(config, tableId, rowId, data, permissions) {
   });
 }
 
+async function createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions) {
+  try {
+    await createRow(config, config.threadsTableId, threadId, {
+      threadId,
+      createdByUserId: currentUserId,
+      subject: otherUserName ?? DEFAULT_MATCH_SUBJECT,
+      status: "active",
+      lastMessageText: null,
+      lastMessageAt: null
+    }, permissions);
+  } catch (err) {
+    if (!isAlreadyExistsError(err)) {
+      throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
+    }
+  }
+
+  return threadId;
+}
+
+async function ensureThreadParticipant(config, threadId, userId, permissions) {
+  const existingParticipant = await findSingleRow(config, config.threadParticipantsTableId, [
+    equal("threadId", [threadId]),
+    equal("userId", [userId]),
+    limit(1)
+  ]);
+
+  if (existingParticipant?.$id) {
+    return existingParticipant.$id;
+  }
+
+  const participantRowId = stableParticipantRowId(threadId, userId);
+
+  try {
+    const participantRow = await createRow(config, config.threadParticipantsTableId, participantRowId, {
+      threadId,
+      userId,
+      role: "member",
+      lastReadAt: null,
+      muted: false,
+      pinned: false,
+      notificationsEnabled: true
+    }, permissions);
+    return participantRow?.$id ?? null;
+  } catch (err) {
+    if (isAlreadyExistsError(err)) {
+      return participantRowId;
+    }
+    throw new Error(`Failed creating participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+  }
+}
+
+async function findSingleRow(config, tableId, queries) {
+  const rows = await listRows(config, tableId, queries);
+  return rows[0] ?? null;
+}
+
 async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions) {
   const subject = asString(otherUserName);
   if (!subject) {
@@ -274,9 +297,26 @@ function limit(value) {
 }
 
 function uniqueId() {
-  return crypto.randomUUID().replaceAll("-", "");
+  return randomUUID().replaceAll("-", "");
 }
 
 function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function isAlreadyExistsError(err) {
+  const message = String(err?.message ?? err ?? "").toLowerCase();
+  return message.includes("already exists");
+}
+
+function stableThreadRowId(userIds) {
+  return stableRowId("th", userIds.join(":"));
+}
+
+function stableParticipantRowId(threadId, userId) {
+  return stableRowId("tp", `${threadId}:${userId}`);
+}
+
+function stableRowId(prefix, seed) {
+  return `${prefix}_${createHash("sha256").update(seed).digest("hex").slice(0, 32)}`;
 }
