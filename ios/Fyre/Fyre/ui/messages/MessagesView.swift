@@ -435,6 +435,24 @@ struct ChatAvatarView: View {
 
     @ViewBuilder
     private var avatarContent: some View {
+        if let remoteAvatarURL {
+            AsyncImage(url: remoteAvatarURL) { phase in
+                switch phase {
+                case let .success(image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                default:
+                    fallbackAvatarContent
+                }
+            }
+        } else {
+            fallbackAvatarContent
+        }
+    }
+
+    @ViewBuilder
+    private var fallbackAvatarContent: some View {
         if let uiImage = UIImage(named: avatarKey) {
             Image(uiImage: uiImage)
                 .resizable()
@@ -471,6 +489,18 @@ struct ChatAvatarView: View {
                     .padding(size * 0.18)
             }
         }
+    }
+
+    private var remoteAvatarURL: URL? {
+        let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else {
+            return nil
+        }
+        guard scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        return url
     }
 
     private var initials: String {

@@ -201,8 +201,11 @@ struct SwipeHomeView: View {
                         placeholderAvatar
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
             } else {
                 placeholderAvatar
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
             LinearGradient(
@@ -212,7 +215,9 @@ struct SwipeHomeView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
+        .frame(maxWidth: .infinity)
         .frame(height: 320)
+        .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
@@ -342,7 +347,7 @@ struct SwipeHomeView: View {
             genders,
             "\(user.resolvedMinPreferredAge)",
             "\(user.resolvedMaxPreferredAge)",
-            "\(user.resolvedMaxDistanceKm)",
+            user.normalizedMaxDistanceKm.map(String.init) ?? "none",
             user.city ?? "",
             user.latitude.map { String($0) } ?? "",
             user.longitude.map { String($0) } ?? ""

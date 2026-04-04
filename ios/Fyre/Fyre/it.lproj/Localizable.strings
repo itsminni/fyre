@@ -12,6 +12,11 @@
 "auth.signup.action" = "Registrati";
 "auth.signup.navigationTitle" = "Registrati";
 "auth.signup.terms" = "Accetto i Termini e l'Informativa sulla privacy";
+"auth.signup.terms.prefix" = "Accetto i";
+"auth.signup.terms.link" = "Termini e l'Informativa sulla privacy";
+"auth.signup.privacy.navigationTitle" = "Termini e Privacy";
+"auth.signup.privacy.title" = "Informativa su Termini e Privacy";
+"auth.signup.privacy.body" = "Trattiamo i dati forniti dall'utente solo e soltanto per consentire l'uso dei servizi e delle relative funzioni dell'app. I dati non sono condivisi con nessun altro.";
 "auth.haveAccount.prompt" = "Hai gia un account?";
 "auth.noAccount.prompt" = "Non hai un account?";
 "auth.icloudPassword.action" = "Usa password iCloud";
@@ -62,6 +67,7 @@
 "chat.attachment.file" = "File";
 "common.done" = "Fine";
 "common.apply" = "Applica";
+"common.none" = "Nessuna";
 "chat.error.sendFailed" = "Impossibile inviare il messaggio adesso. Riprova.";
 "chat.voice.recording" = "Sto registrando un vocale";
 "chat.voice.permissionDenied" = "Attiva il microfono nelle Impostazioni per inviare messaggi vocali.";
@@ -164,7 +170,7 @@
 "profile.ageRange.min" = "Età minima";
 "profile.ageRange.max" = "Età massima";
 "profile.maxDistanceKm" = "Distanza massima";
-"profile.maxDistanceKm.hint" = "Questa distanza è calcolata dalla tua città verificata.";
+"profile.maxDistanceKm.hint" = "Calcolata dalla tua città verificata. Lascia vuoto per nessun limite.";
 "profile.orientation" = "Orientamento";
 "profile.orientation.straight" = "Etero";
 "profile.orientation.gay" = "Gay";
@@ -177,7 +183,7 @@
 "profile.setup.title" = "Completa il profilo";
 "profile.section.security" = "Sicurezza";
 "profile.section.information" = "Informazioni";
-"profile.section.informationHint" = "Questi dati restano bloccati dopo il setup. Invia una mail al supporto a support@example.com se devono essere modificati.";
+"profile.section.informationHint" = "Solo alcuni dati restano bloccati dopo il setup. Se devi modificare quelli non modificabili, invia una mail al supporto a support@example.com.";
 "profile.section.required" = "Obbligatorio";
 "profile.section.discovery" = "Scoperta";
 "profile.section.discoveryHint" = "Questi campi cambiano chi vedi e quanto i profili risultano rilevanti.";

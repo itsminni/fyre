@@ -725,13 +725,27 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private func composerFieldChrome(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
         if #available(iOS 26.0, *) {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            shape
                 .fill(.clear)
-                .glassEffect(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .glassEffect(in: shape)
+                .overlay {
+                    if shouldUseDarkComposerChrome {
+                        shape
+                            .fill(Color.black.opacity(modernComposerContrastOverlayOpacity))
+                    }
+                }
         } else {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            shape
                 .fill(.regularMaterial)
+                .overlay {
+                    if shouldUseDarkComposerChrome {
+                        shape
+                            .fill(Color.black.opacity(modernComposerContrastOverlayOpacity))
+                    }
+                }
         }
     }
 
@@ -799,6 +813,10 @@ struct ChatDetailView: View {
         composerOverlay
             .frame(maxWidth: .infinity, alignment: .bottom)
             .padding(.bottom, max(6, windowSafeAreaBottomInset))
+            .background(alignment: .bottom) {
+                modernComposerBaseChrome
+                    .ignoresSafeArea(.container, edges: .bottom)
+            }
     }
 
     @ViewBuilder
@@ -862,6 +880,24 @@ struct ChatDetailView: View {
     }
 
     @ViewBuilder
+    private var modernComposerBaseChrome: some View {
+        Rectangle()
+            .fill(.regularMaterial)
+            .overlay {
+                if shouldUseDarkComposerChrome {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.32))
+                }
+            }
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(colorScheme == .dark ? .white.opacity(0.12) : .black.opacity(0.08))
+                    .frame(height: 0.8)
+            }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.20 : 0.08), radius: 12, y: -1)
+    }
+
+    @ViewBuilder
     private func legacyComposerFieldChrome(cornerRadius: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
@@ -898,17 +934,23 @@ struct ChatDetailView: View {
     @ViewBuilder
     private func modernSideButtonChrome(isDisabled: Bool = false) -> some View {
         let shape = Circle()
-        let fillOpacity: CGFloat = isDisabled ? 0.72 : 0.94
 
         shape
-            .fill(
-                Color(uiColor: colorScheme == .dark ? .secondarySystemBackground : .systemBackground)
-                    .opacity(fillOpacity)
-            )
+            .fill(.regularMaterial)
+            .overlay {
+                if shouldUseDarkComposerChrome {
+                    shape
+                        .fill(Color.black.opacity(modernComposerContrastOverlayOpacity))
+                }
+            }
             .overlay {
                 shape
-                    .stroke(colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.12), lineWidth: 0.9)
+                    .stroke(
+                        colorScheme == .dark ? .white.opacity(isDisabled ? 0.10 : 0.18) : .black.opacity(isDisabled ? 0.07 : 0.12),
+                        lineWidth: 0.9
+                    )
             }
+            .opacity(isDisabled ? 0.72 : 1)
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.24 : 0.14), radius: 8, y: 2)
     }
 
@@ -1029,6 +1071,7 @@ struct ChatDetailView: View {
                     recordingComposerStatusView
                 } else {
                     TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
+                        .foregroundStyle(shouldUseDarkComposerChrome ? Color.white : Color.primary)
                         .focused($isInputFocused)
                         .textFieldStyle(.plain)
                         .submitLabel(.send)
@@ -1039,7 +1082,7 @@ struct ChatDetailView: View {
                 Button(action: handleMicrophoneButtonTap) {
                     Image(systemName: "mic.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(voiceRecorder.isRecording ? .red : .secondary)
+                        .foregroundStyle(voiceRecorder.isRecording ? .red : composerSecondaryForegroundColor)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
@@ -1168,6 +1211,18 @@ struct ChatDetailView: View {
                 .max() ?? 0
             return brightestStop >= 0.55
         }
+    }
+
+    private var shouldUseDarkComposerChrome: Bool {
+        colorScheme == .dark && isLightChatBackground
+    }
+
+    private var modernComposerContrastOverlayOpacity: CGFloat {
+        0.32
+    }
+
+    private var composerSecondaryForegroundColor: Color {
+        shouldUseDarkComposerChrome ? .white.opacity(0.78) : .secondary
     }
 
     private func messageTextStyle(isOutgoing: Bool) -> AnyShapeStyle {

@@ -127,7 +127,11 @@ function buildCandidateEntry(row, currentUserId, currentUser, excludedUserIds) {
     return null;
   }
 
-  if (distanceKm > currentUser.maxDistanceKm || distanceKm > candidate.maxDistanceKm) {
+  if (Number.isFinite(currentUser.maxDistanceKm) && distanceKm > currentUser.maxDistanceKm) {
+    return null;
+  }
+
+  if (Number.isFinite(candidate.maxDistanceKm) && distanceKm > candidate.maxDistanceKm) {
     return null;
   }
 
@@ -313,25 +317,28 @@ function normalizeAge(value, fallback) {
   if (!Number.isFinite(numeric)) {
     return fallback;
   }
-  return Math.max(DEFAULT_MIN_AGE, Math.min(80, Math.trunc(numeric)));
+  return Math.max(DEFAULT_MIN_AGE, Math.min(98, Math.trunc(numeric)));
 }
 
 function normalizeMaxAge(value, minValue) {
   const minAge = normalizeAge(minValue, DEFAULT_MIN_AGE);
-  const fallbackMax = Math.max(minAge, DEFAULT_MAX_AGE);
+  const fallbackMax = Math.max(minAge + 1, DEFAULT_MAX_AGE);
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
-    return fallbackMax;
+    return Math.min(99, fallbackMax);
   }
-  return Math.max(minAge, Math.min(80, Math.trunc(numeric)));
+  return Math.max(Math.max(minAge + 1, 19), Math.min(99, Math.trunc(numeric)));
 }
 
 function normalizeDistanceKm(value) {
+  if (value == null || value === "") {
+    return null;
+  }
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
-    return 50;
+    return null;
   }
-  return Math.max(5, Math.min(300, Math.trunc(numeric)));
+  return Math.max(5, Math.trunc(numeric));
 }
 
 function normalizeCity(value) {

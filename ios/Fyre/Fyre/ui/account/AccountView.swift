@@ -17,6 +17,7 @@ private struct PendingChatBackgroundPreview: Identifiable {
 struct AccountView: View {
     private struct EditableProfileDraft: Equatable {
         let city: String
+        let gender: UserGender
         let orientation: UserOrientation
         let bio: String
         let intent: UserIntent
@@ -24,7 +25,7 @@ struct AccountView: View {
         let preferredGenders: [UserGender]
         let minPreferredAge: Int
         let maxPreferredAge: Int
-        let maxDistanceKm: Int
+        let maxDistanceKm: Int?
         let smokes: Bool
         let drinks: Bool
     }
@@ -88,6 +89,7 @@ struct AccountView: View {
     @State private var lastName = ""
     @State private var city = ""
     @State private var birthDate = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
+    @State private var gender: UserGender = .male
     @State private var orientation: UserOrientation = .straight
     @State private var bio = ""
     @State private var intent: UserIntent = .relationship
@@ -95,7 +97,7 @@ struct AccountView: View {
     @State private var preferredGenders = Set(UserStore.defaultPreferredGenders)
     @State private var minPreferredAge = 20
     @State private var maxPreferredAge = 32
-    @State private var maxDistanceKm = 50
+    @State private var maxDistanceKm: Int? = 50
     @State private var smokes = false
     @State private var drinks = false
     @State private var profileMessage: String?
@@ -107,6 +109,7 @@ struct AccountView: View {
     @State private var chatBackgroundSettingsMessage: String?
     @State private var chatBackgroundSettingsMessageIsError = false
     @State private var showEventRemovalAlert = false
+    @State private var pendingDangerousGender: UserGender?
     @State private var pendingDangerousOrientation: UserOrientation?
     @State private var isHydratingProfileForm = false
     @State private var hasLoadedProfileForm = false
@@ -129,8 +132,15 @@ struct AccountView: View {
                 fillFromUser()
                 chatBackgroundStyleSelection = chatBackgroundStyle
             }
-            .onChange(of: orientation) { oldValue, newValue in
-                handleOrientationChange(from: oldValue, to: newValue)
+            .task {
+                // Keep event registration state fresh so dangerous profile-change warnings are accurate.
+                await store.refreshRemoteMainEventState()
+            }
+            .onChange(of: gender) { _, _ in
+                handleIdentityFieldChange()
+            }
+            .onChange(of: orientation) { _, _ in
+                handleIdentityFieldChange()
             }
             .task(id: pickedPhotoItem) {
                 guard let pickedPhotoItem else { return }
@@ -165,15 +175,17 @@ struct AccountView: View {
                 Button(L10n.tr("profile.eventsRemoval.warning.confirm"), role: .destructive) {
                     Task {
                         await performProfileSave(
+                            genderOverride: pendingDangerousGender,
                             orientationOverride: pendingDangerousOrientation,
                             notifyEventRemoval: true,
                             showSuccessMessage: true
                         )
+                        pendingDangerousGender = nil
                         pendingDangerousOrientation = nil
                     }
                 }
                 Button(L10n.tr("common.cancel"), role: .cancel) {
-                    pendingDangerousOrientation = nil
+                    rollbackPendingDangerousProfileChanges()
                 }
             } message: {
                 Text(L10n.tr("profile.eventsRemoval.warning.message"))
@@ -393,9 +405,27 @@ struct AccountView: View {
                             ProfileReadOnlyRow(title: L10n.tr("profile.email"), value: store.currentUser?.email ?? "-")
                             cardDivider
                             ProfileReadOnlyRow(title: L10n.tr("profile.birthDate"), value: birthDateLabel)
-                            cardDivider
-                            ProfileReadOnlyRow(title: L10n.tr("profile.gender"), value: genderLabel)
                         }
+
+                        ProfilePickerField(
+                            title: L10n.tr("profile.gender"),
+                            selection: $gender,
+                            options: UserGender.allCases
+                        ) { option in
+                            L10n.tr(option.localizationKey)
+                        }
+
+                        ProfilePickerField(
+                            title: L10n.tr("profile.orientation"),
+                            selection: $orientation,
+                            options: UserOrientation.allCases
+                        ) { option in
+                            L10n.tr(option.localizationKey)
+                        }
+
+                        ProfileToggleField(title: L10n.tr("profile.smokes"), isOn: $smokes)
+                        ProfileToggleField(title: L10n.tr("profile.drinks"), isOn: $drinks)
+                        ProfileTextField(title: L10n.tr("profile.interests"), text: $interests)
                     }
                 }
 
@@ -437,26 +467,6 @@ struct AccountView: View {
                     }
                 }
 
-                AccountCard(
-                    title: L10n.tr("profile.section.preferences"),
-                    subtitle: L10n.tr("profile.section.preferencesHint"),
-                    icon: "slider.horizontal.3"
-                ) {
-                    VStack(spacing: 14) {
-                        ProfilePickerField(
-                            title: L10n.tr("profile.orientation"),
-                            selection: $orientation,
-                            options: UserOrientation.allCases
-                        ) { option in
-                            L10n.tr(option.localizationKey)
-                        }
-
-                        ProfileToggleField(title: L10n.tr("profile.smokes"), isOn: $smokes)
-                        ProfileToggleField(title: L10n.tr("profile.drinks"), isOn: $drinks)
-                        ProfileTextField(title: L10n.tr("profile.interests"), text: $interests)
-                    }
-                }
-
                 if let profileMessage {
                     Text(profileMessage)
                         .font(.footnote)
@@ -482,6 +492,11 @@ struct AccountView: View {
             .padding(.horizontal)
             .padding(.top, 2)
             .padding(.bottom, 28)
+        }
+        .onDisappear {
+            Task {
+                await flushPendingProfileEdits()
+            }
         }
         .scrollIndicators(.hidden)
         .background(accountBackground.ignoresSafeArea())
@@ -898,6 +913,7 @@ struct AccountView: View {
         lastName = store.currentUser?.lastName ?? ""
         city = store.currentUser?.city ?? ""
         birthDate = store.currentUser?.birthDate ?? birthDate
+        gender = store.currentUser?.gender ?? .male
         orientation = store.currentUser?.orientation ?? .straight
         bio = store.currentUser?.normalizedBio ?? ""
         intent = store.currentUser?.intent ?? .relationship
@@ -905,7 +921,7 @@ struct AccountView: View {
         preferredGenders = Set(store.currentUser?.resolvedPreferredGenders ?? UserStore.defaultPreferredGenders)
         minPreferredAge = store.currentUser?.resolvedMinPreferredAge ?? 20
         maxPreferredAge = store.currentUser?.resolvedMaxPreferredAge ?? 32
-        maxDistanceKm = store.currentUser?.resolvedMaxDistanceKm ?? 50
+        maxDistanceKm = store.currentUser?.normalizedMaxDistanceKm
         smokes = store.currentUser?.smokes ?? false
         drinks = store.currentUser?.drinks ?? false
         isHydratingProfileForm = false
@@ -915,6 +931,7 @@ struct AccountView: View {
     private var editableProfileDraft: EditableProfileDraft {
         EditableProfileDraft(
             city: city,
+            gender: gender,
             orientation: orientation,
             bio: bio,
             intent: intent,
@@ -933,6 +950,7 @@ struct AccountView: View {
 
         return EditableProfileDraft(
             city: user.city ?? "",
+            gender: user.gender ?? .male,
             orientation: user.orientation ?? .straight,
             bio: user.normalizedBio,
             intent: user.intent ?? .relationship,
@@ -940,7 +958,7 @@ struct AccountView: View {
             preferredGenders: user.resolvedPreferredGenders,
             minPreferredAge: user.resolvedMinPreferredAge,
             maxPreferredAge: user.resolvedMaxPreferredAge,
-            maxDistanceKm: user.resolvedMaxDistanceKm,
+            maxDistanceKm: user.normalizedMaxDistanceKm,
             smokes: user.smokes ?? false,
             drinks: user.drinks ?? false
         )
@@ -950,18 +968,65 @@ struct AccountView: View {
         UserGender.allCases.filter { preferredGenders.contains($0) }
     }
 
-    private func handleOrientationChange(from oldValue: UserOrientation, to newValue: UserOrientation) {
+    private func stageDangerousProfileChanges(targetGender: UserGender, targetOrientation: UserOrientation) {
+        guard let user = store.currentUser else {
+            pendingDangerousGender = nil
+            pendingDangerousOrientation = nil
+            return
+        }
+
+        pendingDangerousGender = user.gender != targetGender ? targetGender : nil
+        pendingDangerousOrientation = user.orientation != targetOrientation ? targetOrientation : nil
+    }
+
+    private func rollbackPendingDangerousProfileChanges() {
+        guard pendingDangerousGender != nil || pendingDangerousOrientation != nil else { return }
+
+        if let user = store.currentUser {
+            isHydratingProfileForm = true
+            if pendingDangerousGender != nil {
+                gender = user.gender ?? .male
+            }
+            if pendingDangerousOrientation != nil {
+                orientation = user.orientation ?? .straight
+            }
+            isHydratingProfileForm = false
+        }
+
+        pendingDangerousGender = nil
+        pendingDangerousOrientation = nil
+    }
+
+    private func handleIdentityFieldChange() {
         guard hasLoadedProfileForm,
               !isHydratingProfileForm,
-              oldValue != newValue else { return }
+              !isSavingProfile,
+              !showEventRemovalAlert else { return }
 
-        guard store.willCurrentUserLoseMainEventRegistrations(orientation: newValue) else { return }
+        let targetGender = gender
+        let targetOrientation = orientation
 
-        pendingDangerousOrientation = newValue
-        isHydratingProfileForm = true
-        orientation = oldValue
-        isHydratingProfileForm = false
+        guard store.willCurrentUserLoseMainEventRegistrations(
+            changingGenderTo: targetGender,
+            orientation: targetOrientation
+        ) else {
+            return
+        }
+
+        stageDangerousProfileChanges(targetGender: targetGender, targetOrientation: targetOrientation)
         showEventRemovalAlert = true
+    }
+
+    @MainActor
+    private func flushPendingProfileEdits() async {
+        guard hasLoadedProfileForm,
+              !isHydratingProfileForm,
+              !isSavingProfile,
+              pendingDangerousGender == nil,
+              pendingDangerousOrientation == nil,
+              editableProfileDraft != storedEditableProfileDraft else { return }
+
+        await performProfileSave(showSuccessMessage: false)
     }
 
     private func autosaveProfileIfNeeded() async {
@@ -969,6 +1034,7 @@ struct AccountView: View {
         guard hasLoadedProfileForm,
               !isHydratingProfileForm,
               !isSavingProfile,
+              pendingDangerousGender == nil,
               pendingDangerousOrientation == nil,
               editableProfileDraft != storedEditableProfileDraft else { return }
 
@@ -977,6 +1043,7 @@ struct AccountView: View {
               hasLoadedProfileForm,
               !isHydratingProfileForm,
               !isSavingProfile,
+              pendingDangerousGender == nil,
               pendingDangerousOrientation == nil,
               editableProfileDraft != storedEditableProfileDraft else { return }
 
@@ -985,6 +1052,7 @@ struct AccountView: View {
 
     @MainActor
     private func performProfileSave(
+        genderOverride: UserGender? = nil,
         orientationOverride: UserOrientation? = nil,
         notifyEventRemoval: Bool = false,
         showSuccessMessage: Bool = false
@@ -995,18 +1063,29 @@ struct AccountView: View {
         let previousDraft = editableProfileDraft
 
         if notifyEventRemoval,
+           let genderOverride {
+            isHydratingProfileForm = true
+            gender = genderOverride
+            isHydratingProfileForm = false
+        }
+
+        if notifyEventRemoval,
            let orientationOverride {
             isHydratingProfileForm = true
             orientation = orientationOverride
             isHydratingProfileForm = false
         }
 
+        let targetGender = genderOverride ?? gender
         let targetOrientation = orientationOverride ?? orientation
         let shouldShowEventRemovalMessage = notifyEventRemoval
-            || store.willCurrentUserLoseMainEventRegistrations(orientation: targetOrientation)
+            || store.willCurrentUserLoseMainEventRegistrations(
+                changingGenderTo: targetGender,
+                orientation: targetOrientation
+            )
 
-        if shouldShowEventRemovalMessage && pendingDangerousOrientation == nil && !notifyEventRemoval {
-            pendingDangerousOrientation = targetOrientation
+        if shouldShowEventRemovalMessage && !notifyEventRemoval {
+            stageDangerousProfileChanges(targetGender: targetGender, targetOrientation: targetOrientation)
             showEventRemovalAlert = true
             return
         }
@@ -1016,6 +1095,7 @@ struct AccountView: View {
         let result = await store.updateProfile(
             firstName: firstName,
             lastName: lastName,
+            gender: targetGender,
             city: city,
             birthDate: birthDate,
             orientation: targetOrientation,
@@ -1033,6 +1113,11 @@ struct AccountView: View {
         if let result {
             profileMessage = result
             profileMessageIsError = true
+            if genderOverride != nil {
+                isHydratingProfileForm = true
+                gender = previousDraft.gender
+                isHydratingProfileForm = false
+            }
             if orientationOverride != nil {
                 isHydratingProfileForm = true
                 orientation = previousDraft.orientation
@@ -1272,101 +1357,128 @@ private struct ProfileAgeRangeField: View {
     @Binding var maxAge: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.tr("profile.ageRange"))
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            ProfileValueMenuField(
+        VStack(spacing: 0) {
+            ProfileInlineNumericField(
                 title: L10n.tr("profile.ageRange.min"),
-                selection: $minAge,
-                options: Array(18...maxAge)
-            ) { value in
-                "\(value)"
-            }
-            .onChange(of: minAge) { _, newValue in
-                if maxAge < newValue {
-                    maxAge = newValue
+                text: minAgeText
+            )
+
+            Divider()
+                .overlay(.white.opacity(0.08))
+
+            ProfileInlineNumericField(
+                title: L10n.tr("profile.ageRange.max"),
+                text: maxAgeText
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var minAgeText: Binding<String> {
+        Binding(
+            get: { String(minAge) },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                guard !digits.isEmpty, let parsed = Int(digits) else { return }
+                let clamped = min(max(parsed, 18), 98)
+                minAge = clamped
+                if maxAge <= clamped {
+                    maxAge = min(max(clamped + 1, 19), 99)
                 }
             }
+        )
+    }
 
-            ProfileValueMenuField(
-                title: L10n.tr("profile.ageRange.max"),
-                selection: $maxAge,
-                options: Array(minAge...80)
-            ) { value in
-                "\(value)"
+    private var maxAgeText: Binding<String> {
+        Binding(
+            get: { String(maxAge) },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                guard !digits.isEmpty, let parsed = Int(digits) else { return }
+                let minimum = max(minAge + 1, 19)
+                maxAge = max(min(parsed, 99), minimum)
             }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        )
     }
 }
 
 private struct ProfileDistanceField: View {
-    @Binding var maxDistanceKm: Int
-
-    private let options = [5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 150, 200, 300]
+    @Binding var maxDistanceKm: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.tr("profile.maxDistanceKm"))
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Text(L10n.tr("profile.maxDistanceKm.hint"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            ProfileValueMenuField(
+            ProfileInlineNumericField(
                 title: L10n.tr("profile.maxDistanceKm"),
-                selection: $maxDistanceKm,
-                options: options
-            ) { value in
-                "\(value) km"
-            }
+                subtitle: L10n.tr("profile.maxDistanceKm.hint"),
+                text: maxDistanceText,
+                prompt: L10n.tr("common.none"),
+                suffix: "km"
+            )
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var maxDistanceText: Binding<String> {
+        Binding(
+            get: { maxDistanceKm.map(String.init) ?? "" },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                if digits.isEmpty {
+                    maxDistanceKm = nil
+                    return
+                }
+
+                guard let parsed = Int(digits) else { return }
+                maxDistanceKm = max(parsed, 5)
+            }
+        )
     }
 }
 
-private struct ProfileValueMenuField<Value: Hashable>: View {
+private struct ProfileInlineNumericField: View {
     let title: String
-    @Binding var selection: Value
-    let options: [Value]
-    let titleForOption: (Value) -> String
+    var subtitle: String? = nil
+    @Binding var text: String
+    var prompt: String = ""
+    var suffix: String? = nil
 
     var body: some View {
-        Menu {
-            Picker(title, selection: $selection) {
-                ForEach(options, id: \.self) { option in
-                    Text(titleForOption(option)).tag(option)
-                }
-            }
-        } label: {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(title)
-                    .font(.subheadline)
+                    .font(.body)
                     .foregroundStyle(.primary)
 
                 Spacer(minLength: 0)
 
-                Text(titleForOption(selection))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack(alignment: .center, spacing: 6) {
+                    TextField(prompt, text: $text)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 64, alignment: .trailing)
 
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.semibold))
+                    if let suffix, !text.isEmpty {
+                        Text(suffix)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(minHeight: 34)
+
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 2)
     }
 }
 

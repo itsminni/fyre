@@ -400,9 +400,10 @@ actor AppwriteService {
     private func ensureProfileRow(for user: User) async throws -> User {
         let accountId = try await resolvedRequiredAccountId(from: user)
         let payload = makeProfilePayload(for: user)
+        let existingProfileRow = try await fetchProfileRow(id: accountId)
 
         // Use the Auth account id as the profile row id so auth and profile stay trivially linked.
-        if try await fetchProfileRow(id: accountId) == nil {
+        if existingProfileRow == nil {
             _ = try await sendRequest(
                 method: "POST",
                 pathComponents: [
@@ -419,6 +420,7 @@ actor AppwriteService {
                 expectedStatusCodes: [201]
             )
         } else {
+            let existingRowId = stringValue(forKey: "$id", in: existingProfileRow) ?? accountId
             _ = try await sendRequest(
                 method: "PATCH",
                 pathComponents: [
@@ -427,7 +429,7 @@ actor AppwriteService {
                     "tables",
                     configuration.profilesTableId,
                     "rows",
-                    accountId
+                    existingRowId
                 ],
                 jsonBody: [
                     "data": payload
@@ -1176,7 +1178,7 @@ actor AppwriteService {
             "preferredGenders": genderArrayValue(for: user.resolvedPreferredGenders),
             "minPreferredAge": user.resolvedMinPreferredAge,
             "maxPreferredAge": user.resolvedMaxPreferredAge,
-            "maxDistanceKm": user.resolvedMaxDistanceKm,
+            "maxDistanceKm": user.normalizedMaxDistanceKm as Any? ?? NSNull(),
             "latitude": user.latitude as Any? ?? NSNull(),
             "longitude": user.longitude as Any? ?? NSNull(),
             "smokes": user.smokes as Any? ?? NSNull(),

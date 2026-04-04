@@ -336,7 +336,7 @@ extension AppwriteService {
             id: stableUUID(from: threadId),
             remoteId: threadId,
             name: threadName,
-            avatar: "",
+            avatar: threadAvatarURLString(from: profileRow),
             isOnline: isOnline,
             lastSeenAt: lastSeenAt,
             currentUserReadAt: currentUserReadAt,
@@ -348,6 +348,26 @@ extension AppwriteService {
 }
 
 private extension AppwriteService {
+    func threadAvatarURLString(from profileRow: [String: Any]?) -> String {
+        guard let fileId = stringValue(forKey: "avatarFileId", in: profileRow), !fileId.isEmpty else {
+            return ""
+        }
+
+        var url = configuration.endpointURL
+        url.appendPathComponent("storage")
+        url.appendPathComponent("buckets")
+        url.appendPathComponent(configuration.avatarsBucketId)
+        url.appendPathComponent("files")
+        url.appendPathComponent(fileId)
+        url.appendPathComponent("view")
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "project", value: configuration.projectId)
+        ]
+        return components?.url?.absoluteString ?? ""
+    }
+
     func recoverRecentlySentMessage(threadId: String, text: String, replyToMessageId: String?, attachmentFileId: String?, notBefore: Date) async throws -> MessageDTO? {
         guard let currentAccountId = try await fetchCurrentAccountId(required: false) else {
             return nil

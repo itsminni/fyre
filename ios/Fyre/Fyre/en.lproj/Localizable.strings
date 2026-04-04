@@ -12,6 +12,11 @@
 "auth.signup.action" = "Sign up";
 "auth.signup.navigationTitle" = "Sign up";
 "auth.signup.terms" = "I accept Terms and Privacy Policy";
+"auth.signup.terms.prefix" = "I accept";
+"auth.signup.terms.link" = "Terms and Privacy Policy";
+"auth.signup.privacy.navigationTitle" = "Terms and Privacy";
+"auth.signup.privacy.title" = "Terms and Privacy Notice";
+"auth.signup.privacy.body" = "We process user-provided data only to enable use of the app services and related features. Data is not shared with anyone else.";
 "auth.haveAccount.prompt" = "Already have an account?";
 "auth.noAccount.prompt" = "No account yet?";
 "auth.icloudPassword.action" = "Use iCloud password";
@@ -62,6 +67,7 @@
 "chat.attachment.file" = "File";
 "common.done" = "Done";
 "common.apply" = "Apply";
+"common.none" = "None";
 "chat.error.sendFailed" = "Unable to send the message right now. Please try again.";
 "chat.voice.recording" = "Recording voice message";
 "chat.voice.permissionDenied" = "Enable microphone access in Settings to send voice messages.";
@@ -164,7 +170,7 @@
 "profile.ageRange.min" = "Minimum age";
 "profile.ageRange.max" = "Maximum age";
 "profile.maxDistanceKm" = "Maximum distance";
-"profile.maxDistanceKm.hint" = "This is calculated from your verified city.";
+"profile.maxDistanceKm.hint" = "Calculated from your verified city. Leave it empty for no limit.";
 "profile.orientation" = "Orientation";
 "profile.orientation.straight" = "Straight";
 "profile.orientation.gay" = "Gay";
@@ -177,7 +183,7 @@
 "profile.setup.title" = "Complete your profile";
 "profile.section.security" = "Security";
 "profile.section.information" = "Information";
-"profile.section.informationHint" = "These details are locked after setup. Contact support at support@example.com if you need them changed.";
+"profile.section.informationHint" = "Only some details are locked after setup. Contact support at support@example.com if you need changes to non-editable fields.";
 "profile.section.required" = "Required";
 "profile.section.discovery" = "Discovery";
 "profile.section.discoveryHint" = "These change who you see and how relevant profiles feel.";

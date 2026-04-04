@@ -122,15 +122,17 @@ struct User: Codable, Sendable {
     }
 
     nonisolated var resolvedMinPreferredAge: Int {
-        min(max(minPreferredAge ?? 18, 18), 80)
+        min(max(minPreferredAge ?? 18, 18), 98)
     }
 
     nonisolated var resolvedMaxPreferredAge: Int {
-        max(min(maxPreferredAge ?? 35, 80), resolvedMinPreferredAge)
+        let minimum = max(resolvedMinPreferredAge + 1, 19)
+        return max(min(maxPreferredAge ?? 35, 99), minimum)
     }
 
-    nonisolated var resolvedMaxDistanceKm: Int {
-        min(max(maxDistanceKm ?? 50, 5), 300)
+    nonisolated var normalizedMaxDistanceKm: Int? {
+        guard let maxDistanceKm else { return nil }
+        return max(maxDistanceKm, 5)
     }
 
     nonisolated var normalizedBio: String {
@@ -606,7 +608,7 @@ final class UserStore: @unchecked Sendable {
         preferredGenders: [UserGender],
         minPreferredAge: Int,
         maxPreferredAge: Int,
-        maxDistanceKm: Int,
+        maxDistanceKm: Int?,
         smokes: Bool,
         drinks: Bool
     ) async -> String? {
@@ -617,9 +619,9 @@ final class UserStore: @unchecked Sendable {
         let normalizedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedInterests = interests.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedPreferredGenders = UserGender.allCases.filter { preferredGenders.contains($0) }
-        let normalizedMinAge = min(max(minPreferredAge, 18), 80)
-        let normalizedMaxAge = max(min(maxPreferredAge, 80), normalizedMinAge)
-        let normalizedMaxDistanceKm = min(max(maxDistanceKm, 5), 300)
+        let normalizedMinAge = min(max(minPreferredAge, 18), 98)
+        let normalizedMaxAge = max(min(maxPreferredAge, 99), max(normalizedMinAge + 1, 19))
+        let normalizedMaxDistanceKm = maxDistanceKm.map { max($0, 5) }
         guard !first.isEmpty else { return L10n.tr("profile.error.emptyFirstName") }
         guard !normalizedCity.isEmpty else { return L10n.tr("profile.error.emptyCity") }
         guard let birthDate, Self.age(from: birthDate) >= 18 else { return L10n.tr("profile.error.invalidAge") }

@@ -11,8 +11,6 @@ import PhotosUI
 struct ProfileSetupView: View {
     @Environment(UserStore.self) private var store
 
-    private static let distanceOptions = [5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 150, 200, 300]
-
     @State private var firstName = ""
     @State private var lastName = ""
     @State private var city = ""
@@ -25,7 +23,7 @@ struct ProfileSetupView: View {
     @State private var preferredGenders = Set(UserStore.defaultPreferredGenders)
     @State private var minPreferredAge = 20
     @State private var maxPreferredAge = 32
-    @State private var maxDistanceKm = 50
+    @State private var maxDistanceKm: Int? = 50
     @State private var smokes = false
     @State private var drinks = false
     @State private var pickedPhotoItem: PhotosPickerItem?
@@ -98,32 +96,15 @@ struct ProfileSetupView: View {
                     }
                     .padding(.vertical, 4)
 
-                    Picker(L10n.tr("profile.ageRange.min"), selection: $minPreferredAge) {
-                        ForEach(18...maxPreferredAge, id: \.self) { age in
-                            Text("\(age)").tag(age)
-                        }
-                    }
-                    .onChange(of: minPreferredAge) { _, newValue in
-                        if maxPreferredAge < newValue {
-                            maxPreferredAge = newValue
-                        }
-                    }
-
-                    Picker(L10n.tr("profile.ageRange.max"), selection: $maxPreferredAge) {
-                        ForEach(minPreferredAge...80, id: \.self) { age in
-                            Text("\(age)").tag(age)
-                        }
-                    }
-
-                    Picker(L10n.tr("profile.maxDistanceKm"), selection: $maxDistanceKm) {
-                        ForEach(Self.distanceOptions, id: \.self) { distance in
-                            Text("\(distance) km").tag(distance)
-                        }
-                    }
-
-                    Text(L10n.tr("profile.maxDistanceKm.hint"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    numericField(L10n.tr("profile.ageRange.min"), text: minAgeText)
+                    numericField(L10n.tr("profile.ageRange.max"), text: maxAgeText)
+                    numericField(
+                        L10n.tr("profile.maxDistanceKm"),
+                        text: maxDistanceText,
+                        prompt: L10n.tr("common.none"),
+                        suffix: "km",
+                        caption: L10n.tr("profile.maxDistanceKm.hint")
+                    )
 
                     multilineField(L10n.tr("profile.interests"), text: $interests)
                 }
@@ -201,6 +182,46 @@ struct ProfileSetupView: View {
         }
     }
 
+    private func numericField(
+        _ label: String,
+        text: Binding<String>,
+        prompt: String = "",
+        suffix: String? = nil,
+        caption: String? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                Text(label)
+                    .font(.body)
+
+                Spacer(minLength: 0)
+
+                HStack(alignment: .center, spacing: 6) {
+                    TextField(prompt, text: text)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 64, alignment: .trailing)
+
+                    if let suffix, !text.wrappedValue.isEmpty {
+                        Text(suffix)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(minHeight: 34)
+
+            if let caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
     private func multilineField(_ label: String, text: Binding<String>, isRequired: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             fieldLabel(label, isRequired: isRequired)
@@ -254,7 +275,7 @@ struct ProfileSetupView: View {
         preferredGenders = Set(user.resolvedPreferredGenders)
         minPreferredAge = user.resolvedMinPreferredAge
         maxPreferredAge = user.resolvedMaxPreferredAge
-        maxDistanceKm = user.resolvedMaxDistanceKm
+        maxDistanceKm = user.normalizedMaxDistanceKm
         smokes = user.smokes ?? smokes
         drinks = user.drinks ?? drinks
     }
@@ -314,6 +335,49 @@ struct ProfileSetupView: View {
 
     private var orderedPreferredGenders: [UserGender] {
         UserGender.allCases.filter { preferredGenders.contains($0) }
+    }
+
+    private var minAgeText: Binding<String> {
+        Binding(
+            get: { String(minPreferredAge) },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                guard !digits.isEmpty, let parsed = Int(digits) else { return }
+                let clamped = min(max(parsed, 18), 98)
+                minPreferredAge = clamped
+                if maxPreferredAge <= clamped {
+                    maxPreferredAge = min(max(clamped + 1, 19), 99)
+                }
+            }
+        )
+    }
+
+    private var maxAgeText: Binding<String> {
+        Binding(
+            get: { String(maxPreferredAge) },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                guard !digits.isEmpty, let parsed = Int(digits) else { return }
+                let minimum = max(minPreferredAge + 1, 19)
+                maxPreferredAge = max(min(parsed, 99), minimum)
+            }
+        )
+    }
+
+    private var maxDistanceText: Binding<String> {
+        Binding(
+            get: { maxDistanceKm.map(String.init) ?? "" },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                if digits.isEmpty {
+                    maxDistanceKm = nil
+                    return
+                }
+
+                guard let parsed = Int(digits) else { return }
+                maxDistanceKm = max(parsed, 5)
+            }
+        )
     }
 
     private var hasRequiredFields: Bool {
