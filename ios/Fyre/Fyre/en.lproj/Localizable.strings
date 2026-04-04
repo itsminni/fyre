@@ -43,7 +43,6 @@
 "messages.empty.title" = "No chats yet";
 "messages.empty.description" = "Start matching to see your messages.";
 "messages.online" = "Online";
-"messages.lastSeen" = "Last seen at %@";
 "messages.sent" = "Sent";
 "messages.read" = "Read";
 "messages.openChat.hint" = "Tap to open chat";
@@ -59,10 +58,15 @@
 "chat.attachment.photo" = "Photo";
 "chat.attachment.title" = "Choose attachment";
 "chat.attachment.video" = "Video";
+"chat.attachment.audio" = "Voice message";
 "chat.attachment.file" = "File";
 "common.done" = "Done";
 "common.apply" = "Apply";
 "chat.error.sendFailed" = "Unable to send the message right now. Please try again.";
+"chat.voice.recording" = "Recording voice message";
+"chat.voice.permissionDenied" = "Enable microphone access in Settings to send voice messages.";
+"chat.voice.startFailed" = "Unable to start recording right now.";
+"chat.voice.stopFailed" = "Unable to finish the voice recording.";
 "chat.message.placeholder" = "Message";
 "chat.messageInfo.title" = "Message info";
 "chat.messageInfo.content" = "Content";

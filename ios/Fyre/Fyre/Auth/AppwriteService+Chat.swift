@@ -230,14 +230,14 @@ extension AppwriteService {
                     participantRowId
                 ],
                 jsonBody: [
-                    "data": [
-                        "threadId": threadId,
-                        "userId": currentAccountId,
-                        "role": stringValue(forKey: "role", in: participantRow) ?? "member",
-                        "lastReadAt": now,
-                        "muted": boolValue(forKey: "muted", in: participantRow) ?? false,
-                        "pinned": boolValue(forKey: "pinned", in: participantRow) ?? false,
-                        "notificationsEnabled": boolValue(forKey: "notificationsEnabled", in: participantRow) ?? true
+                        "data": [
+                            "threadId": threadId,
+                            "userId": currentAccountId,
+                            "role": stringValue(forKey: "role", in: participantRow) ?? "participant",
+                            "lastReadAt": now,
+                            "muted": boolValue(forKey: "muted", in: participantRow) ?? false,
+                            "pinned": boolValue(forKey: "pinned", in: participantRow) ?? false,
+                            "notificationsEnabled": boolValue(forKey: "notificationsEnabled", in: participantRow) ?? true
                     ]
                 ]
             )

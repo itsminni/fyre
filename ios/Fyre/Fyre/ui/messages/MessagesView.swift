@@ -82,6 +82,8 @@ struct ChatThread: Identifiable, Hashable {
             return L10n.tr("chat.attachment.photo")
         case .video:
             return L10n.tr("chat.attachment.video")
+        case .audio:
+            return L10n.tr("chat.attachment.audio")
         case .file:
             return last.attachment?.name ?? L10n.tr("chat.attachment.file")
         case .text:
@@ -284,38 +286,38 @@ private struct ChatThreadRow: View {
                 isOnline: thread.isOnline
             )
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(thread.name)
-                    .font(.headline)
-                Text(thread.lastMessage)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(thread.name)
+                        .font(.headline)
+                        .lineLimit(1)
 
-            Spacer()
+                    Spacer(minLength: 8)
 
-            VStack(alignment: .trailing, spacing: 4) {
-                if let trailingPrimaryText {
-                    Text(trailingPrimaryText)
-                        .font(.caption.weight(unreadCount > 0 ? .semibold : .regular))
-                        .foregroundStyle(trailingPrimaryColor)
+                    if let trailingTimeText {
+                        Text(trailingTimeText)
+                            .font(.subheadline.weight(unreadCount > 0 ? .semibold : .regular))
+                            .foregroundStyle(trailingTimeColor)
+                            .lineLimit(1)
+                    }
                 }
 
-                if unreadCount > 0 {
-                    Text("\(unreadCount)")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, unreadCount >= 10 ? 7 : 6)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(Color.orange)
-                        )
-                } else if let trailingSecondaryText {
-                    Text(trailingSecondaryText)
-                        .font(.caption2)
-                        .foregroundStyle(trailingSecondaryColor)
+                HStack(alignment: .center, spacing: 8) {
+                    Text(thread.lastMessage)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    if unreadCount > 0 {
+                        unreadBadge
+                    } else if let deliveryStatusText {
+                        Text(deliveryStatusText)
+                            .font(.subheadline)
+                            .foregroundStyle(deliveryStatusColor)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
@@ -333,38 +335,6 @@ private struct ChatThreadRow: View {
         thread.messages.last
     }
 
-    private var trailingPrimaryText: String? {
-        if unreadCount > 0 {
-            return thread.lastTime
-        }
-
-        guard let lastMessage else {
-            return nil
-        }
-
-        if lastMessage.isMe {
-            return isLastOutgoingMessageRead ? L10n.tr("messages.read") : L10n.tr("messages.sent")
-        }
-
-        return thread.lastTime.isEmpty ? nil : thread.lastTime
-    }
-
-    private var trailingSecondaryText: String? {
-        if unreadCount > 0 {
-            return nil
-        }
-
-        if thread.isOnline {
-            return L10n.tr("messages.online")
-        }
-
-        if let lastSeenAt = thread.lastSeenAt {
-            return String(format: L10n.tr("messages.lastSeen"), lastSeenLabel(for: lastSeenAt))
-        }
-
-        return nil
-    }
-
     private var isLastOutgoingMessageRead: Bool {
         guard let lastMessage, lastMessage.isMe, let otherParticipantReadAt = thread.otherParticipantReadAt else {
             return false
@@ -373,44 +343,55 @@ private struct ChatThreadRow: View {
         return otherParticipantReadAt >= lastMessage.sentAt
     }
 
-    private var trailingPrimaryColor: Color {
-        if unreadCount > 0 {
-            return .orange
+    private var trailingTimeText: String? {
+        thread.lastTime.isEmpty ? nil : thread.lastTime
+    }
+
+    private var deliveryStatusText: String? {
+        guard unreadCount == 0, let lastMessage, lastMessage.isMe else {
+            return nil
         }
 
-        if lastMessage?.isMe == true {
-            return isLastOutgoingMessageRead ? .green : .secondary
+        return isLastOutgoingMessageRead ? L10n.tr("messages.read") : L10n.tr("messages.sent")
+    }
+
+    private var trailingTimeColor: Color {
+        if unreadCount > 0 {
+            return .orange
         }
 
         return .secondary
     }
 
-    private var trailingSecondaryColor: Color {
-        thread.isOnline ? .green : .secondary
+    private var deliveryStatusColor: Color {
+        isLastOutgoingMessageRead ? .green : .secondary
     }
 
-    private func lastSeenLabel(for date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
-            return Self.timeFormatter.string(from: date)
+    private var unreadBadge: some View {
+        Group {
+            if unreadCount >= 10 {
+                Text("\(unreadCount)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.orange)
+                    )
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 24, height: 24)
+
+                    Text("\(unreadCount)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                }
+            }
         }
-
-        return Self.dateTimeFormatter.string(from: date)
     }
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "it_IT")
-        formatter.dateFormat = "HH:mm"
-        return formatter
-    }()
-
-    private static let dateTimeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "it_IT")
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter
-    }()
 }
 
 struct ChatAvatarView: View {

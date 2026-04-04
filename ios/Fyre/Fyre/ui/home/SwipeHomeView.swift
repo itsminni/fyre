@@ -235,6 +235,7 @@ struct SwipeHomeView: View {
                 avatar: dto.avatar,
                 isOnline: dto.isOnline,
                 lastSeenAt: dto.lastSeenAt,
+                currentUserReadAt: dto.currentUserReadAt,
                 otherParticipantReadAt: dto.otherParticipantReadAt,
                 participantUserIds: dto.participantUserIds,
                 messages: dto.messages.map(ChatMessage.init(dto:))

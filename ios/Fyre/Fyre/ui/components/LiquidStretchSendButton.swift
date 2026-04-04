@@ -14,6 +14,8 @@ struct LiquidStretchSendButton: View {
     let action: () -> Void
     var size: CGFloat = 38
     var gradientColors: [Color] = [Color.orange, Color.red]
+    var allowsLiquidInteraction: Bool = true
+    var sharedStretchProgress: CGFloat = 0
 
     @GestureState private var dragOffset: CGSize = .zero
 
@@ -35,7 +37,7 @@ struct LiquidStretchSendButton: View {
                     Circle()
                         .stroke(colorScheme == .dark ? Color.white.opacity(0.3) : Color.black.opacity(0.10), lineWidth: 1)
                 )
-                .scaleEffect(x: supportsLiquidInteraction ? stretchX : 1, y: supportsLiquidInteraction ? stretchY : 1)
+                .scaleEffect(x: resolvedStretchX, y: resolvedStretchY)
                 .offset(
                     x: supportsLiquidInteraction ? dragOffset.width * 0.14 : 0,
                     y: supportsLiquidInteraction ? dragOffset.height * 0.14 : 0
@@ -47,6 +49,7 @@ struct LiquidStretchSendButton: View {
                     : nil,
                     value: dragOffset
                 )
+                .animation(.spring(response: 0.28, dampingFraction: 0.8), value: clampedSharedProgress)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -64,6 +67,10 @@ struct LiquidStretchSendButton: View {
     }
 
     private var supportsLiquidInteraction: Bool {
+        guard allowsLiquidInteraction else {
+            return false
+        }
+
         if #available(iOS 26, *) {
             return true
         }
@@ -77,6 +84,26 @@ struct LiquidStretchSendButton: View {
 
     private var stretchY: CGFloat {
         1 + max(0, (abs(dragOffset.height) - abs(dragOffset.width)) / 130)
+    }
+
+    private var clampedSharedProgress: CGFloat {
+        min(max(sharedStretchProgress, 0), 1)
+    }
+
+    private var sharedStretchX: CGFloat {
+        1 + (clampedSharedProgress * 0.12)
+    }
+
+    private var sharedStretchY: CGFloat {
+        1 - (clampedSharedProgress * 0.07)
+    }
+
+    private var resolvedStretchX: CGFloat {
+        (supportsLiquidInteraction ? stretchX : 1) * sharedStretchX
+    }
+
+    private var resolvedStretchY: CGFloat {
+        (supportsLiquidInteraction ? stretchY : 1) * sharedStretchY
     }
 
     private var normalizedGradientColors: [Color] {

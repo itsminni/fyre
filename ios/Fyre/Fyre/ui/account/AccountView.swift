@@ -352,7 +352,7 @@ struct AccountView: View {
             VStack(spacing: 18) {
                 AccountCard(
                     title: L10n.tr("profile.section.information"),
-                    subtitle: L10n.tr("profile.section.informationHint"),
+                    subtitleText: informationHintText,
                     icon: "person.text.rectangle.fill"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
@@ -703,6 +703,19 @@ struct AccountView: View {
             .overlay(.white.opacity(0.08))
     }
 
+    private var informationHintText: Text {
+        let localized = L10n.tr("profile.section.informationHint")
+
+        guard let emailRange = localized.range(of: supportEmail) else {
+            return Text(localized)
+        }
+
+        let beforeEmail = String(localized[..<emailRange.lowerBound])
+        let afterEmail = String(localized[emailRange.upperBound...])
+
+        return Text(beforeEmail) + Text(supportEmail).bold() + Text(afterEmail)
+    }
+
     @ViewBuilder
     private func profileAvatar(size: CGFloat) -> some View {
         if let data = store.currentUser?.profileImageData,
@@ -982,6 +995,7 @@ struct AccountView: View {
 private struct AccountCard<Content: View>: View {
     let title: String
     var subtitle: String? = nil
+    var subtitleText: Text? = nil
     var icon: String
     @ViewBuilder var content: Content
 
@@ -998,7 +1012,11 @@ private struct AccountCard<Content: View>: View {
                     Text(title)
                         .font(.title3.weight(.semibold))
 
-                    if let subtitle {
+                    if let subtitleText {
+                        subtitleText
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if let subtitle {
                         Text(subtitle)
                             .font(.footnote)
                             .foregroundStyle(.secondary)

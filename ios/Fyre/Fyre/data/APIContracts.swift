@@ -36,6 +36,7 @@ enum MessageTypeDTO: String, Sendable {
     case text
     case image
     case video
+    case audio
     case file
 }
 
