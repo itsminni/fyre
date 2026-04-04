@@ -410,9 +410,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Fyre;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare la foto profilo.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare foto profilo e allegati chat.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Fyre usa la posizione per mostrare distanza e profili nelle vicinanze.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere la foto profilo.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere foto profilo e allegati chat.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -455,9 +455,9 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Fyre;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare la foto profilo.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare foto profilo e allegati chat.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Fyre usa la posizione per mostrare distanza e profili nelle vicinanze.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere la foto profilo.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere foto profilo e allegati chat.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

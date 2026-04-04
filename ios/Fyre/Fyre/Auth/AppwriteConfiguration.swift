@@ -5,6 +5,7 @@ struct AppwriteConfiguration: Sendable {
     let databaseId: String
     let profilesTableId: String
     let avatarsBucketId: String
+    let chatAttachmentsBucketId: String?
     let eventsTableId: String
     let eventRegistrationsTableId: String
     let threadsTableId: String
@@ -14,6 +15,7 @@ struct AppwriteConfiguration: Sendable {
     let matchesTableId: String?
     let registerForEventFunctionId: String
     let cancelEventRegistrationFunctionId: String
+    let eventAdminFunctionId: String?
     let createOrGetThreadFunctionId: String
     let sendMessageFunctionId: String
     let recordSwipeFunctionId: String?
@@ -22,6 +24,7 @@ struct AppwriteConfiguration: Sendable {
     let sendMessageFunctionDomain: URL?
     let recordSwipeFunctionDomain: URL?
     let discoverProfilesFunctionDomain: URL?
+    let eventAdminFunctionDomain: URL?
     let endpointURL: URL
 
     static func load(bundle: Bundle = .main) throws -> AppwriteConfiguration {
@@ -41,6 +44,7 @@ struct AppwriteConfiguration: Sendable {
         let databaseId = try stringValue(forKey: "APPWRITE_DATABASE_ID", in: dictionary)
         let profilesTableId = try stringValue(forKey: "APPWRITE_PROFILES_TABLE_ID", in: dictionary)
         let avatarsBucketId = try stringValue(forKey: "APPWRITE_AVATARS_BUCKET_ID", in: dictionary)
+        let chatAttachmentsBucketId = optionalStringValue(forKey: "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID", in: dictionary)
         let eventsTableId = try stringValue(forKey: "APPWRITE_EVENTS_TABLE_ID", in: dictionary)
         let eventRegistrationsTableId = try stringValue(forKey: "APPWRITE_EVENT_REGISTRATIONS_TABLE_ID", in: dictionary)
         let threadsTableId = try stringValue(forKey: "APPWRITE_THREADS_TABLE_ID", in: dictionary)
@@ -50,6 +54,7 @@ struct AppwriteConfiguration: Sendable {
         let matchesTableId = optionalStringValue(forKey: "APPWRITE_MATCHES_TABLE_ID", in: dictionary)
         let registerForEventFunctionId = try stringValue(forKey: "APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID", in: dictionary)
         let cancelEventRegistrationFunctionId = try stringValue(forKey: "APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID", in: dictionary)
+        let eventAdminFunctionId = optionalStringValue(forKey: "APPWRITE_EVENT_ADMIN_FUNCTION_ID", in: dictionary)
         let createOrGetThreadFunctionId = try stringValue(forKey: "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID", in: dictionary)
         let sendMessageFunctionId = try stringValue(forKey: "APPWRITE_SEND_MESSAGE_FUNCTION_ID", in: dictionary)
         let recordSwipeFunctionId = optionalStringValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_ID", in: dictionary)
@@ -58,6 +63,7 @@ struct AppwriteConfiguration: Sendable {
         let sendMessageFunctionDomain = try optionalURLValue(forKey: "APPWRITE_SEND_MESSAGE_FUNCTION_DOMAIN", in: dictionary)
         let recordSwipeFunctionDomain = try optionalURLValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_DOMAIN", in: dictionary)
         let discoverProfilesFunctionDomain = try optionalURLValue(forKey: "APPWRITE_DISCOVER_PROFILES_FUNCTION_DOMAIN", in: dictionary)
+        let eventAdminFunctionDomain = try optionalURLValue(forKey: "APPWRITE_EVENT_ADMIN_FUNCTION_DOMAIN", in: dictionary)
 
         guard let endpointURL = URL(string: publicEndpoint) else {
             throw AppwriteConfigurationError.invalidEndpoint(publicEndpoint)
@@ -69,6 +75,7 @@ struct AppwriteConfiguration: Sendable {
             databaseId: databaseId,
             profilesTableId: profilesTableId,
             avatarsBucketId: avatarsBucketId,
+            chatAttachmentsBucketId: chatAttachmentsBucketId,
             eventsTableId: eventsTableId,
             eventRegistrationsTableId: eventRegistrationsTableId,
             threadsTableId: threadsTableId,
@@ -78,6 +85,7 @@ struct AppwriteConfiguration: Sendable {
             matchesTableId: matchesTableId,
             registerForEventFunctionId: registerForEventFunctionId,
             cancelEventRegistrationFunctionId: cancelEventRegistrationFunctionId,
+            eventAdminFunctionId: eventAdminFunctionId,
             createOrGetThreadFunctionId: createOrGetThreadFunctionId,
             sendMessageFunctionId: sendMessageFunctionId,
             recordSwipeFunctionId: recordSwipeFunctionId,
@@ -86,6 +94,7 @@ struct AppwriteConfiguration: Sendable {
             sendMessageFunctionDomain: sendMessageFunctionDomain,
             recordSwipeFunctionDomain: recordSwipeFunctionDomain,
             discoverProfilesFunctionDomain: discoverProfilesFunctionDomain,
+            eventAdminFunctionDomain: eventAdminFunctionDomain,
             endpointURL: endpointURL
         )
     }
