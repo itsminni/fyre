@@ -10,20 +10,22 @@ import PhotosUI
 
 struct ProfileSetupView: View {
     @Environment(UserStore.self) private var store
+
     @State private var firstName = ""
     @State private var lastName = ""
     @State private var city = ""
     @State private var birthDate = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
     @State private var gender: UserGender = .male
     @State private var orientation: UserOrientation = .straight
-    @State private var showMe: UserShowMe = .everyone
+    @State private var bio = ""
+    @State private var intent: UserIntent = .relationship
+    @State private var interests = ""
+    @State private var preferredGenders = Set(UserStore.defaultPreferredGenders)
+    @State private var minPreferredAge = 20
+    @State private var maxPreferredAge = 32
+    @State private var maxDistanceKm = 50
     @State private var smokes = false
     @State private var drinks = false
-    @State private var hobbies = ""
-    @State private var passions = ""
-    @State private var lookingFor = ""
-    @State private var favoriteSong = ""
-    @State private var favoriteMovie = ""
     @State private var pickedPhotoItem: PhotosPickerItem?
     @State private var errorMessage: String?
     @State private var isSaving = false
@@ -45,7 +47,8 @@ struct ProfileSetupView: View {
 
                 Section(L10n.tr("profile.section.required")) {
                     labeledField(L10n.tr("profile.firstName"), text: $firstName, isRequired: true)
-                    labeledField(L10n.tr("profile.lastName"), text: $lastName, isRequired: true)
+                    labeledField(L10n.tr("profile.lastName"), text: $lastName)
+                    labeledField(L10n.tr("profile.city"), text: $city, isRequired: true)
 
                     DatePicker(
                         L10n.tr("profile.birthDate"),
@@ -66,22 +69,56 @@ struct ProfileSetupView: View {
                         }
                     }
 
-                    Picker(L10n.tr("profile.showMe"), selection: $showMe) {
-                        ForEach(UserShowMe.allCases) { option in
+                    multilineField(L10n.tr("profile.bio"), text: $bio, isRequired: true)
+                }
+
+                Section(L10n.tr("profile.section.discovery")) {
+                    Picker(L10n.tr("profile.intent"), selection: $intent) {
+                        ForEach(UserIntent.allCases) { option in
                             Text(L10n.tr(option.localizationKey)).tag(option)
                         }
                     }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        fieldLabel(L10n.tr("profile.preferredGenders"), isRequired: true)
+
+                        ForEach(UserGender.allCases) { option in
+                            Toggle(isOn: preferredGenderBinding(for: option)) {
+                                Text(L10n.tr(option.localizationKey))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+
+                    Stepper(
+                        "\(L10n.tr("profile.ageRange.min")): \(minPreferredAge)",
+                        value: $minPreferredAge,
+                        in: 18...80
+                    )
+                    .onChange(of: minPreferredAge) { _, newValue in
+                        if maxPreferredAge < newValue {
+                            maxPreferredAge = newValue
+                        }
+                    }
+
+                    Stepper(
+                        "\(L10n.tr("profile.ageRange.max")): \(maxPreferredAge)",
+                        value: $maxPreferredAge,
+                        in: minPreferredAge...80
+                    )
+
+                    Stepper(
+                        "\(L10n.tr("profile.maxDistanceKm")): \(maxDistanceKm) km",
+                        value: $maxDistanceKm,
+                        in: 5...300,
+                        step: 5
+                    )
+                    multilineField(L10n.tr("profile.interests"), text: $interests)
                 }
 
                 Section(L10n.tr("profile.section.preferences")) {
-                    labeledField(L10n.tr("profile.city"), text: $city, isRequired: true)
                     Toggle(L10n.tr("profile.smokes"), isOn: $smokes)
                     Toggle(L10n.tr("profile.drinks"), isOn: $drinks)
-                    labeledField(L10n.tr("profile.hobbies"), text: $hobbies, isRequired: true)
-                    labeledField(L10n.tr("profile.passions"), text: $passions, isRequired: true)
-                    labeledField(L10n.tr("profile.lookingFor"), text: $lookingFor, isRequired: true)
-                    labeledField(L10n.tr("profile.favoriteSong"), text: $favoriteSong, isRequired: true)
-                    labeledField(L10n.tr("profile.favoriteMovie"), text: $favoriteMovie, isRequired: true)
                 }
 
                 if let errorMessage {
@@ -116,7 +153,6 @@ struct ProfileSetupView: View {
             .task(id: pickedPhotoItem) {
                 guard let pickedPhotoItem else { return }
                 if let data = try? await pickedPhotoItem.loadTransferable(type: Data.self) {
-                    // Save the picked avatar immediately so the final profile submit can focus on text fields.
                     errorMessage = await store.updateProfileImage(data)
                 }
             }
@@ -153,6 +189,15 @@ struct ProfileSetupView: View {
         }
     }
 
+    private func multilineField(_ label: String, text: Binding<String>, isRequired: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            fieldLabel(label, isRequired: isRequired)
+            TextField(label, text: text, axis: .vertical)
+                .lineLimit(3, reservesSpace: true)
+        }
+        .padding(.vertical, 4)
+    }
+
     @ViewBuilder
     private func fieldLabel(_ label: String, isRequired: Bool) -> some View {
         if isRequired {
@@ -166,8 +211,20 @@ struct ProfileSetupView: View {
         }
     }
 
+    private func preferredGenderBinding(for option: UserGender) -> Binding<Bool> {
+        Binding(
+            get: { preferredGenders.contains(option) },
+            set: { isSelected in
+                if isSelected {
+                    preferredGenders.insert(option)
+                } else {
+                    preferredGenders.remove(option)
+                }
+            }
+        )
+    }
+
     private func hydrateFromCurrentUserIfNeeded() {
-        // Load the current profile once so the setup form starts from saved values.
         guard !hasHydratedFromUser else { return }
         hasHydratedFromUser = true
 
@@ -179,20 +236,20 @@ struct ProfileSetupView: View {
         birthDate = user.birthDate ?? birthDate
         gender = user.gender ?? gender
         orientation = user.orientation ?? orientation
-        showMe = user.showMe
+        bio = user.normalizedBio.isEmpty ? bio : user.normalizedBio
+        intent = user.intent ?? intent
+        interests = user.normalizedInterests.isEmpty ? interests : user.normalizedInterests
+        preferredGenders = Set(user.resolvedPreferredGenders)
+        minPreferredAge = user.resolvedMinPreferredAge
+        maxPreferredAge = user.resolvedMaxPreferredAge
+        maxDistanceKm = user.resolvedMaxDistanceKm
         smokes = user.smokes ?? smokes
         drinks = user.drinks ?? drinks
-        hobbies = user.hobbies ?? hobbies
-        passions = user.passions ?? passions
-        lookingFor = user.lookingFor ?? lookingFor
-        favoriteSong = user.favoriteSong ?? favoriteSong
-        favoriteMovie = user.favoriteMovie ?? favoriteMovie
     }
 
     private func handleCompleteProfile() {
         errorMessage = nil
 
-        // Ask for confirmation only when the new profile would drop existing registrations.
         if store.willCurrentUserLoseMainEventRegistrations(
             changingGenderTo: gender,
             orientation: orientation
@@ -211,7 +268,7 @@ struct ProfileSetupView: View {
         guard !isSaving else { return }
         errorMessage = nil
 
-        guard hasAllRequiredTextFields else {
+        guard hasRequiredFields else {
             errorMessage = L10n.tr("profile.error.completeRequiredFields")
             return
         }
@@ -225,14 +282,15 @@ struct ProfileSetupView: View {
             city: city,
             birthDate: birthDate,
             orientation: orientation,
-            showMe: showMe,
+            bio: bio,
+            intent: intent,
+            interests: interests,
+            preferredGenders: orderedPreferredGenders,
+            minPreferredAge: minPreferredAge,
+            maxPreferredAge: maxPreferredAge,
+            maxDistanceKm: maxDistanceKm,
             smokes: smokes,
-            drinks: drinks,
-            hobbies: hobbies,
-            passions: passions,
-            lookingFor: lookingFor,
-            favoriteSong: favoriteSong,
-            favoriteMovie: favoriteMovie
+            drinks: drinks
         ) {
             errorMessage = err
             isSaving = false
@@ -242,16 +300,16 @@ struct ProfileSetupView: View {
         isSaving = false
     }
 
-    private var hasAllRequiredTextFields: Bool {
+    private var orderedPreferredGenders: [UserGender] {
+        UserGender.allCases.filter { preferredGenders.contains($0) }
+    }
+
+    private var hasRequiredFields: Bool {
         [
             firstName,
-            lastName,
             city,
-            hobbies,
-            passions,
-            lookingFor,
-            favoriteSong,
-            favoriteMovie
+            bio
         ].allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        && !orderedPreferredGenders.isEmpty
     }
 }
