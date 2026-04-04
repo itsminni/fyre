@@ -7,16 +7,19 @@
 
 import SwiftUI
 
-// Lightweight card model derived from discover results so the swipe UI stays decoupled from backend DTO shape.
 private struct SwipeProfile: Identifiable {
     let id = UUID()
     let remoteUserId: String?
     let name: String
     let age: Int
     let bio: String
+    let city: String?
+    let distanceKm: Int?
+    let intent: UserIntent?
+    let interests: [String]
+    let avatarURL: URL?
 }
 
-// Swipe deck fed by discover profiles. The view keeps interaction local-first and persists the choice afterwards.
 struct SwipeHomeView: View {
     private enum DecisionDirection {
         case left
@@ -124,26 +127,42 @@ struct SwipeHomeView: View {
     }
 
     private func card(for profile: SwipeProfile) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            RoundedRectangle(cornerRadius: 14)
-                .fill(
-                    LinearGradient(
-                        colors: [Color.orange.opacity(0.6), Color.red.opacity(0.6)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(height: 260)
-                .overlay(
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 64))
-                        .foregroundStyle(.white)
-                )
+        VStack(alignment: .leading, spacing: 14) {
+            cardHero(for: profile)
 
-            Text("\(profile.name), \(profile.age)")
-                .font(.title3.bold())
-            Text(profile.bio)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("\(profile.name), \(profile.age)")
+                        .font(.title3.bold())
+
+                    if let distanceKm = profile.distanceKm {
+                        tag(text: "\(distanceKm) km", accent: .orange)
+                    }
+
+                    if let city = profile.city?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !city.isEmpty {
+                        tag(text: city)
+                    }
+                }
+
+                if let intent = profile.intent {
+                    tag(text: L10n.tr(intent.localizationKey), accent: .orange)
+                }
+
+                Text(profile.bio)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+
+                if !profile.interests.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Array(profile.interests.prefix(4)), id: \.self) { interest in
+                                tag(text: interest)
+                            }
+                        }
+                    }
+                }
+            }
         }
         .padding()
         .frame(maxWidth: .infinity)
@@ -155,6 +174,70 @@ struct SwipeHomeView: View {
         .shadow(color: cardSurfaceShadow, radius: colorScheme == .dark ? 16 : 12, y: colorScheme == .dark ? 8 : 5)
     }
 
+    @ViewBuilder
+    private func cardHero(for profile: SwipeProfile) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.orange.opacity(0.55), Color.red.opacity(0.60)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            if let avatarURL = profile.avatarURL {
+                AsyncImage(url: avatarURL) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        placeholderAvatar
+                    }
+                }
+            } else {
+                placeholderAvatar
+            }
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.10), .black.opacity(0.55)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .frame(height: 320)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var placeholderAvatar: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.orange.opacity(0.45), Color.red.opacity(0.38)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Image(systemName: "person.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(.white.opacity(0.92))
+        }
+    }
+
+    private func tag(text: String, accent: Color? = nil) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(accent ?? .primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 999, style: .continuous)
+                    .fill((accent ?? .white).opacity(accent == nil ? 0.08 : 0.14))
+            )
+    }
+
     private func commitDecision(_ direction: DecisionDirection) {
         guard let profile = profiles.first, !isAnimatingDecision, !isSubmittingSwipe else { return }
         animateDecision(direction, for: profile)
@@ -164,7 +247,6 @@ struct SwipeHomeView: View {
         isAnimatingDecision = true
         swipeErrorMessage = nil
 
-        // Push the top card out, then remove it from the stack.
         let targetX: CGFloat = direction == .left ? -180 : 180
         withAnimation(.easeOut(duration: 0.18)) {
             dragOffset = CGSize(width: targetX, height: 0)
@@ -177,7 +259,6 @@ struct SwipeHomeView: View {
             dragOffset = .zero
             isAnimatingDecision = false
 
-            // Keep the card interaction feeling immediate, then persist the decision in the background.
             Task {
                 await submitDecision(direction, for: profile)
             }
@@ -189,18 +270,19 @@ struct SwipeHomeView: View {
         do {
             swipeErrorMessage = nil
             let dtos = try await services.backend.fetchDiscoverProfiles()
-            let preferredAudience = store.currentUser?.showMe ?? .everyone
-            let filteredProfiles = dtos
-                .filter { preferredAudience.matches($0.gender) }
-                .map {
-                    SwipeProfile(
-                        remoteUserId: $0.remoteUserId,
-                        name: $0.name,
-                        age: $0.age,
-                        bio: $0.bio
-                    )
-                }
-            profiles = filteredProfiles
+            profiles = dtos.map {
+                SwipeProfile(
+                    remoteUserId: $0.remoteUserId,
+                    name: $0.name,
+                    age: $0.age,
+                    bio: $0.bio,
+                    city: $0.city,
+                    distanceKm: $0.distanceKm,
+                    intent: $0.intent,
+                    interests: $0.interests,
+                    avatarURL: $0.avatarURL
+                )
+            }
         } catch {
             profiles = []
             swipeErrorMessage = error.localizedDescription
@@ -222,7 +304,6 @@ struct SwipeHomeView: View {
                 decision: decision
             )
 
-            // A mutual like returns the already-created thread so we can jump straight into chat.
             guard let dto = matchedThread else { return }
 
             let displayName = ThreadNaming.isPlaceholderThreadName(dto.name)
@@ -251,7 +332,17 @@ struct SwipeHomeView: View {
     }
 
     private var discoverFilterID: String {
-        (store.currentUser?.showMe ?? .everyone).rawValue
+        guard let user = store.currentUser else { return "discover" }
+        let genders = user.resolvedPreferredGenders.map(\.rawValue).joined(separator: ",")
+        return [
+            genders,
+            "\(user.resolvedMinPreferredAge)",
+            "\(user.resolvedMaxPreferredAge)",
+            "\(user.resolvedMaxDistanceKm)",
+            user.city ?? "",
+            user.latitude.map { String($0) } ?? "",
+            user.longitude.map { String($0) } ?? ""
+        ].joined(separator: "|")
     }
 
     private var cardSurfaceFill: Color {
