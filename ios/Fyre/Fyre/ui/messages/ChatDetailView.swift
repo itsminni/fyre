@@ -895,6 +895,23 @@ struct ChatDetailView: View {
             }
     }
 
+    @ViewBuilder
+    private func modernSideButtonChrome(isDisabled: Bool = false) -> some View {
+        let shape = Circle()
+        let fillOpacity: CGFloat = isDisabled ? 0.72 : 0.94
+
+        shape
+            .fill(
+                Color(uiColor: colorScheme == .dark ? .secondarySystemBackground : .systemBackground)
+                    .opacity(fillOpacity)
+            )
+            .overlay {
+                shape
+                    .stroke(colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.12), lineWidth: 0.9)
+            }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.24 : 0.14), radius: 8, y: 2)
+    }
+
     private var recordingComposerStatusView: some View {
         HStack(spacing: 10) {
             Circle()
@@ -994,10 +1011,11 @@ struct ChatDetailView: View {
                 attachmentMenuActions
             } label: {
                 composerAttachmentButton()
+                    .foregroundStyle(colorScheme == .dark ? .white.opacity(0.92) : .primary.opacity(0.84))
+                    .frame(width: 42, height: 42)
+                    .background(modernSideButtonChrome())
             }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.circle)
-            .controlSize(.regular)
+            .buttonStyle(.plain)
             .tint(.primary)
             .scaleEffect(metrics.sideButtonScale)
             .frame(height: metrics.fieldMinHeight, alignment: .center)
@@ -1039,7 +1057,8 @@ struct ChatDetailView: View {
                 size: 44,
                 gradientColors: sendButtonGradientColors,
                 allowsLiquidInteraction: true,
-                sharedStretchProgress: modernSendButtonSharedStretchProgress
+                sharedStretchProgress: modernSendButtonSharedStretchProgress,
+                contrastBoost: isLightChatBackground
             )
             .frame(width: 44, height: 44, alignment: .center)
             .frame(height: metrics.fieldMinHeight, alignment: .center)
