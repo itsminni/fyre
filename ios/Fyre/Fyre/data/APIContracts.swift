@@ -17,6 +17,11 @@ struct ProfileDTO: Identifiable, Sendable {
     let age: Int
     let gender: UserGender
     let bio: String
+    let city: String?
+    let distanceKm: Int?
+    let intent: UserIntent?
+    let interests: [String]
+    let avatarURL: URL?
 }
 
 struct ThreadDTO: Identifiable, Sendable {

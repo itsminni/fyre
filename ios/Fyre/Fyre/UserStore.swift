@@ -6,6 +6,7 @@
 //  Local user store backed by UserDefaults.
 //
 
+import CoreLocation
 import Foundation
 import Observation
 
@@ -59,32 +60,24 @@ enum UserOrientation: String, Codable, CaseIterable, Sendable, Identifiable {
     }
 }
 
-enum UserShowMe: String, Codable, CaseIterable, Sendable, Identifiable {
-    case men
-    case women
-    case everyone
+enum UserIntent: String, Codable, CaseIterable, Sendable, Identifiable {
+    case relationship
+    case casual
+    case friendship
+    case notSure
 
     var id: String { rawValue }
 
     var localizationKey: String {
         switch self {
-        case .men:
-            return "profile.showMe.men"
-        case .women:
-            return "profile.showMe.women"
-        case .everyone:
-            return "profile.showMe.everyone"
-        }
-    }
-
-    func matches(_ gender: UserGender) -> Bool {
-        switch self {
-        case .men:
-            return gender == .male
-        case .women:
-            return gender == .female
-        case .everyone:
-            return true
+        case .relationship:
+            return "profile.intent.relationship"
+        case .casual:
+            return "profile.intent.casual"
+        case .friendship:
+            return "profile.intent.friendship"
+        case .notSure:
+            return "profile.intent.notSure"
         }
     }
 }
@@ -99,14 +92,17 @@ struct User: Codable, Sendable {
     var birthDate: Date?
     var gender: UserGender?
     var orientation: UserOrientation?
-    var showMe: UserShowMe
+    var preferredGenders: [UserGender]?
+    var minPreferredAge: Int?
+    var maxPreferredAge: Int?
+    var maxDistanceKm: Int?
+    var latitude: Double?
+    var longitude: Double?
     var smokes: Bool?
     var drinks: Bool?
-    var hobbies: String?
-    var passions: String?
-    var lookingFor: String?
-    var favoriteSong: String?
-    var favoriteMovie: String?
+    var bio: String?
+    var intent: UserIntent?
+    var interests: String?
     var avatarFileId: String?
     var profileImageData: Data?
 
@@ -117,20 +113,49 @@ struct User: Codable, Sendable {
         return full.isEmpty ? email : full
     }
 
+    var resolvedPreferredGenders: [UserGender] {
+        let explicit = preferredGenders ?? []
+        if !explicit.isEmpty {
+            return UserGender.allCases.filter { explicit.contains($0) }
+        }
+        return UserStore.defaultPreferredGenders
+    }
+
+    var resolvedMinPreferredAge: Int {
+        min(max(minPreferredAge ?? 18, 18), 80)
+    }
+
+    var resolvedMaxPreferredAge: Int {
+        max(min(maxPreferredAge ?? 35, 80), resolvedMinPreferredAge)
+    }
+
+    var resolvedMaxDistanceKm: Int {
+        min(max(maxDistanceKm ?? 50, 5), 300)
+    }
+
+    var normalizedBio: String {
+        bio?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    var normalizedInterests: String {
+        interests?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     var isProfileComplete: Bool {
         guard let firstName, !firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        guard let lastName, !lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard let city, !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard let birthDate, UserStore.age(from: birthDate) >= 18 else { return false }
         guard gender != nil else { return false }
         guard orientation != nil else { return false }
-        guard smokes != nil, drinks != nil else { return false }
+        guard latitude != nil, longitude != nil else { return false }
+        guard !normalizedBio.isEmpty else { return false }
+        guard !resolvedPreferredGenders.isEmpty else { return false }
         return true
     }
 
     nonisolated init(email: String, password: String) {
         self.email = email
         self.password = password
-        self.showMe = .everyone
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -143,14 +168,17 @@ struct User: Codable, Sendable {
         case birthDate
         case gender
         case orientation
-        case showMe
+        case preferredGenders
+        case minPreferredAge
+        case maxPreferredAge
+        case maxDistanceKm
+        case latitude
+        case longitude
         case smokes
         case drinks
-        case hobbies
-        case passions
-        case lookingFor
-        case favoriteSong
-        case favoriteMovie
+        case bio
+        case intent
+        case interests
         case avatarFileId
     }
 
@@ -165,14 +193,17 @@ struct User: Codable, Sendable {
         birthDate = try c.decodeIfPresent(Date.self, forKey: .birthDate)
         gender = try c.decodeIfPresent(UserGender.self, forKey: .gender)
         orientation = try c.decodeIfPresent(UserOrientation.self, forKey: .orientation)
-        showMe = try c.decode(UserShowMe.self, forKey: .showMe)
+        preferredGenders = try c.decodeIfPresent([UserGender].self, forKey: .preferredGenders)
+        minPreferredAge = try c.decodeIfPresent(Int.self, forKey: .minPreferredAge)
+        maxPreferredAge = try c.decodeIfPresent(Int.self, forKey: .maxPreferredAge)
+        maxDistanceKm = try c.decodeIfPresent(Int.self, forKey: .maxDistanceKm)
+        latitude = try c.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try c.decodeIfPresent(Double.self, forKey: .longitude)
         smokes = try c.decodeIfPresent(Bool.self, forKey: .smokes)
         drinks = try c.decodeIfPresent(Bool.self, forKey: .drinks)
-        hobbies = try c.decodeIfPresent(String.self, forKey: .hobbies)
-        passions = try c.decodeIfPresent(String.self, forKey: .passions)
-        lookingFor = try c.decodeIfPresent(String.self, forKey: .lookingFor)
-        favoriteSong = try c.decodeIfPresent(String.self, forKey: .favoriteSong)
-        favoriteMovie = try c.decodeIfPresent(String.self, forKey: .favoriteMovie)
+        bio = try c.decodeIfPresent(String.self, forKey: .bio)
+        intent = try c.decodeIfPresent(UserIntent.self, forKey: .intent)
+        interests = try c.decodeIfPresent(String.self, forKey: .interests)
         avatarFileId = try c.decodeIfPresent(String.self, forKey: .avatarFileId)
         profileImageData = nil
     }
@@ -188,14 +219,17 @@ struct User: Codable, Sendable {
         try c.encodeIfPresent(birthDate, forKey: .birthDate)
         try c.encodeIfPresent(gender, forKey: .gender)
         try c.encodeIfPresent(orientation, forKey: .orientation)
-        try c.encode(showMe, forKey: .showMe)
+        try c.encodeIfPresent(preferredGenders, forKey: .preferredGenders)
+        try c.encodeIfPresent(minPreferredAge, forKey: .minPreferredAge)
+        try c.encodeIfPresent(maxPreferredAge, forKey: .maxPreferredAge)
+        try c.encodeIfPresent(maxDistanceKm, forKey: .maxDistanceKm)
+        try c.encodeIfPresent(latitude, forKey: .latitude)
+        try c.encodeIfPresent(longitude, forKey: .longitude)
         try c.encodeIfPresent(smokes, forKey: .smokes)
         try c.encodeIfPresent(drinks, forKey: .drinks)
-        try c.encodeIfPresent(hobbies, forKey: .hobbies)
-        try c.encodeIfPresent(passions, forKey: .passions)
-        try c.encodeIfPresent(lookingFor, forKey: .lookingFor)
-        try c.encodeIfPresent(favoriteSong, forKey: .favoriteSong)
-        try c.encodeIfPresent(favoriteMovie, forKey: .favoriteMovie)
+        try c.encodeIfPresent(bio, forKey: .bio)
+        try c.encodeIfPresent(intent, forKey: .intent)
+        try c.encodeIfPresent(interests, forKey: .interests)
         try c.encodeIfPresent(avatarFileId, forKey: .avatarFileId)
     }
 }
@@ -529,14 +563,13 @@ final class UserStore: @unchecked Sendable {
                 do {
                     let updatedUser = try await appwriteService.updateProfile(for: user)
                     currentUser = updatedUser
-                    if shouldRemoveMainEventRegistration {
-                        try? await appwriteService.cancelMainEventRegistration(
-                            for: updatedUser,
-                            eventId: remoteMainEventState?.eventId,
-                            force: true
-                        )
+                    if let removalError = await enforceMainEventEligibilityAfterProfileChange(
+                        shouldRemoveMainEventRegistration,
+                        user: updatedUser,
+                        appwriteService: appwriteService
+                    ) {
+                        return removalError
                     }
-                    await refreshRemoteMainEventState()
                 } catch {
                     return profileErrorMessage(for: error)
                 }
@@ -567,24 +600,48 @@ final class UserStore: @unchecked Sendable {
         city: String = "",
         birthDate: Date?,
         orientation: UserOrientation?,
-        showMe: UserShowMe = .everyone,
+        bio: String,
+        intent: UserIntent?,
+        interests: String,
+        preferredGenders: [UserGender],
+        minPreferredAge: Int,
+        maxPreferredAge: Int,
+        maxDistanceKm: Int,
         smokes: Bool,
-        drinks: Bool,
-        hobbies: String,
-        passions: String,
-        lookingFor: String,
-        favoriteSong: String,
-        favoriteMovie: String
+        drinks: Bool
     ) async -> String? {
         guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
         let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedInterests = interests.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPreferredGenders = UserGender.allCases.filter { preferredGenders.contains($0) }
+        let normalizedMinAge = min(max(minPreferredAge, 18), 80)
+        let normalizedMaxAge = max(min(maxPreferredAge, 80), normalizedMinAge)
+        let normalizedMaxDistanceKm = min(max(maxDistanceKm, 5), 300)
         guard !first.isEmpty else { return L10n.tr("profile.error.emptyFirstName") }
-        guard !last.isEmpty else { return L10n.tr("profile.error.emptyLastName") }
         guard !normalizedCity.isEmpty else { return L10n.tr("profile.error.emptyCity") }
         guard let birthDate, Self.age(from: birthDate) >= 18 else { return L10n.tr("profile.error.invalidAge") }
         guard let orientation else { return L10n.tr("profile.error.orientationRequired") }
+        guard !normalizedBio.isEmpty else { return L10n.tr("profile.error.emptyBio") }
+        guard !normalizedPreferredGenders.isEmpty else { return L10n.tr("profile.error.preferredGendersRequired") }
+        let existingCity = user.city?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let shouldRefreshCoordinates = existingCity.caseInsensitiveCompare(normalizedCity) != .orderedSame
+            || user.latitude == nil
+            || user.longitude == nil
+        let coordinates: (latitude: Double, longitude: Double)
+        if !shouldRefreshCoordinates,
+           let latitude = user.latitude,
+           let longitude = user.longitude {
+            coordinates = (latitude, longitude)
+        } else {
+            do {
+                coordinates = try await Self.coordinates(for: normalizedCity)
+            } catch {
+                return L10n.tr("profile.error.cityLookupFailed")
+            }
+        }
         let nextGender = gender ?? user.gender
         let shouldRemoveMainEventRegistration = willCurrentUserLoseMainEventRegistrations(
             changingGenderTo: nextGender,
@@ -597,14 +654,17 @@ final class UserStore: @unchecked Sendable {
         user.city = normalizedCity
         user.birthDate = birthDate
         user.orientation = orientation
-        user.showMe = showMe
+        user.preferredGenders = normalizedPreferredGenders
+        user.minPreferredAge = normalizedMinAge
+        user.maxPreferredAge = normalizedMaxAge
+        user.maxDistanceKm = normalizedMaxDistanceKm
+        user.latitude = coordinates.latitude
+        user.longitude = coordinates.longitude
         user.smokes = smokes
         user.drinks = drinks
-        user.hobbies = hobbies.trimmingCharacters(in: .whitespacesAndNewlines)
-        user.passions = passions.trimmingCharacters(in: .whitespacesAndNewlines)
-        user.lookingFor = lookingFor.trimmingCharacters(in: .whitespacesAndNewlines)
-        user.favoriteSong = favoriteSong.trimmingCharacters(in: .whitespacesAndNewlines)
-        user.favoriteMovie = favoriteMovie.trimmingCharacters(in: .whitespacesAndNewlines)
+        user.bio = normalizedBio
+        user.intent = intent
+        user.interests = normalizedInterests
 
         if Self.shouldUseAppwrite {
             guard let appwriteService else {
@@ -614,14 +674,13 @@ final class UserStore: @unchecked Sendable {
             do {
                 let updatedUser = try await appwriteService.updateProfile(for: user)
                 currentUser = updatedUser
-                if shouldRemoveMainEventRegistration {
-                    try? await appwriteService.cancelMainEventRegistration(
-                        for: updatedUser,
-                        eventId: remoteMainEventState?.eventId,
-                        force: true
-                    )
+                if let removalError = await enforceMainEventEligibilityAfterProfileChange(
+                    shouldRemoveMainEventRegistration,
+                    user: updatedUser,
+                    appwriteService: appwriteService
+                ) {
+                    return removalError
                 }
-                await refreshRemoteMainEventState()
             } catch {
                 return profileErrorMessage(for: error)
             }
@@ -690,6 +749,33 @@ final class UserStore: @unchecked Sendable {
         let nextOrientation = orientation ?? user.orientation
 
         return user.gender != nextGender || user.orientation != nextOrientation
+    }
+
+    @MainActor
+    private func enforceMainEventEligibilityAfterProfileChange(
+        _ shouldRemoveRegistration: Bool,
+        user: User,
+        appwriteService: AppwriteService
+    ) async -> String? {
+        if shouldRemoveRegistration {
+            do {
+                try await appwriteService.cancelMainEventRegistration(
+                    for: user,
+                    eventId: remoteMainEventState?.eventId,
+                    force: true
+                )
+            } catch {
+                debugLog("Forced cancellation after profile change failed: \(error.localizedDescription)")
+            }
+        }
+
+        await refreshRemoteMainEventStateWithRetry()
+
+        if shouldRemoveRegistration, hasCurrentUserMainEventRegistration {
+            return L10n.tr("events.error.requestFailed")
+        }
+
+        return nil
     }
 
     @MainActor
@@ -921,6 +1007,20 @@ final class UserStore: @unchecked Sendable {
 
     static func age(from birthDate: Date) -> Int {
         Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year ?? 0
+    }
+
+    static var defaultPreferredGenders: [UserGender] { UserGender.allCases }
+
+    @MainActor
+    private static func coordinates(for city: String) async throws -> (latitude: Double, longitude: Double) {
+        let placemarks = try await CLGeocoder().geocodeAddressString(city)
+        guard let coordinate = placemarks
+            .compactMap(\.location?.coordinate)
+            .first else {
+            throw CLError(.geocodeFoundNoResult)
+        }
+
+        return (coordinate.latitude, coordinate.longitude)
     }
 
     // MARK: - Persistence helpers
