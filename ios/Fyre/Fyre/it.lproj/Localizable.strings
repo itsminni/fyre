@@ -43,9 +43,9 @@
 "messages.empty.title" = "Nessuna chat";
 "messages.empty.description" = "Inizia a matchare per vedere i messaggi.";
 "messages.online" = "Online";
-"messages.lastSeen" = "Ultimo accesso %@";
-"messages.sent" = "inviato";
-"messages.read" = "letto";
+"messages.lastSeen" = "Ultimo accesso alle %@";
+"messages.sent" = "Inviato";
+"messages.read" = "Letto";
 "messages.openChat.hint" = "Tocca per aprire la chat";
 "messages.delete.action" = "Elimina";
 "messages.delete.confirmTitle" = "Eliminare la chat?";
@@ -234,7 +234,7 @@
 "events.status.cancelled" = "Stato: Annullato";
 "events.status.promoted" = "Stato: Promosso dalla waiting list";
 "events.admin.section" = "Strumenti admin";
-"events.admin.subtitle" = "Visibile solo agli admin in whitelist.";
+"events.admin.subtitle" = "Visibile solo agli admin autorizzati per questo evento.";
 "events.admin.editEvent" = "Modifica evento";
 "events.admin.participants" = "Partecipanti";
 "events.admin.userLookup" = "Email o user ID Appwrite";
@@ -249,6 +249,10 @@
 "events.admin.field.femaleLimit.value" = "Limite donne: %d";
 "events.admin.field.registrationClosesAt" = "Chiusura iscrizioni";
 "events.admin.field.cancellationClosesAt" = "Chiusura disdetta";
+"events.admin.access" = "Accesso";
+"events.admin.access.subtitle" = "Se imposti admin specifici qui, solo loro gestiranno questo evento. Lascia entrambi i campi vuoti per mantenere la whitelist globale.";
+"events.admin.field.adminEmails" = "Email admin";
+"events.admin.field.adminUserIds" = "User ID admin";
 "events.admin.success.updated" = "Evento aggiornato.";
 "events.admin.success.participantAdded" = "Partecipante aggiunto.";
 "events.admin.success.participantRemoved" = "Partecipante rimosso.";

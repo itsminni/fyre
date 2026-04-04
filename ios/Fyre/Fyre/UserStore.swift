@@ -204,13 +204,19 @@ struct MainEventSnapshot: Sendable {
     let date: Date
     let title: String
     let maxParticipants: Int
+    let maleLimit: Int
+    let femaleLimit: Int
     let maleCount: Int
     let femaleCount: Int
     let waitingListCount: Int
+    let registrationClosesAt: Date?
+    let cancellationClosesAt: Date?
 
     var totalCount: Int { maleCount + femaleCount }
-    var remainingMaleSlots: Int { max(0, 24 - maleCount) }
-    var remainingFemaleSlots: Int { max(0, 24 - femaleCount) }
+    var remainingMaleSlots: Int { max(0, maleLimit - maleCount) }
+    var remainingFemaleSlots: Int { max(0, femaleLimit - femaleCount) }
+    var effectiveRegistrationClosesAt: Date { registrationClosesAt ?? date.addingTimeInterval(-(24 * 60 * 60)) }
+    var effectiveCancellationClosesAt: Date { cancellationClosesAt ?? date.addingTimeInterval(-(48 * 60 * 60)) }
 }
 
 enum EventHistoryStatus: String, Codable, Sendable {
@@ -351,9 +357,13 @@ final class UserStore: @unchecked Sendable {
             date: mainEventDate,
             title: mainEventTitle,
             maxParticipants: maxParticipants,
+            maleLimit: maxParticipants / 2,
+            femaleLimit: maxParticipants / 2,
             maleCount: male,
             femaleCount: female,
-            waitingListCount: mainEventState.waitingList.count
+            waitingListCount: mainEventState.waitingList.count,
+            registrationClosesAt: nil,
+            cancellationClosesAt: nil
         )
     }
 
@@ -781,9 +791,13 @@ final class UserStore: @unchecked Sendable {
                         date: adminState.startsAt,
                         title: adminState.title,
                         maxParticipants: adminState.maxParticipants,
+                        maleLimit: adminState.maleLimit,
+                        femaleLimit: adminState.femaleLimit,
                         maleCount: adminState.participants.filter { $0.status == .confirmed || $0.status == .promoted }.filter { $0.gender == .male }.count,
                         femaleCount: adminState.participants.filter { $0.status == .confirmed || $0.status == .promoted }.filter { $0.gender == .female }.count,
-                        waitingListCount: adminState.participants.filter { $0.status == .waitlisted }.count
+                        waitingListCount: adminState.participants.filter { $0.status == .waitlisted }.count,
+                        registrationClosesAt: adminState.registrationClosesAt,
+                        cancellationClosesAt: adminState.cancellationClosesAt
                     ),
                     currentStatus: remoteState.currentStatus,
                     history: remoteState.history,

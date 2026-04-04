@@ -27,6 +27,8 @@ struct EventAdminState: Sendable {
     let femaleLimit: Int
     let registrationClosesAt: Date?
     let cancellationClosesAt: Date?
+    let adminUserIds: String
+    let adminEmails: String
     let participants: [EventAdminParticipant]
 }
 
@@ -38,6 +40,8 @@ struct EventAdminDraft: Sendable {
     var femaleLimit: Int
     var registrationClosesAt: Date?
     var cancellationClosesAt: Date?
+    var adminUserIds: String
+    var adminEmails: String
 
     init(
         title: String,
@@ -46,7 +50,9 @@ struct EventAdminDraft: Sendable {
         maleLimit: Int,
         femaleLimit: Int,
         registrationClosesAt: Date?,
-        cancellationClosesAt: Date?
+        cancellationClosesAt: Date?,
+        adminUserIds: String,
+        adminEmails: String
     ) {
         self.title = title
         self.startsAt = startsAt
@@ -55,6 +61,8 @@ struct EventAdminDraft: Sendable {
         self.femaleLimit = femaleLimit
         self.registrationClosesAt = registrationClosesAt
         self.cancellationClosesAt = cancellationClosesAt
+        self.adminUserIds = adminUserIds
+        self.adminEmails = adminEmails
     }
 
     init(state: EventAdminState) {
@@ -65,6 +73,8 @@ struct EventAdminDraft: Sendable {
         femaleLimit = state.femaleLimit
         registrationClosesAt = state.registrationClosesAt
         cancellationClosesAt = state.cancellationClosesAt
+        adminUserIds = state.adminUserIds
+        adminEmails = state.adminEmails
     }
 }
 
@@ -153,7 +163,9 @@ actor AppwriteService {
         var nextFileId: String?
         if let imageData, !imageData.isEmpty {
             nextFileId = makeRandomIdentifier()
-            try await uploadAvatar(data: imageData, fileId: nextFileId!)
+            if let nextFileId {
+                try await uploadAvatar(data: imageData, fileId: nextFileId)
+            }
         }
 
         var updatedUser = user
@@ -255,7 +267,9 @@ actor AppwriteService {
             "startsAt": Self.dateFormatter.string(from: draft.startsAt),
             "maxParticipants": draft.maxParticipants,
             "maleLimit": draft.maleLimit,
-            "femaleLimit": draft.femaleLimit
+            "femaleLimit": draft.femaleLimit,
+            "adminUserIds": draft.adminUserIds,
+            "adminEmails": draft.adminEmails
         ]
         if let registrationClosesAt = draft.registrationClosesAt {
             body["registrationClosesAt"] = Self.dateFormatter.string(from: registrationClosesAt)
@@ -627,9 +641,13 @@ actor AppwriteService {
             date: dateValue(forKey: "startsAt", in: eventRow) ?? Date(),
             title: stringValue(forKey: "title", in: eventRow) ?? "Event",
             maxParticipants: intValue(forKey: "maxParticipants", in: eventRow) ?? 48,
+            maleLimit: intValue(forKey: "maleLimit", in: eventRow) ?? 24,
+            femaleLimit: intValue(forKey: "femaleLimit", in: eventRow) ?? 24,
             maleCount: maleCount,
             femaleCount: femaleCount,
-            waitingListCount: waitingListCount
+            waitingListCount: waitingListCount,
+            registrationClosesAt: dateValue(forKey: "registrationClosesAt", in: eventRow),
+            cancellationClosesAt: dateValue(forKey: "cancellationClosesAt", in: eventRow)
         )
     }
 
@@ -658,15 +676,41 @@ actor AppwriteService {
             payload["currentUserId"] = currentUserId
         }
 
+        if shouldBypassDirectFunctionInvoke(functionId: functionId) {
+            return try await executeFunction(functionId: functionId, body: payload)
+        }
+
         // Prefer the direct `.appwrite.run` path because execution polling can drop successful response bodies.
-        if let response = try await executeFunctionDirectly(functionId: functionId, body: payload),
-           !response.isEmpty {
-            return response
+        do {
+            if let response = try await executeFunctionDirectly(functionId: functionId, body: payload),
+               !response.isEmpty {
+                return response
+            }
+        } catch let error as AppwriteServiceError {
+            let shouldFallbackToExecutionAPI: Bool
+            switch error {
+            case let .api(statusCode, _, type):
+                shouldFallbackToExecutionAPI = statusCode == 401 || statusCode == 403 || type == "router_unauthorized_execution"
+            default:
+                shouldFallbackToExecutionAPI = false
+            }
+
+            if !shouldFallbackToExecutionAPI {
+                throw error
+            }
+
+#if DEBUG
+            debugPrint("Direct function invoke denied for \(functionId). Falling back to execution API: \(error.localizedDescription)")
+#endif
         }
 #if DEBUG
         debugPrint("Direct function invoke returned no JSON payload for \(functionId). Falling back to execution polling.")
 #endif
         return try await executeFunction(functionId: functionId, body: payload)
+    }
+
+    private func shouldBypassDirectFunctionInvoke(functionId: String) -> Bool {
+        configuration.eventAdminFunctionId == functionId
     }
 
     private func executeFunction(functionId: String, body: [String: Any]) async throws -> [String: Any] {
@@ -1191,6 +1235,8 @@ actor AppwriteService {
             femaleLimit: intValue(forKey: "femaleLimit", in: event) ?? 24,
             registrationClosesAt: dateValue(forKey: "registrationClosesAt", in: event),
             cancellationClosesAt: dateValue(forKey: "cancellationClosesAt", in: event),
+            adminUserIds: stringValue(forKey: "adminUserIds", in: event) ?? "",
+            adminEmails: stringValue(forKey: "adminEmails", in: event) ?? "",
             participants: participants
         )
     }

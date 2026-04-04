@@ -40,7 +40,7 @@ struct EventsView: View {
                             deadlineText: String(
                                 format: L10n.tr("events.preview.deadline"),
                                 Self.previewDeadlineFormatter.string(
-                                    from: snapshot.date.addingTimeInterval(-(24 * 60 * 60))
+                                    from: snapshot.effectiveRegistrationClosesAt
                                 )
                             ),
                             venueText: L10n.tr("events.info.club"),
@@ -92,9 +92,10 @@ struct EventDetailView: View {
     @State private var adminCancellationClosesAt = Date().addingTimeInterval(48 * 60 * 60)
     @State private var adminUsesRegistrationClose = false
     @State private var adminUsesCancellationClose = false
+    @State private var adminScopedUserIds = ""
+    @State private var adminScopedEmails = ""
     @State private var adminLookup = ""
     @State private var adminAddStatus: EventHistoryStatus = .confirmed
-    @State private var loadedAdminEventId: String?
 
     // The detail screen uses its own formatter because it lives in a different layout context.
     private static let detailDateFormatter: DateFormatter = {
@@ -226,7 +227,7 @@ struct EventDetailView: View {
                                     text: String(
                                         format: L10n.tr("events.countdown.cancel"),
                                         countdownText(
-                                            until: snapshot.date.addingTimeInterval(-(48 * 60 * 60)),
+                                            until: snapshot.effectiveCancellationClosesAt,
                                             now: context.date
                                         )
                                     )
@@ -237,7 +238,7 @@ struct EventDetailView: View {
                                     text: String(
                                         format: L10n.tr("events.countdown.lock"),
                                         countdownText(
-                                            until: snapshot.date.addingTimeInterval(-(24 * 60 * 60)),
+                                            until: snapshot.effectiveRegistrationClosesAt,
                                             now: context.date
                                         )
                                     )
@@ -260,10 +261,7 @@ struct EventDetailView: View {
                                 Text(L10n.tr("events.admin.editEvent"))
                                     .font(.headline)
 
-                                TextField(L10n.tr("events.admin.field.title"), text: $adminTitle)
-                                    .textInputAutocapitalization(.words)
-                                    .padding(12)
-                                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                adminInputField(L10n.tr("events.admin.field.title"), text: $adminTitle, capitalization: .words)
 
                                 DatePicker(
                                     L10n.tr("events.admin.field.startsAt"),
@@ -309,6 +307,17 @@ struct EventDetailView: View {
                                     )
                                     .labelsHidden()
                                 }
+
+                                Text(L10n.tr("events.admin.access"))
+                                    .font(.headline)
+                                    .padding(.top, 8)
+
+                                Text(L10n.tr("events.admin.access.subtitle"))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+
+                                adminInputField(L10n.tr("events.admin.field.adminEmails"), text: $adminScopedEmails, capitalization: .never, axis: .vertical)
+                                adminInputField(L10n.tr("events.admin.field.adminUserIds"), text: $adminScopedUserIds, capitalization: .never, axis: .vertical)
 
                                 Button {
                                     saveAdminChanges()
@@ -382,7 +391,7 @@ struct EventDetailView: View {
                 action: performPrimaryAction
             )
         }
-        .task(id: adminState?.eventId) {
+        .task(id: adminSyncKey(adminState)) {
             syncAdminDraft(from: adminState)
         }
     }
@@ -458,12 +467,9 @@ struct EventDetailView: View {
 
     private func syncAdminDraft(from adminState: EventAdminState?) {
         guard let adminState else {
-            loadedAdminEventId = nil
             return
         }
-        guard loadedAdminEventId != adminState.eventId else { return }
 
-        loadedAdminEventId = adminState.eventId
         adminTitle = adminState.title
         adminStartsAt = adminState.startsAt
         adminMaxParticipants = adminState.maxParticipants
@@ -473,6 +479,8 @@ struct EventDetailView: View {
         adminRegistrationClosesAt = adminState.registrationClosesAt ?? adminState.startsAt.addingTimeInterval(-(24 * 60 * 60))
         adminUsesCancellationClose = adminState.cancellationClosesAt != nil
         adminCancellationClosesAt = adminState.cancellationClosesAt ?? adminState.startsAt.addingTimeInterval(-(48 * 60 * 60))
+        adminScopedUserIds = adminState.adminUserIds
+        adminScopedEmails = adminState.adminEmails
     }
 
     private func saveAdminChanges() {
@@ -486,7 +494,9 @@ struct EventDetailView: View {
             maleLimit: max(0, adminMaleLimit),
             femaleLimit: max(0, adminFemaleLimit),
             registrationClosesAt: adminUsesRegistrationClose ? adminRegistrationClosesAt : nil,
-            cancellationClosesAt: adminUsesCancellationClose ? adminCancellationClosesAt : nil
+            cancellationClosesAt: adminUsesCancellationClose ? adminCancellationClosesAt : nil,
+            adminUserIds: adminScopedUserIds.trimmingCharacters(in: .whitespacesAndNewlines),
+            adminEmails: adminScopedEmails.trimmingCharacters(in: .whitespacesAndNewlines)
         )
 
         Task {
@@ -596,6 +606,37 @@ struct EventDetailView: View {
             return .blue
         }
     }
+
+    private func adminSyncKey(_ adminState: EventAdminState?) -> String {
+        guard let adminState else { return "none" }
+        return [
+            adminState.eventId,
+            adminState.title,
+            String(adminState.startsAt.timeIntervalSince1970),
+            String(adminState.maxParticipants),
+            String(adminState.maleLimit),
+            String(adminState.femaleLimit),
+            adminState.registrationClosesAt.map { String($0.timeIntervalSince1970) } ?? "nil",
+            adminState.cancellationClosesAt.map { String($0.timeIntervalSince1970) } ?? "nil",
+            adminState.adminUserIds,
+            adminState.adminEmails
+        ].joined(separator: "|")
+    }
+
+    @ViewBuilder
+    private func adminInputField(
+        _ title: String,
+        text: Binding<String>,
+        capitalization: TextInputAutocapitalization = .sentences,
+        axis: Axis = .horizontal
+    ) -> some View {
+        TextField(title, text: text, axis: axis)
+            .textInputAutocapitalization(capitalization)
+            .autocorrectionDisabled(capitalization == .never)
+            .lineLimit(axis == .vertical ? 4 : 1)
+            .padding(12)
+            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
 }
 
 private struct EventPreviewCard: View {
@@ -607,8 +648,6 @@ private struct EventPreviewCard: View {
     let registrationText: String?
 
     var body: some View {
-        let genderCapacityLimit = max(1, snapshot.maxParticipants / 2)
-
         VStack(alignment: .leading, spacing: 0) {
             EventPosterSection(
                 height: 280,
@@ -648,11 +687,11 @@ private struct EventPreviewCard: View {
                     spacing: 12
                 ) {
                     EventMiniBadge(
-                        text: "M \(snapshot.maleCount)/\(genderCapacityLimit)",
+                        text: "M \(snapshot.maleCount)/\(max(1, snapshot.maleLimit))",
                         icon: "figure.stand"
                     )
                     EventMiniBadge(
-                        text: "F \(snapshot.femaleCount)/\(genderCapacityLimit)",
+                        text: "F \(snapshot.femaleCount)/\(max(1, snapshot.femaleLimit))",
                         icon: "figure.dress.line.vertical.figure"
                     )
                     EventMiniBadge(
@@ -679,35 +718,6 @@ private struct EventPreviewCard: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .shadow(color: eventCardShadow(for: colorScheme), radius: colorScheme == .dark ? 24 : 14, y: colorScheme == .dark ? 12 : 6)
-    }
-}
-
-private struct EventOverviewCard: View {
-    let snapshot: MainEventSnapshot
-
-    var body: some View {
-        EventSurface(title: L10n.tr("events.section.live"), icon: "chart.bar.fill") {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(String(format: L10n.tr("events.preview.remaining"), snapshot.remainingMaleSlots, snapshot.remainingFemaleSlots))
-                    .font(.headline)
-
-                HStack(spacing: 12) {
-                    EventMetricTile(
-                        title: L10n.tr("events.label.capacity"),
-                        value: "\(snapshot.totalCount)/\(snapshot.maxParticipants)",
-                        accent: .orange
-                    )
-                    EventMetricTile(
-                        title: L10n.tr("events.label.waiting"),
-                        value: "\(snapshot.waitingListCount)",
-                        accent: .pink
-                    )
-                }
-
-                EventInfoLine(icon: "fork.knife", text: L10n.tr("events.info.buffet"))
-                EventInfoLine(icon: "clock.badge.checkmark", text: L10n.tr("events.rule.lock24h"))
-            }
-        }
     }
 }
 
