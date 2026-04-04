@@ -406,9 +406,20 @@ async function request(config, method, path, body, queries = []) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { message: text };
+    }
+  }
+
   if (!response.ok) {
-    throw new Error(payload.message ?? `Request failed with status ${response.status}`);
+    const requestError = new Error(payload.message ?? `Request failed with status ${response.status}`);
+    requestError.statusCode = response.status;
+    requestError.type = payload.type ?? null;
+    throw requestError;
   }
   return payload;
 }
@@ -431,6 +442,10 @@ function isAlreadyExistsError(err) {
 }
 
 function isNotFoundError(err) {
+  if (err?.statusCode === 404) {
+    return true;
+  }
+
   const message = String(err?.message ?? err ?? "").toLowerCase();
   return message.includes("not found") || message.includes("could not be found");
 }

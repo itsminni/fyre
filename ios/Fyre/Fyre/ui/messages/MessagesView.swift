@@ -68,6 +68,7 @@ struct ChatThread: Identifiable, Hashable {
     let avatar: String
     let isOnline: Bool
     let lastSeenAt: Date?
+    let currentUserReadAt: Date?
     let otherParticipantReadAt: Date?
     let participantUserIds: [String]
     let messages: [ChatMessage]
@@ -198,6 +199,7 @@ struct MessagesView: View {
                     avatar: dto.avatar,
                     isOnline: dto.isOnline,
                     lastSeenAt: dto.lastSeenAt,
+                    currentUserReadAt: dto.currentUserReadAt,
                     otherParticipantReadAt: dto.otherParticipantReadAt,
                     participantUserIds: dto.participantUserIds,
                     messages: dto.messages.map(ChatMessage.init(dto:))
@@ -294,20 +296,97 @@ private struct ChatThreadRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text(thread.lastTime)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if thread.isOnline {
-                    Text(L10n.tr("messages.online"))
+                if let trailingPrimaryText {
+                    Text(trailingPrimaryText)
+                        .font(.caption.weight(unreadCount > 0 ? .semibold : .regular))
+                        .foregroundStyle(trailingPrimaryColor)
+                }
+
+                if unreadCount > 0 {
+                    Text("\(unreadCount)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, unreadCount >= 10 ? 7 : 6)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.orange)
+                        )
+                } else if let trailingSecondaryText {
+                    Text(trailingSecondaryText)
                         .font(.caption2)
-                        .foregroundStyle(.green)
-                } else if let lastSeenAt = thread.lastSeenAt {
-                    Text(String(format: L10n.tr("messages.lastSeen"), lastSeenLabel(for: lastSeenAt)))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(trailingSecondaryColor)
                 }
             }
         }
+    }
+
+    private var unreadCount: Int {
+        thread.messages.filter { message in
+            guard !message.isMe else { return false }
+            guard let currentUserReadAt = thread.currentUserReadAt else { return true }
+            return message.sentAt > currentUserReadAt
+        }.count
+    }
+
+    private var lastMessage: ChatMessage? {
+        thread.messages.last
+    }
+
+    private var trailingPrimaryText: String? {
+        if unreadCount > 0 {
+            return thread.lastTime
+        }
+
+        guard let lastMessage else {
+            return nil
+        }
+
+        if lastMessage.isMe {
+            return isLastOutgoingMessageRead ? L10n.tr("messages.read") : L10n.tr("messages.sent")
+        }
+
+        return thread.lastTime.isEmpty ? nil : thread.lastTime
+    }
+
+    private var trailingSecondaryText: String? {
+        if unreadCount > 0 {
+            return nil
+        }
+
+        if thread.isOnline {
+            return L10n.tr("messages.online")
+        }
+
+        if let lastSeenAt = thread.lastSeenAt {
+            return String(format: L10n.tr("messages.lastSeen"), lastSeenLabel(for: lastSeenAt))
+        }
+
+        return nil
+    }
+
+    private var isLastOutgoingMessageRead: Bool {
+        guard let lastMessage, lastMessage.isMe, let otherParticipantReadAt = thread.otherParticipantReadAt else {
+            return false
+        }
+
+        return otherParticipantReadAt >= lastMessage.sentAt
+    }
+
+    private var trailingPrimaryColor: Color {
+        if unreadCount > 0 {
+            return .orange
+        }
+
+        if lastMessage?.isMe == true {
+            return isLastOutgoingMessageRead ? .green : .secondary
+        }
+
+        return .secondary
+    }
+
+    private var trailingSecondaryColor: Color {
+        thread.isOnline ? .green : .secondary
     }
 
     private func lastSeenLabel(for date: Date) -> String {

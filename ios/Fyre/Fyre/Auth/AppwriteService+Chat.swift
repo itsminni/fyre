@@ -294,6 +294,9 @@ extension AppwriteService {
 
         let participantUserIds = participantRows.compactMap { stringValue(forKey: "userId", in: $0) }
         let otherUserId = participantUserIds.first(where: { $0 != resolvedCurrentAccountId })
+        let currentUserReadAt = participantRows
+            .first(where: { stringValue(forKey: "userId", in: $0) == resolvedCurrentAccountId })
+            .flatMap { dateValue(forKey: "lastReadAt", in: $0) }
         let otherParticipantReadAt = participantRows
             .first(where: { stringValue(forKey: "userId", in: $0) == otherUserId })
             .flatMap { dateValue(forKey: "lastReadAt", in: $0) }
@@ -336,6 +339,7 @@ extension AppwriteService {
             avatar: "",
             isOnline: isOnline,
             lastSeenAt: lastSeenAt,
+            currentUserReadAt: currentUserReadAt,
             otherParticipantReadAt: otherParticipantReadAt,
             participantUserIds: participantUserIds,
             messages: sortedMessages

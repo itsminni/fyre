@@ -12,6 +12,22 @@ import UniformTypeIdentifiers
 import AVKit
 import QuickLook
 
+private extension Color {
+    var perceivedLuminance: Double {
+        let uiColor = UIColor(self)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return 0
+        }
+
+        return (0.2126 * Double(red)) + (0.7152 * Double(green)) + (0.0722 * Double(blue))
+    }
+}
+
 private struct ChatScrollViewportHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
@@ -208,21 +224,26 @@ struct ChatDetailView: View {
                                                 if showsTimestamp {
                                                     Text(message.time)
                                                         .font(.caption2)
-                                                        .foregroundStyle(.tertiary)
+                                                        .foregroundStyle(messageMetadataForegroundStyle)
                                                 }
 
                                                 if showsTimestamp, receiptLabel != nil {
                                                     Text("•")
                                                         .font(.caption2)
-                                                        .foregroundStyle(.tertiary)
+                                                        .foregroundStyle(messageMetadataForegroundStyle)
                                                 }
 
                                                 if let receiptLabel {
                                                     Text(receiptLabel)
                                                         .font(.caption2.weight(.semibold))
-                                                        .foregroundStyle(.tertiary)
+                                                        .foregroundStyle(messageMetadataForegroundStyle)
                                                 }
                                             }
+                                            .shadow(
+                                                color: isLightChatBackground ? .white.opacity(0.16) : .black.opacity(0.22),
+                                                radius: 1,
+                                                y: 1
+                                            )
                                             .padding(.horizontal, 2)
                                             .padding(.top, 1)
                                             .opacity(isAnimating(message) ? 0.5 : 1)
@@ -331,8 +352,8 @@ struct ChatDetailView: View {
         .overlay(alignment: .bottom) {
             if #available(iOS 26.0, *) {
                 composerOverlay
-                    .padding(.bottom, composerOverlayBottomInset)
                     .ignoresSafeArea(.container, edges: .bottom)
+                    .ignoresSafeArea(.keyboard, edges: .bottom)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -345,8 +366,10 @@ struct ChatDetailView: View {
         .modifier(ChatDetailTabBarHidingModifier())
         .modifier(ChatDetailNavigationBarModifier(colorScheme: colorScheme))
         .toolbar {
-            if #unavailable(iOS 26.0) {
-                ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .principal) {
+                if #available(iOS 26.0, *) {
+                    ios26ProfileHeader
+                } else {
                     HStack(spacing: 8) {
                         ChatAvatarView(
                             name: threadName,
@@ -616,13 +639,8 @@ struct ChatDetailView: View {
         if #available(iOS 26.0, *) {
             Color.clear
         } else {
-            Group {
-                if colorScheme == .dark {
-                    Rectangle().fill(.ultraThinMaterial)
-                } else {
-                    Rectangle().fill(Color(uiColor: .systemBackground).opacity(0.96))
-                }
-            }
+            Rectangle()
+                .fill(chatChromeBackground)
             .ignoresSafeArea(edges: .bottom)
             .overlay(alignment: .top) {
                 Rectangle()
@@ -634,13 +652,12 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private var composerFieldChrome: some View {
-        if #available(iOS 26.0, *) {
-            Color.clear
-                .glassEffect(in: Capsule(style: .continuous))
-        } else {
-            Capsule(style: .continuous)
-                .fill(Color(uiColor: .secondarySystemFill))
-        }
+        Capsule(style: .continuous)
+            .fill(Color(uiColor: .secondarySystemFill))
+            .overlay {
+                Capsule(style: .continuous)
+                    .stroke(.white.opacity(colorScheme == .dark ? 0.08 : 0.12), lineWidth: 1)
+            }
     }
 
     private var composerBottomPadding: CGFloat {
@@ -750,35 +767,30 @@ struct ChatDetailView: View {
 
     @available(iOS 26.0, *)
     private var ios26ProfileHeader: some View {
-        VStack(spacing: 1) {
+        HStack(spacing: 8) {
             ChatAvatarView(
                 name: threadName,
                 avatarKey: threadAvatar,
                 size: 28,
                 isOnline: threadIsOnline,
-                showsPresence: false
+                showsPresence: true
             )
 
-            Text(threadName)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-
-            if let subtitle = threadPresenceSubtitle {
-                Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(threadIsOnline ? .green.opacity(0.95) : .white.opacity(0.84))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(threadName)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
                     .lineLimit(1)
+
+                if let subtitle = threadPresenceSubtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(threadIsOnline ? .green.opacity(0.95) : .white.opacity(0.84))
+                        .lineLimit(1)
+                }
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 15)
-        .padding(.vertical, 5)
-        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-        }
+        .frame(maxWidth: .infinity)
     }
 
     private var threadPresenceSubtitle: String? {
@@ -794,11 +806,11 @@ struct ChatDetailView: View {
     }
 
     private var navigationTitleText: String {
-        if #available(iOS 26.0, *) {
-            return threadName
-        }
-
         return ""
+    }
+
+    private var messageMetadataForegroundStyle: AnyShapeStyle {
+        AnyShapeStyle(isLightChatBackground ? Color.black.opacity(0.48) : Color.white.opacity(0.74))
     }
 
     @ViewBuilder
@@ -933,6 +945,27 @@ struct ChatDetailView: View {
             Color(hex: chatBackgroundColor3Hex)
         ]
         .compactMap { $0 }
+    }
+
+    private var isLightChatBackground: Bool {
+        let selectedStyle = ChatBackgroundStyle(rawValue: chatBackgroundStyle) ?? .defaultDark
+
+        switch selectedStyle {
+        case .defaultDark:
+            return colorScheme == .light
+        case .graphite, .ember, .ocean, .forest:
+            return colorScheme == .light
+        case .customGradient:
+            let colors = customBackgroundGradientColors
+            guard !colors.isEmpty else {
+                return colorScheme == .light
+            }
+
+            let luminance = colors
+                .map(\.perceivedLuminance)
+                .reduce(0, +) / Double(colors.count)
+            return luminance >= 0.62
+        }
     }
 
     private var composerOverlayBottomInset: CGFloat {
@@ -1095,75 +1128,36 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private func replyComposerPreview(_ message: ChatMessage) -> some View {
-        if #available(iOS 26.0, *) {
-            HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(.orange)
-                    .frame(width: 4, height: 36)
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(.orange)
+                .frame(width: 4, height: 34)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(message.isMe ? L10n.tr("chat.reply.you") : threadName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.96))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message.isMe ? L10n.tr("chat.reply.you") : threadName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-                    Text(replyPreviewText(for: message))
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.80))
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-
-                Button {
-                    replyingToMessage = nil
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .frame(width: 28, height: 28)
-                        .background(.white.opacity(0.10), in: Circle())
-                }
-                .buttonStyle(.plain)
+                Text(replyPreviewText(for: message))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .glassEffect(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(.white.opacity(0.12), lineWidth: 1)
+
+            Spacer(minLength: 0)
+
+            Button {
+                replyingToMessage = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
             }
-        } else {
-            HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(.orange)
-                    .frame(width: 4, height: 34)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(message.isMe ? L10n.tr("chat.reply.you") : threadName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Text(replyPreviewText(for: message))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
-
-                Button {
-                    replyingToMessage = nil
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.white.opacity(colorScheme == .dark ? 0.05 : 0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .buttonStyle(.plain)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.white.opacity(colorScheme == .dark ? 0.05 : 0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func replySwipeOffset(for message: ChatMessage) -> CGFloat {
@@ -1308,17 +1302,12 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private var attachmentTrayChrome: some View {
-        if #available(iOS 26.0, *) {
-            Color.clear
-                .glassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        } else {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(.white.opacity(colorScheme == .dark ? 0.12 : 0.10), lineWidth: 1)
-                }
-        }
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(.white.opacity(colorScheme == .dark ? 0.12 : 0.10), lineWidth: 1)
+            }
     }
 
     private func attachmentTrayAction(icon: String, title: String, action: @escaping () -> Void) -> some View {
@@ -2050,6 +2039,10 @@ private struct ChatDetailNavigationBarModifier: ViewModifier {
     }
 
     private var navigationBarBackground: some ShapeStyle {
+        chatChromeBackground
+    }
+
+    private var chatChromeBackground: some ShapeStyle {
         if colorScheme == .dark {
             return AnyShapeStyle(.regularMaterial)
         }
@@ -2071,6 +2064,7 @@ private struct ChatTabBarVisibilityController: UIViewControllerRepresentable {
 
     final class Controller: UIViewController {
         private var wantsHidden = false
+        private var lastAppliedHidden: Bool?
 
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
@@ -2088,25 +2082,34 @@ private struct ChatTabBarVisibilityController: UIViewControllerRepresentable {
         }
 
         func setTabBarHidden(_ hidden: Bool) {
+            guard wantsHidden != hidden else { return }
             wantsHidden = hidden
             applyTabBarVisibility()
         }
 
         private func applyTabBarVisibility() {
             guard let tabBar = tabBarController?.tabBar else { return }
-            tabBar.isHidden = wantsHidden
-            tabBar.alpha = wantsHidden ? 0 : 1
-            for subview in tabBar.subviews {
-                subview.alpha = wantsHidden ? 0 : 1
+            guard lastAppliedHidden != wantsHidden else { return }
+            lastAppliedHidden = wantsHidden
+
+            UIView.performWithoutAnimation {
+                tabBar.isHidden = wantsHidden
+                tabBarController?.additionalSafeAreaInsets.bottom = wantsHidden ? -tabBar.bounds.height : 0
+                tabBarController?.view.setNeedsLayout()
+                tabBarController?.view.layoutIfNeeded()
             }
         }
 
         private func restoreTabBar() {
             guard let tabBar = tabBarController?.tabBar else { return }
-            tabBar.isHidden = false
-            tabBar.alpha = 1
-            for subview in tabBar.subviews {
-                subview.alpha = 1
+            guard lastAppliedHidden != false else { return }
+            lastAppliedHidden = false
+
+            UIView.performWithoutAnimation {
+                tabBar.isHidden = false
+                tabBarController?.additionalSafeAreaInsets.bottom = 0
+                tabBarController?.view.setNeedsLayout()
+                tabBarController?.view.layoutIfNeeded()
             }
         }
     }

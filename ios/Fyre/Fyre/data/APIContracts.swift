@@ -26,6 +26,7 @@ struct ThreadDTO: Identifiable, Sendable {
     let avatar: String
     let isOnline: Bool
     let lastSeenAt: Date?
+    let currentUserReadAt: Date?
     let otherParticipantReadAt: Date?
     let participantUserIds: [String]
     let messages: [MessageDTO]
