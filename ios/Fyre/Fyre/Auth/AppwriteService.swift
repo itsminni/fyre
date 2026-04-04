@@ -5,12 +5,73 @@ struct MainEventRemoteState: Sendable {
     let snapshot: MainEventSnapshot
     let currentStatus: EventHistoryStatus?
     let history: [EventHistoryItem]
+    let adminState: EventAdminState?
+}
+
+struct EventAdminParticipant: Identifiable, Sendable {
+    let id: String
+    let userId: String
+    let displayName: String
+    let email: String
+    let gender: UserGender?
+    let status: EventHistoryStatus
+    let createdAt: Date?
+}
+
+struct EventAdminState: Sendable {
+    let eventId: String
+    let title: String
+    let startsAt: Date
+    let maxParticipants: Int
+    let maleLimit: Int
+    let femaleLimit: Int
+    let registrationClosesAt: Date?
+    let cancellationClosesAt: Date?
+    let participants: [EventAdminParticipant]
+}
+
+struct EventAdminDraft: Sendable {
+    var title: String
+    var startsAt: Date
+    var maxParticipants: Int
+    var maleLimit: Int
+    var femaleLimit: Int
+    var registrationClosesAt: Date?
+    var cancellationClosesAt: Date?
+
+    init(
+        title: String,
+        startsAt: Date,
+        maxParticipants: Int,
+        maleLimit: Int,
+        femaleLimit: Int,
+        registrationClosesAt: Date?,
+        cancellationClosesAt: Date?
+    ) {
+        self.title = title
+        self.startsAt = startsAt
+        self.maxParticipants = maxParticipants
+        self.maleLimit = maleLimit
+        self.femaleLimit = femaleLimit
+        self.registrationClosesAt = registrationClosesAt
+        self.cancellationClosesAt = cancellationClosesAt
+    }
+
+    init(state: EventAdminState) {
+        title = state.title
+        startsAt = state.startsAt
+        maxParticipants = state.maxParticipants
+        maleLimit = state.maleLimit
+        femaleLimit = state.femaleLimit
+        registrationClosesAt = state.registrationClosesAt
+        cancellationClosesAt = state.cancellationClosesAt
+    }
 }
 
 actor AppwriteService {
-    private let configuration: AppwriteConfiguration
-    private let session: URLSession
-    private var cachedFunctionJWT: (value: String, expiresAt: Date)?
+    let configuration: AppwriteConfiguration
+    let session: URLSession
+    var cachedFunctionJWT: (value: String, expiresAt: Date)?
 
     init(configuration: AppwriteConfiguration) {
         self.configuration = configuration
@@ -135,12 +196,14 @@ actor AppwriteService {
             .flatMap { eventHistoryStatus(for: stringValue(forKey: "status", in: $0)) }
 
         let history = try await makeEventHistory(for: accountId, events: upcomingEvents)
+        let adminState = try await fetchEventAdminStateIfAuthorized(eventId: eventId)
 
         return MainEventRemoteState(
             eventId: eventId,
             snapshot: snapshot,
             currentStatus: currentStatus,
-            history: history
+            history: history,
+            adminState: adminState
         )
     }
 
@@ -180,29 +243,80 @@ actor AppwriteService {
         )
     }
 
-    func createOrGetThread(otherUserId: String) async throws -> String {
+    func updateMainEventAsAdmin(eventId: String, draft: EventAdminDraft) async throws -> EventAdminState {
+        guard let functionId = configuration.eventAdminFunctionId else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_EVENT_ADMIN_FUNCTION_ID")
+        }
+
+        var body: [String: Any] = [
+            "action": "updateEvent",
+            "eventId": eventId,
+            "title": draft.title,
+            "startsAt": Self.dateFormatter.string(from: draft.startsAt),
+            "maxParticipants": draft.maxParticipants,
+            "maleLimit": draft.maleLimit,
+            "femaleLimit": draft.femaleLimit
+        ]
+        if let registrationClosesAt = draft.registrationClosesAt {
+            body["registrationClosesAt"] = Self.dateFormatter.string(from: registrationClosesAt)
+        }
+        if let cancellationClosesAt = draft.cancellationClosesAt {
+            body["cancellationClosesAt"] = Self.dateFormatter.string(from: cancellationClosesAt)
+        }
+
         let response = try await executeUserFunction(
-            functionId: configuration.createOrGetThreadFunctionId,
-            body: ["otherUserId": otherUserId]
+            functionId: functionId,
+            body: body
         )
 
-        guard let threadId = stringValue(forKey: "threadId", in: response) else {
+        guard let state = makeEventAdminState(from: response) else {
             throw AppwriteServiceError.invalidResponse
         }
 
-        return threadId
+        return state
     }
 
-    func createOrGetThreadDTO(otherUserId: String) async throws -> ThreadDTO {
-        let threadId = try await createOrGetThread(otherUserId: otherUserId)
-        guard let thread = try await fetchThread(threadId: threadId) else {
+    func addEventParticipantAsAdmin(eventId: String, lookup: String, status: EventHistoryStatus) async throws -> EventAdminState {
+        guard let functionId = configuration.eventAdminFunctionId else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_EVENT_ADMIN_FUNCTION_ID")
+        }
+
+        let response = try await executeUserFunction(
+            functionId: functionId,
+            body: [
+                "action": "addParticipant",
+                "eventId": eventId,
+                "userLookup": lookup,
+                "status": status.rawValue
+            ]
+        )
+
+        guard let state = makeEventAdminState(from: response) else {
             throw AppwriteServiceError.invalidResponse
         }
-        return thread
+
+        return state
     }
 
-    func fetchThreadDTO(threadId: String) async throws -> ThreadDTO? {
-        try await fetchThread(threadId: threadId)
+    func removeEventParticipantAsAdmin(eventId: String, registrationId: String) async throws -> EventAdminState {
+        guard let functionId = configuration.eventAdminFunctionId else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_EVENT_ADMIN_FUNCTION_ID")
+        }
+
+        let response = try await executeUserFunction(
+            functionId: functionId,
+            body: [
+                "action": "removeParticipant",
+                "eventId": eventId,
+                "registrationId": registrationId
+            ]
+        )
+
+        guard let state = makeEventAdminState(from: response) else {
+            throw AppwriteServiceError.invalidResponse
+        }
+
+        return state
     }
 
     func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
@@ -232,214 +346,6 @@ actor AppwriteService {
             return makeDiscoverProfileDTO(from: row)
         }
         return mappedProfiles
-    }
-
-    func fetchThreads() async throws -> [ThreadDTO] {
-        guard let currentAccountId = try await fetchCurrentAccountId(required: false) else {
-            return []
-        }
-
-        let participantRows = try await listRows(
-            tableId: configuration.threadParticipantsTableId,
-            queries: [
-                AppwriteQuery.equal("userId", values: [currentAccountId]),
-            ]
-        )
-
-        var threads: [(thread: ThreadDTO, lastActivity: Date)] = []
-
-        for participantRow in participantRows {
-            guard let threadId = stringValue(forKey: "threadId", in: participantRow),
-                  let thread = try await fetchThread(threadId: threadId, currentAccountId: currentAccountId) else {
-                continue
-            }
-            let lastActivity = thread.messages
-                .compactMap { Self.messageTimeFormatter.date(from: $0.time) }
-                .last ?? .distantPast
-            threads.append((thread, lastActivity))
-        }
-
-        return threads
-            .sorted(by: { $0.lastActivity > $1.lastActivity })
-            .map(\.thread)
-    }
-
-    func sendMessage(threadId: String, text: String) async throws -> MessageDTO {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw AppwriteServiceError.api(statusCode: 400, message: "chat.error.sendFailed", type: "validation")
-        }
-
-        let attemptedAt = Date()
-        let response: [String: Any]
-
-        do {
-            response = try await executeUserFunction(
-                functionId: configuration.sendMessageFunctionId,
-                body: [
-                    "threadId": threadId,
-                    "text": trimmed
-                ]
-            )
-        } catch let error as AppwriteServiceError where error.statusCode == 500 {
-            if let recoveredMessage = try await recoverRecentlySentMessage(
-                threadId: threadId,
-                text: trimmed,
-                notBefore: attemptedAt.addingTimeInterval(-12)
-            ) {
-                return recoveredMessage
-            }
-            throw error
-        }
-
-        let remoteMessageId = stringValue(forKey: "messageId", in: response) ?? UUID().uuidString
-        let createdAt = dateValue(forKey: "createdAt", in: response) ?? Date()
-        let responseText = stringValue(forKey: "text", in: response) ?? trimmed
-
-        return MessageDTO(
-            id: stableUUID(from: remoteMessageId),
-            text: responseText,
-            isMe: true,
-            time: Self.messageTimeFormatter.string(from: createdAt)
-        )
-    }
-
-    func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
-        guard let functionId = configuration.recordSwipeFunctionId else {
-            throw AppwriteServiceError.missingConfiguration("APPWRITE_RECORD_SWIPE_FUNCTION_ID")
-        }
-
-        // The backend owns match detection so two clients can't create duplicate chats on race conditions.
-        var payload: [String: Any] = [
-            "otherUserId": otherUserId,
-            "decision": decision.rawValue
-        ]
-        if let otherUserName, !otherUserName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            payload["otherUserName"] = otherUserName
-        }
-
-        let response = try await executeUserFunction(
-            functionId: functionId,
-            body: payload
-        )
-
-        let isMatch = boolValue(forKey: "matched", in: response) ?? false
-        guard isMatch else { return nil }
-
-        guard let threadId = stringValue(forKey: "threadId", in: response),
-              let thread = try await fetchThread(threadId: threadId) else {
-            throw AppwriteServiceError.invalidResponse
-        }
-
-        return thread
-    }
-
-    private func fetchThread(threadId: String, currentAccountId: String? = nil) async throws -> ThreadDTO? {
-        let resolvedCurrentAccountId: String
-        if let currentAccountId {
-            resolvedCurrentAccountId = currentAccountId
-        } else if let fetched = try await fetchCurrentAccountId(required: false) {
-            resolvedCurrentAccountId = fetched
-        } else {
-            return nil
-        }
-
-        guard let threadRow = try await fetchRowIfAccessible(tableId: configuration.threadsTableId, rowId: threadId) else {
-            return nil
-        }
-
-        let participantRows = try await listRows(
-            tableId: configuration.threadParticipantsTableId,
-            queries: [
-                AppwriteQuery.equal("threadId", values: [threadId]),
-            ]
-        )
-
-        let otherUserId = participantRows
-            .compactMap { stringValue(forKey: "userId", in: $0) }
-            .first(where: { $0 != resolvedCurrentAccountId })
-
-        let profileRow = try await fetchProfileRow(id: otherUserId ?? "")
-        let messageRows = try await listRows(
-            tableId: configuration.messagesTableId,
-            queries: [
-                AppwriteQuery.equal("threadId", values: [threadId]),
-                AppwriteQuery.orderAsc("createdAt"),
-            ]
-        )
-
-        let messages = messageRows.compactMap { row in
-            makeMessageDTO(from: row, currentAccountId: resolvedCurrentAccountId)
-        }
-
-        let threadName = displayName(
-            from: profileRow,
-            fallback: stringValue(forKey: "subject", in: threadRow)
-        )
-        let lastMessageAt = dateValue(forKey: "lastMessageAt", in: threadRow)
-            ?? messageRows.compactMap { dateValue(forKey: "createdAt", in: $0) }.last
-            ?? .distantPast
-
-        let sortedMessages = messages.sorted { lhs, rhs in
-            (Self.messageTimeFormatter.date(from: lhs.time) ?? .distantPast) <
-            (Self.messageTimeFormatter.date(from: rhs.time) ?? .distantPast)
-        }
-
-        _ = lastMessageAt
-
-        return ThreadDTO(
-            id: stableUUID(from: threadId),
-            remoteId: threadId,
-            name: threadName,
-            avatar: "",
-            isOnline: false,
-            messages: sortedMessages
-        )
-    }
-
-    private func recoverRecentlySentMessage(threadId: String, text: String, notBefore: Date) async throws -> MessageDTO? {
-        guard let currentAccountId = try await fetchCurrentAccountId(required: false) else {
-            return nil
-        }
-
-        let rows = try await listRows(
-            tableId: configuration.messagesTableId,
-            queries: [
-                AppwriteQuery.equal("threadId", values: [threadId]),
-                AppwriteQuery.orderAsc("createdAt"),
-            ]
-        )
-
-        for row in rows.reversed() {
-            guard stringValue(forKey: "senderUserId", in: row) == currentAccountId else {
-                continue
-            }
-
-            let rowText = stringValue(forKey: "text", in: row) ?? ""
-            guard rowText == text else {
-                continue
-            }
-
-            let createdAt = dateValue(forKey: "createdAt", in: row)
-                ?? dateValue(forKey: "$createdAt", in: row)
-                ?? .distantPast
-            guard createdAt >= notBefore else {
-                continue
-            }
-
-            guard let remoteId = stringValue(forKey: "$id", in: row) else {
-                continue
-            }
-
-            return MessageDTO(
-                id: stableUUID(from: remoteId),
-                text: rowText,
-                isMe: true,
-                time: Self.messageTimeFormatter.string(from: createdAt)
-            )
-        }
-
-        return nil
     }
 
     private func ensureProfileRow(for user: User) async throws -> User {
@@ -537,7 +443,7 @@ actor AppwriteService {
         return user
     }
 
-    private func fetchCurrentAccountId(required: Bool) async throws -> String? {
+    func fetchCurrentAccountId(required: Bool) async throws -> String? {
         guard let account = try await fetchCurrentAccount(required: required) else {
             return nil
         }
@@ -545,7 +451,7 @@ actor AppwriteService {
         return stringValue(forKey: "$id", in: account)
     }
 
-    private func fetchProfileRow(id rowId: String) async throws -> [String: Any]? {
+    func fetchProfileRow(id rowId: String) async throws -> [String: Any]? {
         guard !rowId.isEmpty else { return nil }
 
         if let row = try await fetchRowIfAccessible(tableId: configuration.profilesTableId, rowId: rowId) {
@@ -567,7 +473,7 @@ actor AppwriteService {
         }
     }
 
-    private func fetchRowIfAccessible(tableId: String, rowId: String) async throws -> [String: Any]? {
+    func fetchRowIfAccessible(tableId: String, rowId: String) async throws -> [String: Any]? {
         do {
             return try await sendJSONObjectRequest(
                 method: "GET",
@@ -745,13 +651,14 @@ actor AppwriteService {
         return accountId
     }
 
-    private func executeUserFunction(functionId: String, body: [String: Any]) async throws -> [String: Any] {
+    func executeUserFunction(functionId: String, body: [String: Any]) async throws -> [String: Any] {
         var payload = body
         if payload["currentUserId"] == nil,
            let currentUserId = try await fetchCurrentAccountId(required: true) {
             payload["currentUserId"] = currentUserId
         }
 
+        // Prefer the direct `.appwrite.run` path because execution polling can drop successful response bodies.
         if let response = try await executeFunctionDirectly(functionId: functionId, body: payload),
            !response.isEmpty {
             return response
@@ -897,6 +804,8 @@ actor AppwriteService {
             configuredURL = configuration.createOrGetThreadFunctionDomain
         } else if configuration.sendMessageFunctionId == functionId {
             configuredURL = configuration.sendMessageFunctionDomain
+        } else if configuration.eventAdminFunctionId == functionId {
+            configuredURL = configuration.eventAdminFunctionDomain
         } else {
             configuredURL = nil
         }
@@ -1004,7 +913,7 @@ actor AppwriteService {
         return nil
     }
 
-    private func listRows(tableId: String, queries: [String]) async throws -> [[String: Any]] {
+    func listRows(tableId: String, queries: [String]) async throws -> [[String: Any]] {
         let payload = try await sendJSONObjectRequest(
             method: "GET",
             pathComponents: [
@@ -1043,6 +952,8 @@ actor AppwriteService {
         request.httpBody = makeMultipartBody(
             boundary: boundary,
             fileId: fileId,
+            fileName: "avatar-\(fileId).jpg",
+            mimeType: "image/jpeg",
             fileData: data
         )
 
@@ -1087,7 +998,7 @@ actor AppwriteService {
         return try decodeJSONObject(from: data)
     }
 
-    private func sendRequest(
+    func sendRequest(
         method: String,
         pathComponents: [String],
         queryItems: [URLQueryItem] = [],
@@ -1147,7 +1058,7 @@ actor AppwriteService {
         )
     }
 
-    private func url(pathComponents: [String], queryItems: [URLQueryItem] = []) -> URL {
+    func url(pathComponents: [String], queryItems: [URLQueryItem] = []) -> URL {
         var components = URLComponents(url: configuration.endpointURL, resolvingAgainstBaseURL: false)
         let path = "/" + pathComponents.map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }.joined(separator: "/")
         components?.path = configuration.endpointURL.path + path
@@ -1159,7 +1070,7 @@ actor AppwriteService {
         }
     }
 
-    private func makeAPIError(from data: Data, statusCode: Int) -> AppwriteServiceError {
+    func makeAPIError(from data: Data, statusCode: Int) -> AppwriteServiceError {
         if let payload = try? decodeJSONObject(from: data) {
             return .api(
                 statusCode: statusCode,
@@ -1192,24 +1103,6 @@ actor AppwriteService {
         ]
     }
 
-    private func makeMessageDTO(from row: [String: Any], currentAccountId: String) -> MessageDTO? {
-        guard let remoteId = stringValue(forKey: "$id", in: row) else {
-            return nil
-        }
-
-        let text = stringValue(forKey: "text", in: row) ?? ""
-        let createdAt = dateValue(forKey: "createdAt", in: row)
-            ?? dateValue(forKey: "$createdAt", in: row)
-            ?? Date()
-
-        return MessageDTO(
-            id: stableUUID(from: remoteId),
-            text: text,
-            isMe: stringValue(forKey: "senderUserId", in: row) == currentAccountId,
-            time: Self.messageTimeFormatter.string(from: createdAt)
-        )
-    }
-
     private func makeDiscoverProfileDTO(from row: [String: Any]) -> ProfileDTO? {
         guard let userId = stringValue(forKey: "userId", in: row),
               let gender = genderValue(for: stringValue(forKey: "gender", in: row)) else {
@@ -1220,7 +1113,7 @@ actor AppwriteService {
         let lastName = stringValue(forKey: "lastName", in: row) ?? ""
         let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
         let email = stringValue(forKey: "email", in: row) ?? ""
-        let name = fullName.isEmpty ? discoverNameFallback(from: email) : fullName
+        let name = fullName.isEmpty ? (ThreadNaming.discoverFallbackName(email: email) ?? ThreadNaming.placeholderTitle) : fullName
         let age = ageValue(from: dateValue(forKey: "birthDate", in: row))
 
         return ProfileDTO(
@@ -1233,36 +1126,73 @@ actor AppwriteService {
         )
     }
 
-    private func displayName(from profileRow: [String: Any]?, fallback: String? = nil) -> String {
-        let firstName = stringValue(forKey: "firstName", in: profileRow) ?? ""
-        let lastName = stringValue(forKey: "lastName", in: profileRow) ?? ""
-        let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if !fullName.isEmpty {
-            return fullName
+    private func fetchEventAdminStateIfAuthorized(eventId: String) async throws -> EventAdminState? {
+        guard let functionId = configuration.eventAdminFunctionId else {
+            return nil
         }
 
-        if let email = stringValue(forKey: "email", in: profileRow),
-           let localPart = email.split(separator: "@").first,
-           !localPart.isEmpty {
-            return String(localPart)
+        do {
+            let response = try await executeUserFunction(
+                functionId: functionId,
+                body: [
+                    "action": "fetch",
+                    "eventId": eventId
+                ]
+            )
+            return makeEventAdminState(from: response)
+        } catch let error as AppwriteServiceError where error.statusCode == 401 || error.statusCode == 403 || error.statusCode == 404 {
+            return nil
         }
-
-        if let fallback {
-            let trimmedFallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedFallback.isEmpty, trimmedFallback != "Fyre match" {
-                return trimmedFallback
-            }
-        }
-
-        return "Match"
     }
 
-    private func discoverNameFallback(from email: String) -> String {
-        guard let localPart = email.split(separator: "@").first, !localPart.isEmpty else {
-            return "Match"
+    private func makeEventAdminState(from payload: [String: Any]) -> EventAdminState? {
+        guard (boolValue(forKey: "isAdmin", in: payload) ?? true),
+              let event = payload["event"] as? [String: Any],
+              let eventId = stringValue(forKey: "$id", in: event) ?? stringValue(forKey: "eventId", in: event),
+              let startsAt = dateValue(forKey: "startsAt", in: event) else {
+            return nil
         }
-        return String(localPart)
+
+        let participants = (payload["participants"] as? [[String: Any]] ?? []).compactMap { row -> EventAdminParticipant? in
+            guard let id = stringValue(forKey: "registrationId", in: row) ?? stringValue(forKey: "$id", in: row),
+                  let userId = stringValue(forKey: "userId", in: row),
+                  let status = eventHistoryStatus(for: stringValue(forKey: "status", in: row)) else {
+                return nil
+            }
+
+            return EventAdminParticipant(
+                id: id,
+                userId: userId,
+                displayName: ThreadNaming.displayName(
+                    firstName: stringValue(forKey: "firstName", in: row),
+                    lastName: stringValue(forKey: "lastName", in: row),
+                    email: stringValue(forKey: "email", in: row),
+                    fallback: stringValue(forKey: "displayName", in: row)
+                ),
+                email: stringValue(forKey: "email", in: row) ?? userId,
+                gender: genderValue(for: stringValue(forKey: "gender", in: row)),
+                status: status,
+                createdAt: dateValue(forKey: "createdAt", in: row) ?? dateValue(forKey: "$createdAt", in: row)
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.status == rhs.status {
+                return (lhs.createdAt ?? .distantPast) < (rhs.createdAt ?? .distantPast)
+            }
+            return lhs.status.sortOrder < rhs.status.sortOrder
+        }
+
+        return EventAdminState(
+            eventId: eventId,
+            title: stringValue(forKey: "title", in: event) ?? L10n.tr("events.title"),
+            startsAt: startsAt,
+            maxParticipants: intValue(forKey: "maxParticipants", in: event) ?? 48,
+            maleLimit: intValue(forKey: "maleLimit", in: event) ?? 24,
+            femaleLimit: intValue(forKey: "femaleLimit", in: event) ?? 24,
+            registrationClosesAt: dateValue(forKey: "registrationClosesAt", in: event),
+            cancellationClosesAt: dateValue(forKey: "cancellationClosesAt", in: event),
+            participants: participants
+        )
     }
 
     private func discoverBio(from row: [String: Any]) -> String {
@@ -1410,19 +1340,32 @@ actor AppwriteService {
         }
     }
 
-    private func makeMultipartBody(boundary: String, fileId: String, fileData: Data) -> Data {
-        let filename = "avatar-\(fileId).jpg"
-        let parts = [
+    func makeMultipartBody(
+        boundary: String,
+        fileId: String,
+        fileName: String,
+        mimeType: String,
+        fileData: Data,
+        permissions: [String] = []
+    ) -> Data {
+        var parts = [
             Data("--\(boundary)\r\n".utf8),
             Data("Content-Disposition: form-data; name=\"fileId\"\r\n\r\n".utf8),
             Data("\(fileId)\r\n".utf8),
             Data("--\(boundary)\r\n".utf8),
-            Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".utf8),
-            Data("Content-Type: image/jpeg\r\n\r\n".utf8),
+            Data("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n".utf8),
+            Data("Content-Type: \(mimeType)\r\n\r\n".utf8),
             fileData,
-            Data("\r\n".utf8),
-            Data("--\(boundary)--\r\n".utf8)
+            Data("\r\n".utf8)
         ]
+
+        for permission in permissions {
+            parts.append(Data("--\(boundary)\r\n".utf8))
+            parts.append(Data("Content-Disposition: form-data; name=\"permissions[]\"\r\n\r\n".utf8))
+            parts.append(Data("\(permission)\r\n".utf8))
+        }
+
+        parts.append(Data("--\(boundary)--\r\n".utf8))
 
         return Data(parts.joined())
     }
@@ -1437,11 +1380,11 @@ actor AppwriteService {
         }
     }
 
-    private func makeRandomIdentifier() -> String {
+    func makeRandomIdentifier() -> String {
         UUID().uuidString.replacingOccurrences(of: "-", with: "")
     }
 
-    private func stableUUID(from text: String) -> UUID {
+    func stableUUID(from text: String) -> UUID {
         if let uuid = UUID(uuidString: text) {
             return uuid
         }
@@ -1484,17 +1427,17 @@ actor AppwriteService {
         return try decodeJSONObject(from: data)
     }
 
-    private func stringValue(forKey key: String, in dictionary: [String: Any]?) -> String? {
+    func stringValue(forKey key: String, in dictionary: [String: Any]?) -> String? {
         guard let rawValue = dictionary?[key] as? String else { return nil }
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
     }
 
-    private func boolValue(forKey key: String, in dictionary: [String: Any]?) -> Bool? {
+    func boolValue(forKey key: String, in dictionary: [String: Any]?) -> Bool? {
         dictionary?[key] as? Bool
     }
 
-    private func intValue(forKey key: String, in dictionary: [String: Any]?) -> Int? {
+    func intValue(forKey key: String, in dictionary: [String: Any]?) -> Int? {
         if let value = dictionary?[key] as? Int {
             return value
         }
@@ -1507,7 +1450,7 @@ actor AppwriteService {
         return nil
     }
 
-    private func dateValue(forKey key: String, in dictionary: [String: Any]?) -> Date? {
+    func dateValue(forKey key: String, in dictionary: [String: Any]?) -> Date? {
         guard let rawValue = stringValue(forKey: key, in: dictionary) else {
             return nil
         }
@@ -1516,19 +1459,19 @@ actor AppwriteService {
             ?? Self.fallbackDateFormatter.date(from: rawValue)
     }
 
-    fileprivate static let dateFormatter: ISO8601DateFormatter = {
+    static let dateFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 
-    fileprivate static let fallbackDateFormatter: ISO8601DateFormatter = {
+    static let fallbackDateFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
 
-    fileprivate static let messageTimeFormatter: DateFormatter = {
+    static let messageTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "it_IT")
         formatter.dateFormat = "HH:mm"
@@ -1536,7 +1479,7 @@ actor AppwriteService {
     }()
 }
 
-private enum AppwriteQuery {
+enum AppwriteQuery {
     static func equal(_ field: String, values: [String]) -> String {
         query(method: "equal", column: field, values: values)
     }
