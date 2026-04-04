@@ -17,14 +17,15 @@ struct AccountView: View {
     private struct EditableProfileDraft: Equatable {
         let city: String
         let orientation: UserOrientation
-        let showMe: UserShowMe
+        let bio: String
+        let intent: UserIntent
+        let interests: String
+        let preferredGenders: [UserGender]
+        let minPreferredAge: Int
+        let maxPreferredAge: Int
+        let maxDistanceKm: Int
         let smokes: Bool
         let drinks: Bool
-        let hobbies: String
-        let passions: String
-        let lookingFor: String
-        let favoriteSong: String
-        let favoriteMovie: String
     }
 
     private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
@@ -82,14 +83,15 @@ struct AccountView: View {
     @State private var city = ""
     @State private var birthDate = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
     @State private var orientation: UserOrientation = .straight
-    @State private var showMe: UserShowMe = .everyone
+    @State private var bio = ""
+    @State private var intent: UserIntent = .relationship
+    @State private var interests = ""
+    @State private var preferredGenders = Set(UserStore.defaultPreferredGenders)
+    @State private var minPreferredAge = 20
+    @State private var maxPreferredAge = 32
+    @State private var maxDistanceKm = 50
     @State private var smokes = false
     @State private var drinks = false
-    @State private var hobbies = ""
-    @State private var passions = ""
-    @State private var lookingFor = ""
-    @State private var favoriteSong = ""
-    @State private var favoriteMovie = ""
     @State private var profileMessage: String?
     @State private var profileMessageIsError = false
     @State private var securityMessage: String?
@@ -394,6 +396,7 @@ struct AccountView: View {
                 AccountCard(title: L10n.tr("profile.section.preferences"), icon: "slider.horizontal.3") {
                     VStack(spacing: 14) {
                         ProfileTextField(title: L10n.tr("profile.city"), text: $city)
+                        ProfileTextField(title: L10n.tr("profile.bio"), text: $bio)
 
                         ProfilePickerField(
                             title: L10n.tr("profile.orientation"),
@@ -404,20 +407,30 @@ struct AccountView: View {
                         }
 
                         ProfilePickerField(
-                            title: L10n.tr("profile.showMe"),
-                            selection: $showMe,
-                            options: UserShowMe.allCases
+                            title: L10n.tr("profile.intent"),
+                            selection: $intent,
+                            options: UserIntent.allCases
                         ) { option in
                             L10n.tr(option.localizationKey)
                         }
 
+                        ProfileMultiSelectField(
+                            title: L10n.tr("profile.preferredGenders"),
+                            options: UserGender.allCases,
+                            selected: $preferredGenders
+                        ) { option in
+                            L10n.tr(option.localizationKey)
+                        }
+
+                        ProfileAgeRangeField(
+                            minAge: $minPreferredAge,
+                            maxAge: $maxPreferredAge
+                        )
+
+                        ProfileDistanceField(maxDistanceKm: $maxDistanceKm)
                         ProfileToggleField(title: L10n.tr("profile.smokes"), isOn: $smokes)
                         ProfileToggleField(title: L10n.tr("profile.drinks"), isOn: $drinks)
-                        ProfileTextField(title: L10n.tr("profile.hobbies"), text: $hobbies)
-                        ProfileTextField(title: L10n.tr("profile.passions"), text: $passions)
-                        ProfileTextField(title: L10n.tr("profile.lookingFor"), text: $lookingFor)
-                        ProfileTextField(title: L10n.tr("profile.favoriteSong"), text: $favoriteSong)
-                        ProfileTextField(title: L10n.tr("profile.favoriteMovie"), text: $favoriteMovie)
+                        ProfileTextField(title: L10n.tr("profile.interests"), text: $interests)
                     }
                 }
 
@@ -810,14 +823,15 @@ struct AccountView: View {
         city = store.currentUser?.city ?? ""
         birthDate = store.currentUser?.birthDate ?? birthDate
         orientation = store.currentUser?.orientation ?? .straight
-        showMe = store.currentUser?.showMe ?? .everyone
+        bio = store.currentUser?.normalizedBio ?? ""
+        intent = store.currentUser?.intent ?? .relationship
+        interests = store.currentUser?.normalizedInterests ?? ""
+        preferredGenders = Set(store.currentUser?.resolvedPreferredGenders ?? UserStore.defaultPreferredGenders)
+        minPreferredAge = store.currentUser?.resolvedMinPreferredAge ?? 20
+        maxPreferredAge = store.currentUser?.resolvedMaxPreferredAge ?? 32
+        maxDistanceKm = store.currentUser?.resolvedMaxDistanceKm ?? 50
         smokes = store.currentUser?.smokes ?? false
         drinks = store.currentUser?.drinks ?? false
-        hobbies = store.currentUser?.hobbies ?? ""
-        passions = store.currentUser?.passions ?? ""
-        lookingFor = store.currentUser?.lookingFor ?? ""
-        favoriteSong = store.currentUser?.favoriteSong ?? ""
-        favoriteMovie = store.currentUser?.favoriteMovie ?? ""
         isHydratingProfileForm = false
         hasLoadedProfileForm = true
     }
@@ -826,14 +840,15 @@ struct AccountView: View {
         EditableProfileDraft(
             city: city,
             orientation: orientation,
-            showMe: showMe,
+            bio: bio,
+            intent: intent,
+            interests: interests,
+            preferredGenders: orderedPreferredGenders,
+            minPreferredAge: minPreferredAge,
+            maxPreferredAge: maxPreferredAge,
+            maxDistanceKm: maxDistanceKm,
             smokes: smokes,
-            drinks: drinks,
-            hobbies: hobbies,
-            passions: passions,
-            lookingFor: lookingFor,
-            favoriteSong: favoriteSong,
-            favoriteMovie: favoriteMovie
+            drinks: drinks
         )
     }
 
@@ -843,15 +858,20 @@ struct AccountView: View {
         return EditableProfileDraft(
             city: user.city ?? "",
             orientation: user.orientation ?? .straight,
-            showMe: user.showMe,
+            bio: user.normalizedBio,
+            intent: user.intent ?? .relationship,
+            interests: user.normalizedInterests,
+            preferredGenders: user.resolvedPreferredGenders,
+            minPreferredAge: user.resolvedMinPreferredAge,
+            maxPreferredAge: user.resolvedMaxPreferredAge,
+            maxDistanceKm: user.resolvedMaxDistanceKm,
             smokes: user.smokes ?? false,
-            drinks: user.drinks ?? false,
-            hobbies: user.hobbies ?? "",
-            passions: user.passions ?? "",
-            lookingFor: user.lookingFor ?? "",
-            favoriteSong: user.favoriteSong ?? "",
-            favoriteMovie: user.favoriteMovie ?? ""
+            drinks: user.drinks ?? false
         )
+    }
+
+    private var orderedPreferredGenders: [UserGender] {
+        UserGender.allCases.filter { preferredGenders.contains($0) }
     }
 
     private func handleOrientationChange(from oldValue: UserOrientation, to newValue: UserOrientation) {
@@ -923,14 +943,15 @@ struct AccountView: View {
             city: city,
             birthDate: birthDate,
             orientation: targetOrientation,
-            showMe: showMe,
+            bio: bio,
+            intent: intent,
+            interests: interests,
+            preferredGenders: orderedPreferredGenders,
+            minPreferredAge: minPreferredAge,
+            maxPreferredAge: maxPreferredAge,
+            maxDistanceKm: maxDistanceKm,
             smokes: smokes,
-            drinks: drinks,
-            hobbies: hobbies,
-            passions: passions,
-            lookingFor: lookingFor,
-            favoriteSong: favoriteSong,
-            favoriteMovie: favoriteMovie
+            drinks: drinks
         )
 
         if let result {
@@ -1110,6 +1131,86 @@ private struct ProfilePickerField<Option: Identifiable & Hashable>: View {
             }
             .pickerStyle(.menu)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct ProfileMultiSelectField<Option: Identifiable & Hashable>: View {
+    let title: String
+    let options: [Option]
+    @Binding var selected: Set<Option>
+    let titleForOption: (Option) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(options) { option in
+                Toggle(isOn: binding(for: option)) {
+                    Text(titleForOption(option))
+                        .font(.subheadline)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func binding(for option: Option) -> Binding<Bool> {
+        Binding(
+            get: { selected.contains(option) },
+            set: { isSelected in
+                if isSelected {
+                    selected.insert(option)
+                } else {
+                    selected.remove(option)
+                }
+            }
+        )
+    }
+}
+
+private struct ProfileAgeRangeField: View {
+    @Binding var minAge: Int
+    @Binding var maxAge: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("profile.ageRange"))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Stepper("\(L10n.tr("profile.ageRange.min")): \(minAge)", value: $minAge, in: 18...80)
+                .onChange(of: minAge) { _, newValue in
+                    if maxAge < newValue {
+                        maxAge = newValue
+                    }
+                }
+
+            Stepper("\(L10n.tr("profile.ageRange.max")): \(maxAge)", value: $maxAge, in: minAge...80)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct ProfileDistanceField: View {
+    @Binding var maxDistanceKm: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("profile.maxDistanceKm"))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Stepper("\(maxDistanceKm) km", value: $maxDistanceKm, in: 5...300, step: 5)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
