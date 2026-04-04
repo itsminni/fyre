@@ -1,3 +1,10 @@
+//
+//  AppwriteRealtimeService.swift
+//  Fyre
+//
+//  Created by Gabriele Mininni on 04/04/26.
+//
+
 import Foundation
 
 struct MainEventRemoteState: Sendable {
@@ -203,9 +210,37 @@ actor AppwriteService {
 
         let snapshot = makeMainEventSnapshot(eventRow: mainEvent, registrations: eventRegistrations)
         let accountId = try await resolvedAccountId(from: user)
-        let currentStatus = eventRegistrations
-            .first(where: { stringValue(forKey: "userId", in: $0) == accountId })
-            .flatMap { eventHistoryStatus(for: stringValue(forKey: "status", in: $0)) }
+        let currentStatus: EventHistoryStatus?
+        if let accountId {
+            let sortedUserRegistrations = eventRegistrations
+                .filter { stringValue(forKey: "userId", in: $0) == accountId }
+                .sorted { lhs, rhs in
+                    let lhsUpdatedAt = dateValue(forKey: "$updatedAt", in: lhs)
+                        ?? dateValue(forKey: "updatedAt", in: lhs)
+                        ?? dateValue(forKey: "createdAt", in: lhs)
+                        ?? dateValue(forKey: "$createdAt", in: lhs)
+                        ?? .distantPast
+                    let rhsUpdatedAt = dateValue(forKey: "$updatedAt", in: rhs)
+                        ?? dateValue(forKey: "updatedAt", in: rhs)
+                        ?? dateValue(forKey: "createdAt", in: rhs)
+                        ?? dateValue(forKey: "$createdAt", in: rhs)
+                        ?? .distantPast
+                    return lhsUpdatedAt > rhsUpdatedAt
+                }
+
+            let activeStatuses: Set<String> = ["confirmed", "promoted", "waitlisted"]
+            let preferredRegistration = sortedUserRegistrations.first { row in
+                guard let rawStatus = stringValue(forKey: "status", in: row)?.lowercased() else {
+                    return false
+                }
+                return activeStatuses.contains(rawStatus)
+            } ?? sortedUserRegistrations.first
+
+            currentStatus = preferredRegistration
+                .flatMap { eventHistoryStatus(for: stringValue(forKey: "status", in: $0)) }
+        } else {
+            currentStatus = nil
+        }
 
         let history = try await makeEventHistory(for: accountId, events: upcomingEvents)
         let adminState = try await fetchEventAdminStateIfAuthorized(eventId: eventId)
@@ -444,14 +479,17 @@ actor AppwriteService {
         user.birthDate = dateValue(forKey: "birthDate", in: profileRow)
         user.gender = genderValue(for: stringValue(forKey: "gender", in: profileRow))
         user.orientation = orientationValue(for: stringValue(forKey: "orientation", in: profileRow))
-        user.showMe = showMeValue(for: stringValue(forKey: "showMe", in: profileRow)) ?? .everyone
+        user.preferredGenders = genderListValue(for: stringValue(forKey: "preferredGenders", in: profileRow))
+        user.minPreferredAge = intValue(forKey: "minPreferredAge", in: profileRow)
+        user.maxPreferredAge = intValue(forKey: "maxPreferredAge", in: profileRow)
+        user.maxDistanceKm = intValue(forKey: "maxDistanceKm", in: profileRow)
+        user.latitude = doubleValue(forKey: "latitude", in: profileRow)
+        user.longitude = doubleValue(forKey: "longitude", in: profileRow)
         user.smokes = boolValue(forKey: "smokes", in: profileRow)
         user.drinks = boolValue(forKey: "drinks", in: profileRow)
-        user.hobbies = stringValue(forKey: "hobbies", in: profileRow)
-        user.passions = stringValue(forKey: "passions", in: profileRow)
-        user.lookingFor = stringValue(forKey: "lookingFor", in: profileRow)
-        user.favoriteSong = stringValue(forKey: "favoriteSong", in: profileRow)
-        user.favoriteMovie = stringValue(forKey: "favoriteMovie", in: profileRow)
+        user.bio = stringValue(forKey: "bio", in: profileRow)
+        user.intent = intentValue(for: stringValue(forKey: "intent", in: profileRow))
+        user.interests = stringValue(forKey: "interests", in: profileRow)
         user.avatarFileId = stringValue(forKey: "avatarFileId", in: profileRow)
         user.profileImageData = avatarData
         return user
@@ -1135,14 +1173,18 @@ actor AppwriteService {
             "birthDate": nullOrDateString(user.birthDate),
             "gender": nullOrString(stringValue(for: user.gender)),
             "orientation": nullOrString(stringValue(for: user.orientation)),
-            "showMe": stringValue(for: user.showMe),
+            "preferredGenders": nullOrString(csvString(for: user.resolvedPreferredGenders)),
+            "minPreferredAge": user.resolvedMinPreferredAge,
+            "maxPreferredAge": user.resolvedMaxPreferredAge,
+            "maxDistanceKm": user.resolvedMaxDistanceKm,
+            "latitude": user.latitude as Any? ?? NSNull(),
+            "longitude": user.longitude as Any? ?? NSNull(),
             "smokes": user.smokes as Any? ?? NSNull(),
             "drinks": user.drinks as Any? ?? NSNull(),
-            "hobbies": nullOrString(user.hobbies),
-            "passions": nullOrString(user.passions),
-            "lookingFor": nullOrString(user.lookingFor),
-            "favoriteSong": nullOrString(user.favoriteSong),
-            "favoriteMovie": nullOrString(user.favoriteMovie),
+            "bio": nullOrString(user.normalizedBio),
+            "intent": nullOrString(stringValue(for: user.intent)),
+            "interests": nullOrString(user.normalizedInterests),
+            "profileReady": user.isProfileComplete,
             "avatarFileId": nullOrString(user.avatarFileId)
         ]
     }
@@ -1166,7 +1208,12 @@ actor AppwriteService {
             name: name,
             age: age,
             gender: gender,
-            bio: discoverBio(from: row)
+            bio: discoverBio(from: row),
+            city: stringValue(forKey: "city", in: row),
+            distanceKm: intValue(forKey: "distanceKm", in: row),
+            intent: intentValue(for: stringValue(forKey: "intent", in: row)),
+            interests: interestListValue(for: row),
+            avatarURL: avatarURL(fileId: stringValue(forKey: "avatarFileId", in: row))
         )
     }
 
@@ -1243,9 +1290,7 @@ actor AppwriteService {
 
     private func discoverBio(from row: [String: Any]) -> String {
         let candidates = [
-            stringValue(forKey: "lookingFor", in: row),
-            stringValue(forKey: "passions", in: row),
-            stringValue(forKey: "hobbies", in: row)
+            stringValue(forKey: "bio", in: row)
         ]
         .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
@@ -1255,6 +1300,10 @@ actor AppwriteService {
         }
 
         return "Say hi and start the conversation."
+    }
+
+    private func interestListValue(for row: [String: Any]) -> [String] {
+        interestListValue(for: stringValue(forKey: "interests", in: row))
     }
 
     private func ageValue(from date: Date?) -> Int {
@@ -1328,14 +1377,16 @@ actor AppwriteService {
         }
     }
 
-    private func showMeValue(for rawValue: String?) -> UserShowMe? {
+    private func intentValue(for rawValue: String?) -> UserIntent? {
         switch rawValue {
-        case "men":
-            return .men
-        case "women":
-            return .women
-        case "everyone":
-            return .everyone
+        case "relationship":
+            return .relationship
+        case "casual":
+            return .casual
+        case "friendship":
+            return .friendship
+        case "notSure":
+            return .notSure
         default:
             return nil
         }
@@ -1356,6 +1407,64 @@ actor AppwriteService {
         }
     }
 
+    private func stringValue(for value: UserIntent?) -> String? {
+        switch value {
+        case .relationship:
+            return "relationship"
+        case .casual:
+            return "casual"
+        case .friendship:
+            return "friendship"
+        case .notSure:
+            return "notSure"
+        case nil:
+            return nil
+        }
+    }
+
+    private func genderListValue(for rawValue: String?) -> [UserGender] {
+        guard let rawValue else { return [] }
+
+        return rawValue
+            .split(separator: ",")
+            .compactMap { genderValue(for: String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    private func csvString(for genders: [UserGender]) -> String? {
+        let values = UserGender.allCases
+            .filter { genders.contains($0) }
+            .compactMap { stringValue(for: $0) }
+        guard !values.isEmpty else { return nil }
+        return values.joined(separator: ",")
+    }
+
+    private func interestListValue(for rawValue: String?) -> [String] {
+        guard let rawValue else { return [] }
+
+        return rawValue
+            .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == "|" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func avatarURL(fileId: String?) -> URL? {
+        guard let fileId, !fileId.isEmpty else { return nil }
+
+        var url = configuration.endpointURL
+        url.appendPathComponent("storage")
+        url.appendPathComponent("buckets")
+        url.appendPathComponent(configuration.avatarsBucketId)
+        url.appendPathComponent("files")
+        url.appendPathComponent(fileId)
+        url.appendPathComponent("view")
+
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "project", value: configuration.projectId)
+        ]
+        return components?.url
+    }
+
     private func stringValue(for value: UserOrientation?) -> String? {
         switch value {
         case .straight:
@@ -1372,17 +1481,6 @@ actor AppwriteService {
             return "other"
         case nil:
             return nil
-        }
-    }
-
-    private func stringValue(for value: UserShowMe) -> String {
-        switch value {
-        case .men:
-            return "men"
-        case .women:
-            return "women"
-        case .everyone:
-            return "everyone"
         }
     }
 
@@ -1492,6 +1590,19 @@ actor AppwriteService {
         }
         if let value = dictionary?[key] as? String {
             return Int(value)
+        }
+        return nil
+    }
+
+    func doubleValue(forKey key: String, in dictionary: [String: Any]?) -> Double? {
+        if let value = dictionary?[key] as? Double {
+            return value
+        }
+        if let value = dictionary?[key] as? Int {
+            return Double(value)
+        }
+        if let value = dictionary?[key] as? String {
+            return Double(value)
         }
         return nil
     }
