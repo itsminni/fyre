@@ -8,13 +8,12 @@ export default async ({ req, res, error }) => {
     const body = parseBody(req);
     const currentUserId = requiredHeader(req, "x-appwrite-user-id");
     const currentProfile = await getRow(config, config.profilesTableId, currentUserId);
-
-    ensureAdmin(config, currentUserId, currentProfile);
-
     const action = asString(body.action) ?? "fetch";
     const event = body.eventId
       ? await getRow(config, config.eventsTableId, body.eventId)
       : await getUpcomingEvent(config);
+
+    ensureAdmin(config, currentUserId, currentProfile, event);
 
     if (!event) {
       return res.json({ messageKey: "events.error.notRegistered" }, 404);
@@ -77,13 +76,25 @@ function getConfig(req) {
   };
 }
 
-function ensureAdmin(config, currentUserId, currentProfile) {
+function ensureAdmin(config, currentUserId, currentProfile, event) {
   const currentEmail = asString(currentProfile.email)?.toLowerCase();
-  if (config.adminUserIds.has(currentUserId)) {
-    return;
-  }
-  if (currentEmail && config.adminEmails.has(currentEmail)) {
-    return;
+  const scopedUserIds = parseCSVValue(event?.adminUserIds);
+  const scopedEmails = parseCSVValue(event?.adminEmails, { lowercase: true });
+
+  if (scopedUserIds.size || scopedEmails.size) {
+    if (scopedUserIds.has(currentUserId)) {
+      return;
+    }
+    if (currentEmail && scopedEmails.has(currentEmail)) {
+      return;
+    }
+  } else {
+    if (config.adminUserIds.has(currentUserId)) {
+      return;
+    }
+    if (currentEmail && config.adminEmails.has(currentEmail)) {
+      return;
+    }
   }
 
   const err = new Error("Forbidden");
@@ -150,7 +161,9 @@ async function makeAdminResponse(config, event) {
       maleLimit: asNumber(event.maleLimit) ?? 24,
       femaleLimit: asNumber(event.femaleLimit) ?? 24,
       registrationClosesAt: asString(event.registrationClosesAt),
-      cancellationClosesAt: asString(event.cancellationClosesAt)
+      cancellationClosesAt: asString(event.cancellationClosesAt),
+      adminUserIds: csvStringFromValue(event.adminUserIds),
+      adminEmails: csvStringFromValue(event.adminEmails, { lowercase: true })
     },
     participants
   };
@@ -183,6 +196,8 @@ async function updateEvent(config, eventId, body) {
     payload.femaleLimit = femaleLimit;
   }
 
+  payload.adminUserIds = nullableCSVText(body.adminUserIds);
+  payload.adminEmails = nullableCSVText(body.adminEmails, { lowercase: true });
   payload.registrationClosesAt = body.registrationClosesAt ? asDateString(body.registrationClosesAt) : null;
   payload.cancellationClosesAt = body.cancellationClosesAt ? asDateString(body.cancellationClosesAt) : null;
 
@@ -201,7 +216,7 @@ async function addParticipant(config, event, body) {
 
   const profile = await findProfileByLookup(config, lookup);
   if (!profile) {
-    const err = new Error("Profile not found");
+    const err = new Error(`Profile not found for lookup: ${lookup}`);
     err.messageKey = "events.admin.error.userNotFound";
     err.statusCode = 404;
     throw err;
@@ -295,11 +310,7 @@ async function removeParticipant(config, event, body) {
 
 async function findProfileByLookup(config, lookup) {
   if (lookup.includes("@")) {
-    const rows = await listRows(config, config.profilesTableId, [
-      equal("email", [lookup.toLowerCase()]),
-      limit(1)
-    ]);
-    return rows[0] ?? null;
+    return await findProfileByEmail(config, lookup);
   }
 
   try {
@@ -311,6 +322,32 @@ async function findProfileByLookup(config, lookup) {
     ]);
     return rows[0] ?? null;
   }
+}
+
+async function findProfileByEmail(config, lookup) {
+  const normalizedLookup = normalizeEmailLookup(lookup);
+  const exactMatches = [];
+
+  if (normalizedLookup) {
+    exactMatches.push(normalizedLookup);
+  }
+  if (lookup !== normalizedLookup) {
+    exactMatches.push(lookup);
+  }
+
+  for (const candidate of exactMatches) {
+    const rows = await listRows(config, config.profilesTableId, [
+      equal("email", [candidate]),
+      limit(1)
+    ]);
+    if (rows[0]) {
+      return rows[0];
+    }
+  }
+
+  // Legacy rows may contain emails with unexpected casing or spacing.
+  const fallbackRows = await listRows(config, config.profilesTableId, [limit(500)]);
+  return fallbackRows.find((row) => normalizeEmailLookup(row.email) === normalizedLookup) ?? null;
 }
 
 async function getUpcomingEvent(config) {
@@ -446,6 +483,29 @@ function parseCSVEnv(name) {
   );
 }
 
+function parseCSVValue(value, options = {}) {
+  const lowercase = options.lowercase === true;
+  const values = Array.isArray(value)
+    ? value
+    : String(value ?? "")
+        .split(",");
+
+  return new Set(
+    values
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .map((item) => lowercase ? item.toLowerCase() : item)
+      .filter(Boolean)
+  );
+}
+
+function csvStringFromValue(value, options = {}) {
+  return Array.from(parseCSVValue(value, options)).join(", ");
+}
+
+function nullableCSVText(value, options = {}) {
+  return csvStringFromValue(value, options) || null;
+}
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) {
@@ -543,6 +603,10 @@ function asString(value) {
   }
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeEmailLookup(value) {
+  return asString(value)?.toLowerCase() ?? "";
 }
 
 function asNumber(value) {

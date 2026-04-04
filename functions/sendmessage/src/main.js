@@ -227,7 +227,7 @@ async function getFile(config, fileId) {
 }
 
 async function updateFile(config, fileId, data) {
-  return request(config, "PATCH", `/storage/buckets/${config.chatAttachmentsBucketId}/files/${fileId}`, data);
+  return request(config, "PUT", `/storage/buckets/${config.chatAttachmentsBucketId}/files/${fileId}`, data);
 }
 
 async function updateRow(config, tableId, rowId, data) {
