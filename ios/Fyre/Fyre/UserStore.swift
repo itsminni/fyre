@@ -220,6 +220,21 @@ enum EventHistoryStatus: String, Codable, Sendable {
     case promoted
 }
 
+extension EventHistoryStatus {
+    nonisolated var sortOrder: Int {
+        switch self {
+        case .confirmed:
+            return 0
+        case .promoted:
+            return 1
+        case .waitlisted:
+            return 2
+        case .cancelled:
+            return 3
+        }
+    }
+}
+
 struct EventHistoryItem: Identifiable, Sendable {
     let id: UUID
     let eventTitle: String
@@ -340,6 +355,14 @@ final class UserStore: @unchecked Sendable {
             femaleCount: female,
             waitingListCount: mainEventState.waitingList.count
         )
+    }
+
+    var mainEventAdminState: EventAdminState? {
+        Self.shouldUseAppwrite ? remoteMainEventState?.adminState : nil
+    }
+
+    var isCurrentUserEventAdmin: Bool {
+        mainEventAdminState != nil
     }
 
     private let maxParticipants = 48
@@ -743,6 +766,70 @@ final class UserStore: @unchecked Sendable {
     }
 
     @MainActor
+    func updateMainEventAsAdmin(_ draft: EventAdminDraft) async -> String? {
+        guard Self.shouldUseAppwrite else { return L10n.tr("events.admin.error.forbidden") }
+        guard let appwriteService, let eventId = remoteMainEventState?.eventId else {
+            return eventRequestErrorMessage()
+        }
+
+        do {
+            let adminState = try await appwriteService.updateMainEventAsAdmin(eventId: eventId, draft: draft)
+            if let remoteState = remoteMainEventState {
+                remoteMainEventState = MainEventRemoteState(
+                    eventId: remoteState.eventId,
+                    snapshot: MainEventSnapshot(
+                        date: adminState.startsAt,
+                        title: adminState.title,
+                        maxParticipants: adminState.maxParticipants,
+                        maleCount: adminState.participants.filter { $0.status == .confirmed || $0.status == .promoted }.filter { $0.gender == .male }.count,
+                        femaleCount: adminState.participants.filter { $0.status == .confirmed || $0.status == .promoted }.filter { $0.gender == .female }.count,
+                        waitingListCount: adminState.participants.filter { $0.status == .waitlisted }.count
+                    ),
+                    currentStatus: remoteState.currentStatus,
+                    history: remoteState.history,
+                    adminState: adminState
+                )
+            }
+            await refreshRemoteMainEventStateWithRetry()
+            return nil
+        } catch {
+            return eventErrorMessage(for: error)
+        }
+    }
+
+    @MainActor
+    func addMainEventParticipantAsAdmin(lookup: String, status: EventHistoryStatus) async -> String? {
+        guard Self.shouldUseAppwrite else { return L10n.tr("events.admin.error.forbidden") }
+        guard let appwriteService, let eventId = remoteMainEventState?.eventId else {
+            return eventRequestErrorMessage()
+        }
+
+        do {
+            _ = try await appwriteService.addEventParticipantAsAdmin(eventId: eventId, lookup: lookup, status: status)
+            await refreshRemoteMainEventStateWithRetry()
+            return nil
+        } catch {
+            return eventErrorMessage(for: error)
+        }
+    }
+
+    @MainActor
+    func removeMainEventParticipantAsAdmin(registrationId: String) async -> String? {
+        guard Self.shouldUseAppwrite else { return L10n.tr("events.admin.error.forbidden") }
+        guard let appwriteService, let eventId = remoteMainEventState?.eventId else {
+            return eventRequestErrorMessage()
+        }
+
+        do {
+            _ = try await appwriteService.removeEventParticipantAsAdmin(eventId: eventId, registrationId: registrationId)
+            await refreshRemoteMainEventStateWithRetry()
+            return nil
+        } catch {
+            return eventErrorMessage(for: error)
+        }
+    }
+
+    @MainActor
     private func refreshRemoteMainEventStateWithRetry() async {
         await refreshRemoteMainEventState()
 
@@ -888,7 +975,12 @@ final class UserStore: @unchecked Sendable {
         do {
             return try JSONDecoder().decode(Value.self, from: data)
         } catch {
-            fatalError("Failed to decode persisted value for key '\(key)': \(error)")
+            // Corrupt cached state should not brick the app on launch; drop it and rebuild from network/defaults.
+            UserDefaults.standard.removeObject(forKey: key)
+#if DEBUG
+            debugPrint("Dropped invalid persisted value for key '\(key)': \(error)")
+#endif
+            return nil
         }
     }
 
@@ -897,7 +989,10 @@ final class UserStore: @unchecked Sendable {
             let data = try JSONEncoder().encode(value)
             UserDefaults.standard.set(data, forKey: key)
         } catch {
-            fatalError("Failed to encode persisted value for key '\(key)': \(error)")
+            // Persistence failures are recoverable; keep the in-memory state and avoid crashing user sessions.
+#if DEBUG
+            debugPrint("Failed to encode persisted value for key '\(key)': \(error)")
+#endif
         }
     }
 
@@ -1081,7 +1176,7 @@ final class UserStore: @unchecked Sendable {
 
     private func debugLog(_ message: String) {
 #if DEBUG
-        print(message)
+        debugPrint(message)
 #endif
     }
 }
