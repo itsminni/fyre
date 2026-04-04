@@ -432,7 +432,7 @@ function isAlreadyExistsError(err) {
 
 function isNotFoundError(err) {
   const message = String(err?.message ?? err ?? "").toLowerCase();
-  return message.includes("not found");
+  return message.includes("not found") || message.includes("could not be found");
 }
 
 function stableThreadRowId(userIds) {
