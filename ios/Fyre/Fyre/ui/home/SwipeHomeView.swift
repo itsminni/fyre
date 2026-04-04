@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-// In-memory profile card data used by the demo swipe experience.
+// Lightweight card model derived from discover results so the swipe UI stays decoupled from backend DTO shape.
 private struct SwipeProfile: Identifiable {
     let id = UUID()
     let remoteUserId: String?
@@ -16,7 +16,7 @@ private struct SwipeProfile: Identifiable {
     let bio: String
 }
 
-// Draft local implementation of the swipe-based discovery view.
+// Swipe deck fed by discover profiles. The view keeps interaction local-first and persists the choice afterwards.
 struct SwipeHomeView: View {
     private enum DecisionDirection {
         case left
@@ -225,7 +225,7 @@ struct SwipeHomeView: View {
             // A mutual like returns the already-created thread so we can jump straight into chat.
             guard let dto = matchedThread else { return }
 
-            let displayName = dto.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || dto.name == "Match"
+            let displayName = ThreadNaming.isPlaceholderThreadName(dto.name)
                 ? profile.name
                 : dto.name
             selectedThread = ChatThread(
@@ -234,9 +234,10 @@ struct SwipeHomeView: View {
                 name: displayName,
                 avatar: dto.avatar,
                 isOnline: dto.isOnline,
-                messages: dto.messages.map {
-                    ChatMessage(id: $0.id, text: $0.text, isMe: $0.isMe, time: $0.time)
-                }
+                lastSeenAt: dto.lastSeenAt,
+                otherParticipantReadAt: dto.otherParticipantReadAt,
+                participantUserIds: dto.participantUserIds,
+                messages: dto.messages.map(ChatMessage.init(dto:))
             )
             NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
         } catch {
