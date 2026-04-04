@@ -81,7 +81,7 @@
 "account.segment.events" = "Eventi";
 "account.segment.security" = "Sicurezza";
 "account.section.events" = "Le mie iscrizioni eventi";
-"account.events.empty" = "Nessuna attivita eventi futuri.";
+"account.events.empty" = "Nessuna attività eventi futuri.";
 "account.events.openAll" = "Eventi";
 "account.events.title" = "Tutti gli eventi futuri";
 "account.theme" = "Tema";

@@ -181,6 +181,11 @@ async function updateRow(config, tableId, rowId, data, permissions) {
 }
 
 async function createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions) {
+  const existingThread = await getRowIfExists(config, config.threadsTableId, threadId);
+  if (existingThread?.$id) {
+    return threadId;
+  }
+
   try {
     await createRow(config, config.threadsTableId, threadId, {
       threadId,
@@ -234,6 +239,17 @@ async function ensureThreadParticipant(config, threadId, userId, permissions) {
 async function findSingleRow(config, tableId, queries) {
   const rows = await listRows(config, tableId, queries);
   return rows[0] ?? null;
+}
+
+async function getRowIfExists(config, tableId, rowId) {
+  try {
+    return await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions) {
@@ -307,6 +323,11 @@ function asString(value) {
 function isAlreadyExistsError(err) {
   const message = String(err?.message ?? err ?? "").toLowerCase();
   return message.includes("already exists");
+}
+
+function isNotFoundError(err) {
+  const message = String(err?.message ?? err ?? "").toLowerCase();
+  return message.includes("not found");
 }
 
 function stableThreadRowId(userIds) {

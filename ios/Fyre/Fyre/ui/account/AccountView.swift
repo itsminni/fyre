@@ -117,8 +117,6 @@ struct AccountView: View {
     var body: some View {
         NavigationStack {
             settingsHome
-            .navigationTitle(L10n.tr("tab.account"))
-            .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 fillFromUser()
                 chatBackgroundStyleSelection = chatBackgroundStyle
@@ -219,15 +217,49 @@ struct AccountView: View {
 
     private var profileHubHeader: some View {
         VStack(spacing: 12) {
-            profileAvatar(size: 96)
+            PhotosPicker(selection: $pickedPhotoItem, matching: .images) {
+                profileAvatar(size: 95)
+                    .overlay(alignment: .bottomTrailing) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.72))
+                            Image(systemName: "camera.fill")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 30, height: 30)
+                        .overlay {
+                            Circle()
+                                .stroke(.white.opacity(0.12), lineWidth: 1)
+                        }
+                        .offset(x: 2, y: 2)
+                    }
+            }
+            .buttonStyle(.plain)
 
-            Text(store.currentUser?.displayName ?? "Fyre")
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+            Text(profileHeaderFirstName)
+                .font(.system(size: 32, weight: .bold, design: .rounded))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
         .padding(.bottom, 4)
+    }
+
+    private var profileHeaderFirstName: String {
+        let candidates = [
+            store.currentUser?.firstName,
+            firstName
+        ]
+
+        for candidate in candidates {
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        return "Fyre"
     }
 
     private var settingsNavigationList: some View {
@@ -710,17 +742,17 @@ struct AccountView: View {
     @ViewBuilder
     private func sectionEyebrow(_ title: String) -> some View {
         Text(title)
-            .font(.title3.weight(.bold))
+            .font(.system(size: 19, weight: .bold, design: .default))
             .foregroundStyle(.primary)
             .padding(.horizontal, 4)
     }
 
     @ViewBuilder
     private func settingsNavigationRow(_ destination: SettingsDestination) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(.white.opacity(0.04))
-                .frame(width: 34, height: 34)
+                .frame(width: 30, height: 30)
                 .overlay {
                     Image(systemName: destination.iconName)
                         .font(.subheadline.weight(.semibold))
@@ -728,7 +760,8 @@ struct AccountView: View {
                 }
 
             Text(L10n.tr(destination.titleKey))
-                .font(.title3.weight(.medium))
+                .font(.body)
+                .fontWeight(.bold)
                 .foregroundStyle(.primary)
 
             Spacer(minLength: 0)
@@ -738,7 +771,7 @@ struct AccountView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 15)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
     }
 
