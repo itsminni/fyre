@@ -1,3 +1,6 @@
+const DEFAULT_MATCH_SUBJECT = "Fyre match";
+const PLACEHOLDER_MATCH_SUBJECTS = new Set(["Match", DEFAULT_MATCH_SUBJECT]);
+
 export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
@@ -198,7 +201,7 @@ async function createThreadWithParticipants(config, currentUserId, otherUserId, 
     await createRow(config, config.threadsTableId, threadId, {
       threadId,
       createdByUserId: currentUserId,
-      subject: otherUserName ?? "Fyre match",
+      subject: otherUserName ?? DEFAULT_MATCH_SUBJECT,
       status: "active",
       lastMessageText: null,
       lastMessageAt: null
@@ -248,7 +251,7 @@ async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherU
     const threadRow = await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${config.threadsTableId}/rows/${threadId}`);
     const currentSubject = asString(threadRow.subject);
 
-    if (currentSubject && currentSubject !== "Match" && currentSubject !== "Fyre match") {
+    if (currentSubject && !PLACEHOLDER_MATCH_SUBJECTS.has(currentSubject)) {
       return;
     }
 
