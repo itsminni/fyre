@@ -83,6 +83,18 @@ struct EventDetailView: View {
     @State private var feedbackMessage: String?
     @State private var feedbackIsError = false
     @State private var isSubmitting = false
+    @State private var adminTitle = ""
+    @State private var adminStartsAt = Date()
+    @State private var adminMaxParticipants = 48
+    @State private var adminMaleLimit = 24
+    @State private var adminFemaleLimit = 24
+    @State private var adminRegistrationClosesAt = Date().addingTimeInterval(24 * 60 * 60)
+    @State private var adminCancellationClosesAt = Date().addingTimeInterval(48 * 60 * 60)
+    @State private var adminUsesRegistrationClose = false
+    @State private var adminUsesCancellationClose = false
+    @State private var adminLookup = ""
+    @State private var adminAddStatus: EventHistoryStatus = .confirmed
+    @State private var loadedAdminEventId: String?
 
     // The detail screen uses its own formatter because it lives in a different layout context.
     private static let detailDateFormatter: DateFormatter = {
@@ -103,6 +115,7 @@ struct EventDetailView: View {
 
     var body: some View {
         let snapshot = store.mainEventSnapshot
+        let adminState = store.mainEventAdminState
 
         ScrollView {
             VStack(spacing: 20) {
@@ -233,6 +246,123 @@ struct EventDetailView: View {
                         }
                     }
                 }
+
+                if let adminState {
+                    EventSurface(title: L10n.tr("events.admin.section"), icon: "person.badge.key.fill") {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text(L10n.tr("events.admin.subtitle"))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            Divider().overlay(.white.opacity(0.08))
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(L10n.tr("events.admin.editEvent"))
+                                    .font(.headline)
+
+                                TextField(L10n.tr("events.admin.field.title"), text: $adminTitle)
+                                    .textInputAutocapitalization(.words)
+                                    .padding(12)
+                                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                                DatePicker(
+                                    L10n.tr("events.admin.field.startsAt"),
+                                    selection: $adminStartsAt,
+                                    displayedComponents: [.date, .hourAndMinute]
+                                )
+
+                                Stepper(
+                                    String(format: L10n.tr("events.admin.field.maxParticipants.value"), adminMaxParticipants),
+                                    value: $adminMaxParticipants,
+                                    in: 2...200,
+                                    step: 2
+                                )
+
+                                Stepper(
+                                    String(format: L10n.tr("events.admin.field.maleLimit.value"), adminMaleLimit),
+                                    value: $adminMaleLimit,
+                                    in: 0...200
+                                )
+
+                                Stepper(
+                                    String(format: L10n.tr("events.admin.field.femaleLimit.value"), adminFemaleLimit),
+                                    value: $adminFemaleLimit,
+                                    in: 0...200
+                                )
+
+                                Toggle(L10n.tr("events.admin.field.registrationClosesAt"), isOn: $adminUsesRegistrationClose)
+                                if adminUsesRegistrationClose {
+                                    DatePicker(
+                                        "",
+                                        selection: $adminRegistrationClosesAt,
+                                        displayedComponents: [.date, .hourAndMinute]
+                                    )
+                                    .labelsHidden()
+                                }
+
+                                Toggle(L10n.tr("events.admin.field.cancellationClosesAt"), isOn: $adminUsesCancellationClose)
+                                if adminUsesCancellationClose {
+                                    DatePicker(
+                                        "",
+                                        selection: $adminCancellationClosesAt,
+                                        displayedComponents: [.date, .hourAndMinute]
+                                    )
+                                    .labelsHidden()
+                                }
+
+                                Button {
+                                    saveAdminChanges()
+                                } label: {
+                                    Label(L10n.tr("events.admin.save"), systemImage: "square.and.arrow.down")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.orange)
+                                .disabled(isSubmitting)
+                            }
+
+                            Divider().overlay(.white.opacity(0.08))
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(L10n.tr("events.admin.participants"))
+                                    .font(.headline)
+
+                                TextField(L10n.tr("events.admin.userLookup"), text: $adminLookup)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .padding(12)
+                                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                                Picker(L10n.tr("events.admin.status"), selection: $adminAddStatus) {
+                                    Text(L10n.tr("events.badge.confirmed")).tag(EventHistoryStatus.confirmed)
+                                    Text(L10n.tr("events.badge.waitlisted")).tag(EventHistoryStatus.waitlisted)
+                                }
+                                .pickerStyle(.segmented)
+
+                                Button {
+                                    addParticipant()
+                                } label: {
+                                    Label(L10n.tr("events.admin.add"), systemImage: "person.badge.plus")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(isSubmitting || adminLookup.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                                if adminState.participants.isEmpty {
+                                    Text(L10n.tr("events.admin.emptyParticipants"))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    VStack(spacing: 10) {
+                                        ForEach(adminState.participants) { participant in
+                                            adminParticipantRow(participant)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             .padding(.horizontal)
             .padding(.top, 12)
@@ -251,6 +381,9 @@ struct EventDetailView: View {
                 isLoading: isSubmitting,
                 action: performPrimaryAction
             )
+        }
+        .task(id: adminState?.eventId) {
+            syncAdminDraft(from: adminState)
         }
     }
 
@@ -321,6 +454,147 @@ struct EventDetailView: View {
     private func countdownText(until date: Date, now: Date) -> String {
         guard date > now else { return L10n.tr("events.countdown.closed") }
         return Self.countdownFormatter.string(from: now, to: date) ?? L10n.tr("events.countdown.soon")
+    }
+
+    private func syncAdminDraft(from adminState: EventAdminState?) {
+        guard let adminState else {
+            loadedAdminEventId = nil
+            return
+        }
+        guard loadedAdminEventId != adminState.eventId else { return }
+
+        loadedAdminEventId = adminState.eventId
+        adminTitle = adminState.title
+        adminStartsAt = adminState.startsAt
+        adminMaxParticipants = adminState.maxParticipants
+        adminMaleLimit = adminState.maleLimit
+        adminFemaleLimit = adminState.femaleLimit
+        adminUsesRegistrationClose = adminState.registrationClosesAt != nil
+        adminRegistrationClosesAt = adminState.registrationClosesAt ?? adminState.startsAt.addingTimeInterval(-(24 * 60 * 60))
+        adminUsesCancellationClose = adminState.cancellationClosesAt != nil
+        adminCancellationClosesAt = adminState.cancellationClosesAt ?? adminState.startsAt.addingTimeInterval(-(48 * 60 * 60))
+    }
+
+    private func saveAdminChanges() {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+
+        let draft = EventAdminDraft(
+            title: adminTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            startsAt: adminStartsAt,
+            maxParticipants: max(2, adminMaxParticipants),
+            maleLimit: max(0, adminMaleLimit),
+            femaleLimit: max(0, adminFemaleLimit),
+            registrationClosesAt: adminUsesRegistrationClose ? adminRegistrationClosesAt : nil,
+            cancellationClosesAt: adminUsesCancellationClose ? adminCancellationClosesAt : nil
+        )
+
+        Task {
+            let error = await store.updateMainEventAsAdmin(draft)
+            await MainActor.run {
+                feedbackMessage = error ?? L10n.tr("events.admin.success.updated")
+                feedbackIsError = error != nil
+                isSubmitting = false
+            }
+        }
+    }
+
+    private func addParticipant() {
+        let trimmedLookup = adminLookup.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLookup.isEmpty, !isSubmitting else { return }
+        isSubmitting = true
+
+        Task {
+            let error = await store.addMainEventParticipantAsAdmin(lookup: trimmedLookup, status: adminAddStatus)
+            await MainActor.run {
+                feedbackMessage = error ?? L10n.tr("events.admin.success.participantAdded")
+                feedbackIsError = error != nil
+                if error == nil {
+                    adminLookup = ""
+                }
+                isSubmitting = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func adminParticipantRow(_ participant: EventAdminParticipant) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(participant.displayName)
+                    .font(.subheadline.weight(.semibold))
+                Text(participant.email)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(statusLabel(for: participant.status))
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(statusColor(for: participant.status).opacity(0.18), in: Capsule())
+                        .foregroundStyle(statusColor(for: participant.status))
+
+                    if let gender = participant.gender {
+                        Text(gender.rawValue.capitalized)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Spacer()
+
+            Button(role: .destructive) {
+                removeParticipant(participant)
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.red)
+            .disabled(isSubmitting)
+        }
+        .padding(12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func removeParticipant(_ participant: EventAdminParticipant) {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+
+        Task {
+            let error = await store.removeMainEventParticipantAsAdmin(registrationId: participant.id)
+            await MainActor.run {
+                feedbackMessage = error ?? L10n.tr("events.admin.success.participantRemoved")
+                feedbackIsError = error != nil
+                isSubmitting = false
+            }
+        }
+    }
+
+    private func statusLabel(for status: EventHistoryStatus) -> String {
+        switch status {
+        case .confirmed:
+            return L10n.tr("events.badge.confirmed")
+        case .waitlisted:
+            return L10n.tr("events.badge.waitlisted")
+        case .cancelled:
+            return L10n.tr("events.admin.participant.cancelled")
+        case .promoted:
+            return L10n.tr("events.admin.participant.promoted")
+        }
+    }
+
+    private func statusColor(for status: EventHistoryStatus) -> Color {
+        switch status {
+        case .confirmed:
+            return .green
+        case .waitlisted:
+            return .orange
+        case .cancelled:
+            return .red
+        case .promoted:
+            return .blue
+        }
     }
 }
 
@@ -710,36 +984,66 @@ private struct EventActionBar: View {
     let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
-            Button(title, role: role, action: action)
-                .buttonStyle(EventPrimaryActionStyle(isDestructive: role == .destructive))
+        if #available(iOS 26.0, *) {
+            VStack(spacing: 10) {
+                if let message {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(isError ? Color.red : Color.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .glassEffect(in: Capsule(style: .continuous))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Button(role: role, action: action) {
+                    Text(title)
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .padding(.horizontal, 16)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.regular)
+                .tint(role == .destructive ? .red : .orange)
                 .disabled(isLoading)
                 .opacity(isLoading ? 0.72 : 1)
-
-            if let message {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(isError ? .red : .secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
-        .background(
-            Group {
-                if colorScheme == .dark {
-                    Rectangle().fill(.ultraThinMaterial)
-                } else {
-                    Rectangle().fill(Color(uiColor: .systemBackground).opacity(0.96))
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+        } else {
+            VStack(spacing: 10) {
+                Button(title, role: role, action: action)
+                    .buttonStyle(EventPrimaryActionStyle(isDestructive: role == .destructive))
+                    .disabled(isLoading)
+                    .opacity(isLoading ? 0.72 : 1)
+
+                if let message {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(isError ? .red : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .ignoresSafeArea(edges: .bottom)
-        )
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.08))
-                .frame(height: 1)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            .background(
+                Group {
+                    if colorScheme == .dark {
+                        Rectangle().fill(.ultraThinMaterial)
+                    } else {
+                        Rectangle().fill(Color(uiColor: .systemBackground).opacity(0.96))
+                    }
+                }
+                .ignoresSafeArea(edges: .bottom)
+            )
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.08))
+                    .frame(height: 1)
+            }
         }
     }
 }
