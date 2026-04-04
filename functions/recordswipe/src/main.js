@@ -77,7 +77,8 @@ export default async ({ req, res, error }) => {
         userAId: userIds[0],
         userBId: userIds[1],
         threadId,
-        createdAt: existingMatch.createdAt ?? now
+        createdAt: existingMatch.createdAt ?? now,
+        matchedAt: now
       }, permissions);
       return res.json({ matched: true, matchId: existingMatch.$id, threadId }, 200);
     }
@@ -88,7 +89,8 @@ export default async ({ req, res, error }) => {
       userAId: userIds[0],
       userBId: userIds[1],
       threadId,
-      createdAt: now
+      createdAt: now,
+      matchedAt: now
     }, permissions);
 
     return res.json({ matched: true, matchId, threadId }, 200);
