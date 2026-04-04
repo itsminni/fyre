@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // Send button stretches toward drag direction for a "liquid" feel.
 struct LiquidStretchSendButton: View {
@@ -16,6 +17,7 @@ struct LiquidStretchSendButton: View {
     var gradientColors: [Color] = [Color.orange, Color.red]
     var allowsLiquidInteraction: Bool = true
     var sharedStretchProgress: CGFloat = 0
+    var contrastBoost: Bool = false
 
     @GestureState private var dragOffset: CGSize = .zero
 
@@ -23,7 +25,7 @@ struct LiquidStretchSendButton: View {
         Button(action: action) {
             Image(systemName: "paperplane.fill")
                 .font(.system(size: max(16, size * 0.36), weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(iconForegroundColor)
                 .frame(width: size, height: size)
                 .background(
                     LinearGradient(
@@ -35,14 +37,14 @@ struct LiquidStretchSendButton: View {
                 )
                 .overlay(
                     Circle()
-                        .stroke(colorScheme == .dark ? Color.white.opacity(0.3) : Color.black.opacity(0.10), lineWidth: 1)
+                        .stroke(buttonBorderColor, lineWidth: contrastBoost ? 1.2 : 1)
                 )
                 .scaleEffect(x: resolvedStretchX, y: resolvedStretchY)
                 .offset(
                     x: supportsLiquidInteraction ? dragOffset.width * 0.14 : 0,
                     y: supportsLiquidInteraction ? dragOffset.height * 0.14 : 0
                 )
-                .shadow(color: shadowBaseColor.opacity(colorScheme == .dark ? 0.28 : 0.20), radius: size * 0.26, x: 0, y: size * 0.13)
+                .shadow(color: shadowColor, radius: contrastBoost ? size * 0.34 : size * 0.26, x: 0, y: size * 0.16)
                 .animation(
                     supportsLiquidInteraction
                     ? .spring(response: 0.26, dampingFraction: 0.7)
@@ -50,6 +52,13 @@ struct LiquidStretchSendButton: View {
                     value: dragOffset
                 )
                 .animation(.spring(response: 0.28, dampingFraction: 0.8), value: clampedSharedProgress)
+                .background {
+                    if contrastBoost {
+                        Circle()
+                            .fill(Color.black.opacity(colorScheme == .dark ? 0.12 : 0.08))
+                            .frame(width: size + 8, height: size + 8)
+                    }
+                }
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -112,5 +121,55 @@ struct LiquidStretchSendButton: View {
 
     private var shadowBaseColor: Color {
         normalizedGradientColors.first ?? .orange
+    }
+
+    private var iconForegroundColor: Color {
+        if contrastBoost && averageGradientLuminance > 0.62 {
+            return Color.black.opacity(0.74)
+        }
+
+        return .white
+    }
+
+    private var buttonBorderColor: Color {
+        if contrastBoost {
+            return colorScheme == .dark ? Color.white.opacity(0.34) : Color.black.opacity(0.22)
+        }
+
+        return colorScheme == .dark ? Color.white.opacity(0.3) : Color.black.opacity(0.10)
+    }
+
+    private var shadowColor: Color {
+        if contrastBoost {
+            return Color.black.opacity(colorScheme == .dark ? 0.34 : 0.26)
+        }
+
+        return shadowBaseColor.opacity(colorScheme == .dark ? 0.28 : 0.20)
+    }
+
+    private var averageGradientLuminance: CGFloat {
+        guard !normalizedGradientColors.isEmpty else { return 0.5 }
+
+        let luminance = normalizedGradientColors.reduce(CGFloat.zero) { partial, color in
+            partial + color.uiLuminance
+        }
+
+        return luminance / CGFloat(normalizedGradientColors.count)
+    }
+}
+
+private extension Color {
+    var uiLuminance: CGFloat {
+        let uiColor = UIColor(self)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return 0.5
+        }
+
+        return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
     }
 }
