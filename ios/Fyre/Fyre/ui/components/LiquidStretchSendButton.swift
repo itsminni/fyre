@@ -12,18 +12,20 @@ struct LiquidStretchSendButton: View {
     @Environment(\.colorScheme) private var colorScheme
     let isEnabled: Bool
     let action: () -> Void
+    var size: CGFloat = 38
+    var gradientColors: [Color] = [Color.orange, Color.red]
 
     @GestureState private var dragOffset: CGSize = .zero
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "paperplane.fill")
-                .font(.body.weight(.semibold))
+                .font(.system(size: max(16, size * 0.36), weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
+                .frame(width: size, height: size)
                 .background(
                     LinearGradient(
-                        colors: [Color.orange, Color.red],
+                        colors: normalizedGradientColors,
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
@@ -38,7 +40,7 @@ struct LiquidStretchSendButton: View {
                     x: supportsLiquidInteraction ? dragOffset.width * 0.14 : 0,
                     y: supportsLiquidInteraction ? dragOffset.height * 0.14 : 0
                 )
-                .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.28 : 0.20), radius: 10, x: 0, y: 5)
+                .shadow(color: shadowBaseColor.opacity(colorScheme == .dark ? 0.28 : 0.20), radius: size * 0.26, x: 0, y: size * 0.13)
                 .animation(
                     supportsLiquidInteraction
                     ? .spring(response: 0.26, dampingFraction: 0.7)
@@ -75,5 +77,13 @@ struct LiquidStretchSendButton: View {
 
     private var stretchY: CGFloat {
         1 + max(0, (abs(dragOffset.height) - abs(dragOffset.width)) / 130)
+    }
+
+    private var normalizedGradientColors: [Color] {
+        gradientColors.isEmpty ? [Color.orange, Color.red] : gradientColors
+    }
+
+    private var shadowBaseColor: Color {
+        normalizedGradientColors.first ?? .orange
     }
 }

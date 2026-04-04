@@ -8,6 +8,11 @@
 import SwiftUI
 import PhotosUI
 
+private struct PendingChatBackgroundPreview: Identifiable {
+    let id = UUID()
+    let style: ChatBackgroundStyle
+}
+
 struct AccountView: View {
     private struct EditableProfileDraft: Equatable {
         let city: String
@@ -46,6 +51,13 @@ struct AccountView: View {
     @AppStorage("settings_notifications_enabled") private var notificationsEnabled = true
     @AppStorage("settings_show_age") private var showAge = true
     @AppStorage("settings_show_distance") private var showDistance = true
+    @AppStorage("settings_chat_background_style") private var chatBackgroundStyle = ChatBackgroundStyle.defaultDark.rawValue
+    @AppStorage("settings_chat_background_brightness") private var chatBackgroundBrightness = 0.0
+    @AppStorage("settings_chat_outgoing_bubble_palette") private var outgoingBubblePalette = ChatBubblePalette.default.rawValue
+    @AppStorage("settings_chat_incoming_bubble_palette") private var incomingBubblePalette = ChatBubblePalette.default.rawValue
+    @AppStorage("settings_send_button_color_1") private var sendButtonColor1Hex = "#FF9A00"
+    @AppStorage("settings_send_button_color_2") private var sendButtonColor2Hex = "#FF8A1F"
+    @AppStorage("settings_send_button_color_3") private var sendButtonColor3Hex = "#E14D33"
 
     @State private var selectedSection: AccountSection = .profile
     @State private var firstName = ""
@@ -65,6 +77,10 @@ struct AccountView: View {
     @State private var profileMessageIsError = false
     @State private var securityMessage: String?
     @State private var pickedPhotoItem: PhotosPickerItem?
+    @State private var pendingChatBackgroundPreview: PendingChatBackgroundPreview?
+    @State private var chatBackgroundStyleSelection = ChatBackgroundStyle.defaultDark.rawValue
+    @State private var chatBackgroundSettingsMessage: String?
+    @State private var chatBackgroundSettingsMessageIsError = false
     @State private var showEventRemovalAlert = false
     @State private var pendingDangerousOrientation: UserOrientation?
     @State private var isHydratingProfileForm = false
@@ -109,6 +125,7 @@ struct AccountView: View {
             .navigationTitle(L10n.tr("tab.account"))
             .onAppear {
                 fillFromUser()
+                chatBackgroundStyleSelection = chatBackgroundStyle
             }
             .onChange(of: orientation) { oldValue, newValue in
                 handleOrientationChange(from: oldValue, to: newValue)
@@ -127,6 +144,13 @@ struct AccountView: View {
                         fillFromUser()
                     }
                 }
+            }
+            .onChange(of: chatBackgroundStyleSelection) { _, newValue in
+                guard newValue != chatBackgroundStyle else { return }
+                let style = ChatBackgroundStyle(rawValue: newValue) ?? .defaultDark
+                pendingChatBackgroundPreview = PendingChatBackgroundPreview(
+                    style: style
+                )
             }
             .task(id: editableProfileDraft) {
                 // Only editable profile fields participate in autosave; identity fields stay read-only above.
@@ -151,6 +175,22 @@ struct AccountView: View {
                 }
             } message: {
                 Text(L10n.tr("profile.eventsRemoval.warning.message"))
+            }
+            .fullScreenCover(item: $pendingChatBackgroundPreview) { preview in
+                ChatBackgroundConfirmationView(
+                    preview: preview,
+                    brightness: $chatBackgroundBrightness,
+                    outgoingPalette: ChatBubblePalette(rawValue: outgoingBubblePalette) ?? .default,
+                    incomingPalette: ChatBubblePalette(rawValue: incomingBubblePalette) ?? .default,
+                    onCancel: {
+                        chatBackgroundStyleSelection = chatBackgroundStyle
+                        pendingChatBackgroundPreview = nil
+                    },
+                    onApply: {
+                        applyChatBackgroundStyle(preview.style)
+                        pendingChatBackgroundPreview = nil
+                    }
+                )
             }
         }
     }
@@ -262,10 +302,9 @@ struct AccountView: View {
     private var appSettings: some View {
         ScrollView {
             VStack(spacing: 18) {
-                // Use the same card layout as the other tabs to avoid the extra top inset from Form.
                 AccountCard(
-                    title: L10n.tr("account.section.settings"),
-                    icon: "gearshape.fill"
+                    title: L10n.tr("account.section.appearance"),
+                    icon: "paintpalette.fill"
                 ) {
                     VStack(spacing: 14) {
                         SettingsPickerField(
@@ -283,6 +322,54 @@ struct AccountView: View {
                             }
                         }
 
+                        SettingsPickerField(
+                            title: L10n.tr("account.chatBackground"),
+                            selection: $chatBackgroundStyleSelection,
+                            options: ChatBackgroundStyle.allCases.map(\.rawValue)
+                        ) { option in
+                            let style = ChatBackgroundStyle(rawValue: option) ?? .defaultDark
+                            return L10n.tr(style.localizationKey)
+                        }
+
+                        SettingsPickerField(
+                            title: L10n.tr("account.chatBubble.outgoing"),
+                            selection: $outgoingBubblePalette,
+                            options: ChatBubblePalette.allCases.map(\.rawValue)
+                        ) { option in
+                            let palette = ChatBubblePalette(rawValue: option) ?? .default
+                            return L10n.tr(palette.localizationKey)
+                        }
+
+                        SettingsPickerField(
+                            title: L10n.tr("account.chatBubble.incoming"),
+                            selection: $incomingBubblePalette,
+                            options: ChatBubblePalette.allCases.map(\.rawValue)
+                        ) { option in
+                            let palette = ChatBubblePalette(rawValue: option) ?? .default
+                            return L10n.tr(palette.localizationKey)
+                        }
+
+                        SendButtonGradientSettings(
+                            colorOne: sendButtonColorOneBinding,
+                            colorTwo: sendButtonColorTwoBinding,
+                            colorThree: sendButtonColorThreeBinding
+                        )
+
+                        if let chatBackgroundSettingsMessage {
+                            Text(chatBackgroundSettingsMessage)
+                                .font(.footnote)
+                                .foregroundStyle(chatBackgroundSettingsMessageIsError ? .red : .secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                        }
+                    }
+                }
+
+                AccountCard(
+                    title: L10n.tr("account.section.preferences"),
+                    icon: "slider.horizontal.3"
+                ) {
+                    VStack(spacing: 14) {
                         SettingsToggleField(title: L10n.tr("account.notifications"), isOn: $notificationsEnabled)
                         SettingsToggleField(title: L10n.tr("account.showAge"), isOn: $showAge)
                         SettingsToggleField(title: L10n.tr("account.showDistance"), isOn: $showDistance)
@@ -371,6 +458,27 @@ struct AccountView: View {
         )
     }
 
+    private var sendButtonColorOneBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: sendButtonColor1Hex) ?? .orange },
+            set: { sendButtonColor1Hex = $0.hexRGB ?? "#FF9A00" }
+        )
+    }
+
+    private var sendButtonColorTwoBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: sendButtonColor2Hex) ?? Color(red: 1.0, green: 0.54, blue: 0.12) },
+            set: { sendButtonColor2Hex = $0.hexRGB ?? "#FF8A1F" }
+        )
+    }
+
+    private var sendButtonColorThreeBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: sendButtonColor3Hex) ?? Color(red: 0.88, green: 0.30, blue: 0.20) },
+            set: { sendButtonColor3Hex = $0.hexRGB ?? "#E14D33" }
+        )
+    }
+
     private var cardDivider: some View {
         Divider()
             .overlay(.white.opacity(0.08))
@@ -410,6 +518,51 @@ struct AccountView: View {
     private func displayValue(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "-" : trimmed
+    }
+
+    @ViewBuilder
+    private func settingsActionRow(title: String, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.headline)
+                .foregroundStyle(.orange)
+                .frame(width: 20)
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func settingsCompactActionButton(title: String, systemImage: String, isDestructive: Bool = false) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.headline)
+                .foregroundStyle(isDestructive ? .red : .orange)
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isDestructive ? .red : .primary)
+                .lineLimit(2)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func applyChatBackgroundStyle(_ style: ChatBackgroundStyle) {
+        chatBackgroundStyle = style.rawValue
+        chatBackgroundStyleSelection = style.rawValue
+        chatBackgroundSettingsMessage = nil
+        chatBackgroundSettingsMessageIsError = false
     }
 
     private func fillFromUser() {
@@ -763,6 +916,74 @@ private struct SettingsPickerField: View {
     }
 }
 
+private struct SendButtonGradientSettings: View {
+    @Binding var colorOne: Color
+    @Binding var colorTwo: Color
+    @Binding var colorThree: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("account.sendButtonGradient"))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color1"), color: $colorOne)
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color2"), color: $colorTwo)
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color3"), color: $colorThree)
+            }
+
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [colorOne, colorTwo, colorThree],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 44, height: 44)
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.28), lineWidth: 1)
+                }
+                .overlay {
+                    Image(systemName: "paperplane.fill")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct SendButtonColorSwatch: View {
+    let title: String
+    @Binding var color: Color
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ColorPicker(title, selection: $color, supportsOpacity: false)
+                .labelsHidden()
+
+            Circle()
+                .fill(color)
+                .frame(width: 28, height: 28)
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                }
+
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 private struct AccountPrimaryButtonStyle: ButtonStyle {
     var tint: Color = .orange
 
@@ -784,5 +1005,249 @@ private struct AccountPrimaryButtonStyle: ButtonStyle {
             .shadow(color: tint.opacity(0.22), radius: 18, y: 10)
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct ChatBackgroundConfirmationView: View {
+    let preview: PendingChatBackgroundPreview
+    @Binding var brightness: Double
+    let outgoingPalette: ChatBubblePalette
+    let incomingPalette: ChatBubblePalette
+    let onCancel: () -> Void
+    let onApply: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            previewBackground
+
+            Rectangle()
+                .fill(.black.opacity(colorScheme == .dark ? 0.10 : 0.04))
+                .ignoresSafeArea()
+
+            VStack {
+                Spacer(minLength: 0)
+                VStack(spacing: 16) {
+                    previewBubble(
+                        text: "Hey, this feels better.",
+                        palette: incomingPalette,
+                        isOutgoing: false,
+                        alignment: .leading
+                    )
+
+                    previewBubble(
+                        text: "Much closer to the real chat.",
+                        palette: outgoingPalette,
+                        isOutgoing: true,
+                        alignment: .trailing
+                    )
+                }
+                .padding(.horizontal, 18)
+                Spacer(minLength: 0)
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            previewTopBar
+        }
+        .safeAreaInset(edge: .bottom) {
+            previewBottomBar
+        }
+    }
+
+    @ViewBuilder
+    private var previewBackground: some View {
+        preview.style.backgroundView(colorScheme: colorScheme)
+        .brightness(brightness)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private var previewTopBar: some View {
+        if #available(iOS 26.0, *) {
+            HStack {
+                Button(action: onCancel) {
+                    Image(systemName: "chevron.left")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background {
+                            Circle()
+                                .fill(.clear)
+                                .glassEffect(in: Circle())
+                        }
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 16)
+
+                Button(action: onApply) {
+                    Text(L10n.tr("common.apply"))
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .frame(height: 44)
+                        .background {
+                            Capsule(style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(in: Capsule(style: .continuous))
+                                .overlay {
+                                    Capsule(style: .continuous)
+                                        .fill(topBarPrimaryBackground.opacity(0.78))
+                                }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+            .background(
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(.white.opacity(0.08))
+                            .frame(height: 1)
+                    }
+                    .ignoresSafeArea(edges: .top)
+            )
+        } else {
+            HStack(spacing: 12) {
+                Button(action: onCancel) {
+                    Image(systemName: "chevron.left")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .frame(width: 44, height: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 0)
+
+                Button(action: onApply) {
+                    Text(L10n.tr("common.apply"))
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .background(
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(.white.opacity(0.10))
+                            .frame(height: 1)
+                    }
+                    .ignoresSafeArea(edges: .top)
+            )
+        }
+    }
+
+    private var topBarPrimaryBackground: LinearGradient {
+        LinearGradient(
+            colors: [.orange, .orange.opacity(0.82)],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    private var brightnessControl: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sun.min.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.88))
+
+            Slider(value: $brightness, in: -0.35...0.35)
+                .tint(.orange)
+                .frame(width: 132)
+
+            Image(systemName: "sun.max.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.88))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background {
+            if #available(iOS 26.0, *) {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
+        }
+    }
+
+    private var previewBottomBar: some View {
+        HStack(alignment: .center, spacing: 12) {
+            brightnessControl
+
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.70))
+
+                        Text(L10n.tr("chat.message.placeholder"))
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.70))
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(height: 52)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background(
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(.white.opacity(0.08))
+                        .frame(height: 1)
+                }
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    @ViewBuilder
+    private func previewBubble(
+        text: String,
+        palette: ChatBubblePalette,
+        isOutgoing: Bool,
+        alignment: HorizontalAlignment
+    ) -> some View {
+        HStack {
+            if isOutgoing { Spacer(minLength: 48) }
+
+            Text(text)
+                .font(.body)
+                .foregroundStyle(palette.textColor(colorScheme: colorScheme, isOutgoing: isOutgoing))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(palette.fillStyle(colorScheme: colorScheme, isOutgoing: isOutgoing))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .stroke(palette.strokeColor(colorScheme: colorScheme, isOutgoing: isOutgoing), lineWidth: 1)
+                        }
+                )
+                .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: isOutgoing ? .trailing : .leading)
+
+            if !isOutgoing { Spacer(minLength: 48) }
+        }
+        .frame(maxWidth: .infinity, alignment: isOutgoing ? .trailing : .leading)
     }
 }
