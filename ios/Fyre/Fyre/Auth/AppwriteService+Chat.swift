@@ -199,6 +199,55 @@ extension AppwriteService {
         )
     }
 
+    func markThreadRead(threadId: String) async {
+        guard let currentAccountId = try? await fetchCurrentAccountId(required: false) else {
+            return
+        }
+
+        do {
+            let participantRows = try await listRows(
+                tableId: configuration.threadParticipantsTableId,
+                queries: [
+                    AppwriteQuery.equal("threadId", values: [threadId]),
+                    AppwriteQuery.equal("userId", values: [currentAccountId])
+                ]
+            )
+
+            guard let participantRow = participantRows.first,
+                  let participantRowId = stringValue(forKey: "$id", in: participantRow) else {
+                return
+            }
+
+            let now = ISO8601DateFormatter().string(from: Date())
+            _ = try await sendRequest(
+                method: "PATCH",
+                pathComponents: [
+                    "tablesdb",
+                    configuration.databaseId,
+                    "tables",
+                    configuration.threadParticipantsTableId,
+                    "rows",
+                    participantRowId
+                ],
+                jsonBody: [
+                    "data": [
+                        "threadId": threadId,
+                        "userId": currentAccountId,
+                        "role": stringValue(forKey: "role", in: participantRow) ?? "member",
+                        "lastReadAt": now,
+                        "muted": boolValue(forKey: "muted", in: participantRow) ?? false,
+                        "pinned": boolValue(forKey: "pinned", in: participantRow) ?? false,
+                        "notificationsEnabled": boolValue(forKey: "notificationsEnabled", in: participantRow) ?? true
+                    ]
+                ]
+            )
+        } catch {
+#if DEBUG
+            debugPrint("markThreadRead failed for \(threadId): \(error.localizedDescription)")
+#endif
+        }
+    }
+
     func fetchAttachmentData(fileId: String) async throws -> Data? {
         guard let bucketId = configuration.chatAttachmentsBucketId, !bucketId.isEmpty else {
             throw AppwriteServiceError.missingConfiguration("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID")
@@ -245,6 +294,9 @@ extension AppwriteService {
 
         let participantUserIds = participantRows.compactMap { stringValue(forKey: "userId", in: $0) }
         let otherUserId = participantUserIds.first(where: { $0 != resolvedCurrentAccountId })
+        let otherParticipantReadAt = participantRows
+            .first(where: { stringValue(forKey: "userId", in: $0) == otherUserId })
+            .flatMap { dateValue(forKey: "lastReadAt", in: $0) }
 
         let profileRow = try await fetchProfileRow(id: otherUserId ?? "")
         let messageRows = try await listRows(
@@ -284,6 +336,7 @@ extension AppwriteService {
             avatar: "",
             isOnline: isOnline,
             lastSeenAt: lastSeenAt,
+            otherParticipantReadAt: otherParticipantReadAt,
             participantUserIds: participantUserIds,
             messages: sortedMessages
         )

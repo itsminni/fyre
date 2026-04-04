@@ -379,7 +379,8 @@ struct ChatAvatarView: View {
             Image(uiImage: uiImage)
                 .resizable()
                 .scaledToFill()
-        } else if UIImage(systemName: avatarKey) != nil {
+        } else if !avatarKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  UIImage(systemName: avatarKey) != nil {
             ZStack {
                 Circle()
                     .fill(placeholderAvatarFill)

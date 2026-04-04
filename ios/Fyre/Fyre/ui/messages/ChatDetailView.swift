@@ -85,7 +85,6 @@ struct ChatDetailView: View {
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var bottomAnchorMinY: CGFloat = 0
     @State private var initialScrollTicket = UUID()
-    @State private var composerDragOffset: CGFloat = 0
     @State private var isDeleteChatConfirmationPresented = false
     @State private var messageReadInfoMessage: ChatMessage?
     @FocusState private var isInputFocused: Bool
@@ -107,97 +106,118 @@ struct ChatDetailView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
                             let bubblePosition = bubblePosition(for: index)
-                            HStack(alignment: .bottom, spacing: 0) {
-                                if message.isMe { Spacer(minLength: 40) }
-                                VStack(alignment: message.isMe ? .trailing : .leading, spacing: 3) {
-                                    VStack(alignment: .leading, spacing: message.replyPreviewText == nil ? 0 : 8) {
-                                        if let replyPreviewText = message.replyPreviewText {
-                                            replyInlinePreview(
-                                                sender: replySenderLabel(for: message),
-                                                text: replyPreviewText,
-                                                isOutgoing: message.isMe
-                                            )
-                                        }
+                            VStack(spacing: 0) {
+                                if shouldShowDateSeparator(before: index) {
+                                    Text(dateSeparatorLabel(for: message.sentAt))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 7)
+                                        .background(.ultraThinMaterial, in: Capsule())
+                                        .padding(.top, index == 0 ? 6 : 14)
+                                        .padding(.bottom, 10)
+                                        .frame(maxWidth: .infinity)
+                                }
 
-                                        if let attachment = message.attachment {
-                                            messageAttachmentView(
-                                                attachment: attachment,
-                                                messageType: message.messageType
-                                            )
-                                        }
+                                HStack(alignment: .bottom, spacing: 0) {
+                                    if message.isMe { Spacer(minLength: 40) }
+                                    VStack(alignment: message.isMe ? .trailing : .leading, spacing: 3) {
+                                        VStack(alignment: .leading, spacing: message.replyPreviewText == nil ? 0 : 8) {
+                                            if let replyPreviewText = message.replyPreviewText {
+                                                replyInlinePreview(
+                                                    sender: replySenderLabel(for: message),
+                                                    text: replyPreviewText,
+                                                    isOutgoing: message.isMe
+                                                )
+                                            }
 
-                                        if !message.text.isEmpty {
-                                            Text(message.text)
-                                                .font(.body)
-                                                .multilineTextAlignment(.leading)
-                                                .foregroundStyle(messageTextStyle(isOutgoing: message.isMe))
-                                        }
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        messageBubbleChrome(
-                                            isOutgoing: message.isMe,
-                                            position: bubblePosition
-                                        )
-                                    )
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: messageMaxWidth, alignment: message.isMe ? .trailing : .leading)
-                                    .shadow(color: messageBubbleShadow(isOutgoing: message.isMe), radius: colorScheme == .dark ? 0 : 6, y: colorScheme == .dark ? 0 : 3)
-                                    .contextMenu {
-                                        Button {
-                                            replyingToMessage = message
-                                            isInputFocused = true
-                                        } label: {
-                                            Label(L10n.tr("chat.reply"), systemImage: "arrowshape.turn.up.left.fill")
-                                        }
+                                            if let attachment = message.attachment {
+                                                messageAttachmentView(
+                                                    attachment: attachment,
+                                                    messageType: message.messageType
+                                                )
+                                            }
 
-                                        Button {
-                                            copyMessageText(message.text)
-                                        } label: {
-                                            Label(L10n.tr("chat.copy"), systemImage: "doc.on.doc")
-                                        }
-                                    }
-
-                                    if shouldShowTimestamp(for: index) {
-                                        HStack(spacing: 4) {
-                                            Text(message.time)
-                                                .font(.caption2)
-                                                .foregroundStyle(.tertiary)
-
-                                            if let receiptLabel = readReceiptLabel(for: message) {
-                                                Text("•")
-                                                    .font(.caption2)
-                                                    .foregroundStyle(.tertiary)
-
-                                                Text(receiptLabel)
-                                                    .font(.caption2.weight(.semibold))
-                                                    .foregroundStyle(.tertiary)
+                                            if !message.text.isEmpty {
+                                                Text(message.text)
+                                                    .font(.body)
+                                                    .multilineTextAlignment(.leading)
+                                                    .foregroundStyle(messageTextStyle(isOutgoing: message.isMe))
                                             }
                                         }
-                                        .padding(.horizontal, 2)
-                                        .padding(.top, 1)
-                                        .opacity(isAnimating(message) ? 0.5 : 1)
-                                    }
-                                }
-                                .id(message.id)
-                                .scaleEffect(
-                                    isAnimating(message) ? 0.94 : 1,
-                                    anchor: message.isMe ? .trailing : .leading
-                                )
-                                .opacity(isAnimating(message) ? 0.78 : 1)
-                                .offset(
-                                    x: isAnimating(message) ? (message.isMe ? 18 : -18) : 0,
-                                    y: isAnimating(message) ? 10 : 0
-                                )
-                                .blur(radius: isAnimating(message) ? 5 : 0)
-                                .transition(messageInsertionTransition(isOutgoing: message.isMe))
-                                .animation(
-                                    .spring(response: 0.38, dampingFraction: 0.84, blendDuration: 0.14),
-                                    value: animatingMessageIDs
-                                )
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(
+                                            messageBubbleChrome(
+                                                isOutgoing: message.isMe,
+                                                position: bubblePosition
+                                            )
+                                        )
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: messageMaxWidth, alignment: message.isMe ? .trailing : .leading)
+                                        .shadow(color: messageBubbleShadow(isOutgoing: message.isMe), radius: colorScheme == .dark ? 0 : 6, y: colorScheme == .dark ? 0 : 3)
+                                        .contextMenu {
+                                            Button {
+                                                replyingToMessage = message
+                                                isInputFocused = true
+                                            } label: {
+                                                Label(L10n.tr("chat.reply"), systemImage: "arrowshape.turn.up.left.fill")
+                                            }
 
-                                if !message.isMe { Spacer(minLength: 40) }
+                                            Button {
+                                                copyMessageText(message.text)
+                                            } label: {
+                                                Label(L10n.tr("chat.copy"), systemImage: "doc.on.doc")
+                                            }
+                                        }
+
+                                        if shouldShowMetadata(for: index) {
+                                            let showsTimestamp = shouldShowTimestamp(for: index)
+                                            let receiptLabel = readReceiptLabel(for: message)
+
+                                            HStack(spacing: 4) {
+                                                if showsTimestamp {
+                                                    Text(message.time)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.tertiary)
+                                                }
+
+                                                if showsTimestamp, receiptLabel != nil {
+                                                    Text("•")
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.tertiary)
+                                                }
+
+                                                if let receiptLabel {
+                                                    Text(receiptLabel)
+                                                        .font(.caption2.weight(.semibold))
+                                                        .foregroundStyle(.tertiary)
+                                                }
+                                            }
+                                            .padding(.horizontal, 2)
+                                            .padding(.top, 1)
+                                            .opacity(isAnimating(message) ? 0.5 : 1)
+                                        }
+                                    }
+                                    .id(message.id)
+                                    .scaleEffect(
+                                        isAnimating(message) ? 0.94 : 1,
+                                        anchor: message.isMe ? .trailing : .leading
+                                    )
+                                    .opacity(isAnimating(message) ? 0.78 : 1)
+                                    .offset(
+                                        x: isAnimating(message) ? (message.isMe ? 18 : -18) : 0,
+                                        y: isAnimating(message) ? 10 : 0
+                                    )
+                                    .blur(radius: isAnimating(message) ? 5 : 0)
+                                    .transition(messageInsertionTransition(isOutgoing: message.isMe))
+                                    .animation(
+                                        .spring(response: 0.38, dampingFraction: 0.84, blendDuration: 0.14),
+                                        value: animatingMessageIDs
+                                    )
+
+                                    if !message.isMe { Spacer(minLength: 40) }
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: message.isMe ? .trailing : .leading)
                             .padding(.horizontal, 12)
@@ -232,9 +252,11 @@ struct ChatDetailView: View {
                     }
                 }
                 .onPreferenceChange(ChatScrollViewportHeightPreferenceKey.self) { value in
+                    guard abs(scrollViewportHeight - value) > 0.5 else { return }
                     scrollViewportHeight = value
                 }
                 .onPreferenceChange(ChatBottomAnchorMinYPreferenceKey.self) { value in
+                    guard abs(bottomAnchorMinY - value) > 0.5 else { return }
                     bottomAnchorMinY = value
                 }
                 .onAppear {
@@ -294,16 +316,13 @@ struct ChatDetailView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composerOverlay
         }
-        .navigationTitle("")
+        .navigationTitle(navigationTitleText)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .background {
+            ChatTabBarVisibilityController(isHidden: true)
+        }
         .toolbar {
-            if #available(iOS 26.0, *) {
-                ToolbarItem(placement: .principal) {
-                    ios26ProfileHeader
-                        .offset(y: 10)
-                }
-            } else {
+            if #unavailable(iOS 26.0) {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 8) {
                         ChatAvatarView(
@@ -335,15 +354,18 @@ struct ChatDetailView: View {
 
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button(role: .destructive) {
+                    Button {
                         isDeleteChatConfirmationPresented = true
                     } label: {
-                        HStack {
+                        HStack(spacing: 12) {
                             Text(L10n.tr("messages.delete.action"))
-                            Spacer(minLength: 12)
+                                .foregroundStyle(.red)
+                            Spacer(minLength: 0)
                             Image(systemName: "trash")
+                                .foregroundStyle(.red)
                         }
-                        .foregroundStyle(.red)
+                        .symbolRenderingMode(.monochrome)
+                        .contentShape(Rectangle())
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -441,8 +463,6 @@ struct ChatDetailView: View {
         .padding(.top, 8)
         .padding(.bottom, composerBottomPadding)
         .background(composerChrome)
-        .offset(y: composerOverlayOffset)
-        .gesture(composerOverlayGesture)
     }
 
     private func sendMessage() {
@@ -605,38 +625,6 @@ struct ChatDetailView: View {
         return 10
     }
 
-    private var composerOverlayOffset: CGFloat {
-        if #available(iOS 26.0, *) {
-            return composerDragOffset
-        }
-
-        return 0
-    }
-
-    private var composerOverlayGesture: some Gesture {
-        DragGesture(minimumDistance: 8, coordinateSpace: .local)
-            .onChanged { value in
-                guard #available(iOS 26.0, *),
-                      abs(value.translation.height) > abs(value.translation.width) else { return }
-
-                composerDragOffset = min(max(value.translation.height, -22), 42)
-            }
-            .onEnded { value in
-                guard #available(iOS 26.0, *),
-                      abs(value.translation.height) > abs(value.translation.width) else { return }
-
-                if value.translation.height > 30 {
-                    isInputFocused = false
-                } else if value.translation.height < -18 {
-                    isInputFocused = true
-                }
-
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                    composerDragOffset = 0
-                }
-            }
-    }
-
     private var messageListTopInset: CGFloat {
         if #available(iOS 26.0, *) {
             return 20
@@ -719,9 +707,9 @@ struct ChatDetailView: View {
         if #available(iOS 26.0, *) {
             Image(systemName: "plus")
                 .font(.headline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.92))
-                .frame(width: 44, height: 44)
-                .glassEffect(in: Circle())
+                .foregroundStyle(.white.opacity(0.88))
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
         } else {
             Image(systemName: "plus")
                 .font(.headline.weight(.semibold))
@@ -732,29 +720,30 @@ struct ChatDetailView: View {
 
     @available(iOS 26.0, *)
     private var ios26ProfileHeader: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 1) {
             ChatAvatarView(
                 name: threadName,
                 avatarKey: threadAvatar,
-                size: 32,
+                size: 28,
                 isOnline: threadIsOnline,
                 showsPresence: false
             )
 
             Text(threadName)
-                .font(.callout.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
 
             if let subtitle = threadPresenceSubtitle {
                 Text(subtitle)
                     .font(.caption2)
-                    .foregroundStyle(threadIsOnline ? .green.opacity(0.95) : .white.opacity(0.72))
+                    .foregroundStyle(threadIsOnline ? .green.opacity(0.95) : .white.opacity(0.84))
                     .lineLimit(1)
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 15)
-        .padding(.vertical, 7)
+        .padding(.vertical, 5)
         .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -774,41 +763,56 @@ struct ChatDetailView: View {
         return String(format: L10n.tr("messages.lastSeen"), lastSeenLabel(for: threadLastSeenAt))
     }
 
+    private var navigationTitleText: String {
+        if #available(iOS 26.0, *) {
+            return threadName
+        }
+
+        return ""
+    }
+
     @ViewBuilder
     private var composerRow: some View {
         if #available(iOS 26.0, *) {
-            HStack(alignment: .center, spacing: 10) {
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                        isAttachmentTrayPresented.toggle()
-                    }
-                } label: {
-                    composerAttachmentButton
-                }
-                .buttonStyle(.plain)
+            Group {
+                if isInputFocused {
+                    HStack(alignment: .center, spacing: 10) {
+                        composerAttachmentToggleButton
 
-                HStack(alignment: .center, spacing: 8) {
-                    if let pendingAttachment {
-                        composerIntegratedAttachmentPreview(pendingAttachment)
-                    }
+                        HStack(alignment: .center, spacing: 8) {
+                            if let pendingAttachment {
+                                composerIntegratedAttachmentPreview(pendingAttachment)
+                            }
 
-                    TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
-                        .focused($isInputFocused)
-                        .textFieldStyle(.plain)
-                        .submitLabel(.send)
-                        .onSubmit(sendMessage)
-                        .lineLimit(1...4)
+                            composerTextField
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(composerFieldChrome)
+
+                        composerSendButton(size: 44)
+                    }
+                } else {
+                    HStack(alignment: .center, spacing: 8) {
+                        composerAttachmentToggleButton
+                            .frame(width: 32, height: 32)
+
+                        HStack(alignment: .center, spacing: 8) {
+                            if let pendingAttachment {
+                                composerIntegratedAttachmentPreview(pendingAttachment)
+                            }
+
+                            composerTextField
+                        }
+
+                        composerSendButton(size: 38)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(composerFieldChrome)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(composerFieldChrome)
-                LiquidStretchSendButton(
-                    isEnabled: canSendMessage,
-                    action: sendMessage,
-                    size: 44,
-                    gradientColors: sendButtonGradientColors
-                )
             }
+            .animation(.spring(response: 0.30, dampingFraction: 0.86), value: isInputFocused)
         } else {
             HStack(alignment: .center, spacing: 10) {
                 HStack(alignment: .center, spacing: 8) {
@@ -844,6 +848,35 @@ struct ChatDetailView: View {
                 )
             }
         }
+    }
+
+    private var composerAttachmentToggleButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                isAttachmentTrayPresented.toggle()
+            }
+        } label: {
+            composerAttachmentButton
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var composerTextField: some View {
+        TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
+            .focused($isInputFocused)
+            .textFieldStyle(.plain)
+            .submitLabel(.send)
+            .onSubmit(sendMessage)
+            .lineLimit(1...4)
+    }
+
+    private func composerSendButton(size: CGFloat) -> some View {
+        LiquidStretchSendButton(
+            isEnabled: canSendMessage,
+            action: sendMessage,
+            size: size,
+            gradientColors: sendButtonGradientColors
+        )
     }
 
     private var outgoingBubbleStyle: ChatBubblePalette {
@@ -1522,7 +1555,12 @@ struct ChatDetailView: View {
 
     private func readReceiptLabel(for message: ChatMessage) -> String? {
         guard message.isMe else { return nil }
-        return isMessageReadByPeer(message) ? L10n.tr("messages.read") : L10n.tr("messages.sent")
+
+        if isMessageReadByPeer(message) {
+            return latestReadOutgoingMessage()?.id == message.id ? L10n.tr("messages.read") : nil
+        }
+
+        return latestUnreadOutgoingMessage()?.id == message.id ? L10n.tr("messages.sent") : nil
     }
 
     private func readTimestamp(for message: ChatMessage) -> Date? {
@@ -1557,6 +1595,44 @@ struct ChatDetailView: View {
         }
 
         return next.sentAt.timeIntervalSince(current.sentAt) > (3 * 60)
+    }
+
+    private func shouldShowMetadata(for index: Int) -> Bool {
+        guard messages.indices.contains(index) else {
+            return false
+        }
+
+        return shouldShowTimestamp(for: index) || readReceiptLabel(for: messages[index]) != nil
+    }
+
+    private func latestReadOutgoingMessage() -> ChatMessage? {
+        messages.last(where: { $0.isMe && isMessageReadByPeer($0) })
+    }
+
+    private func latestUnreadOutgoingMessage() -> ChatMessage? {
+        messages.last(where: { $0.isMe && !isMessageReadByPeer($0) })
+    }
+
+    private func shouldShowDateSeparator(before index: Int) -> Bool {
+        guard messages.indices.contains(index) else {
+            return false
+        }
+
+        guard index > 0 else {
+            return true
+        }
+
+        let previous = messages[index - 1]
+        let current = messages[index]
+        return !Calendar.current.isDate(previous.sentAt, inSameDayAs: current.sentAt)
+    }
+
+    private func dateSeparatorLabel(for date: Date) -> String {
+        let calendar = Calendar.current
+        let formatter = calendar.isDate(date, equalTo: Date(), toGranularity: .year)
+            ? Self.messageDayFormatter
+            : Self.messageDayWithYearFormatter
+        return formatter.string(from: date)
     }
 
     private func messageInsertionTransition(isOutgoing: Bool) -> AnyTransition {
@@ -1716,6 +1792,20 @@ struct ChatDetailView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+
+    private static let messageDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("EEE d MMMM")
+        return formatter
+    }()
+
+    private static let messageDayWithYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("EEE d MMMM y")
+        return formatter
+    }()
 }
 
 private struct PendingChatAttachment {
@@ -1744,15 +1834,18 @@ private struct PendingChatAttachment {
 
     static func from(data: Data, fileName: String, contentType: UTType) -> PendingChatAttachment {
         let mimeType = contentType.preferredMIMEType ?? "application/octet-stream"
+        let resolvedFileName = normalizedFileName(from: fileName, contentType: contentType)
         let size = data.count
 
         if contentType.conforms(to: .image), let image = UIImage(data: data) {
+            let jpegData = image.jpegData(compressionQuality: 0.9) ?? data
+            let jpegFileName = normalizedFileName(from: fileName, contentType: .jpeg)
             return PendingChatAttachment(
-                data: data,
-                fileName: fileName,
-                mimeType: mimeType,
+                data: jpegData,
+                fileName: jpegFileName,
+                mimeType: "image/jpeg",
                 type: .image,
-                size: size,
+                size: jpegData.count,
                 width: Int(image.size.width),
                 height: Int(image.size.height),
                 duration: nil,
@@ -1763,7 +1856,7 @@ private struct PendingChatAttachment {
         if contentType.conforms(to: .movie) || mimeType.hasPrefix("video/") {
             return PendingChatAttachment(
                 data: data,
-                fileName: fileName,
+                fileName: resolvedFileName,
                 mimeType: mimeType,
                 type: .video,
                 size: size,
@@ -1776,7 +1869,7 @@ private struct PendingChatAttachment {
 
         return PendingChatAttachment(
             data: data,
-            fileName: fileName,
+            fileName: resolvedFileName,
             mimeType: mimeType,
             type: .file,
             size: size,
@@ -1785,6 +1878,77 @@ private struct PendingChatAttachment {
             duration: nil,
             previewImage: nil
         )
+    }
+
+    private static func normalizedFileName(from rawFileName: String, contentType: UTType) -> String {
+        let trimmed = rawFileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preferredExt = contentType.preferredFilenameExtension?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let invalidCharacters = CharacterSet(charactersIn: "/:\\")
+        let candidate = trimmed.components(separatedBy: invalidCharacters).last ?? ""
+        let baseName = (candidate as NSString).deletingPathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+        let existingExt = (candidate as NSString).pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBaseName = baseName.isEmpty ? "attachment-\(UUID().uuidString)" : baseName
+        let resolvedExt = existingExt.isEmpty ? preferredExt : existingExt
+
+        guard !resolvedExt.isEmpty else {
+            return resolvedBaseName
+        }
+
+        return "\(resolvedBaseName).\(resolvedExt)"
+    }
+}
+
+private struct ChatTabBarVisibilityController: UIViewControllerRepresentable {
+    let isHidden: Bool
+
+    func makeUIViewController(context: Context) -> Controller {
+        Controller()
+    }
+
+    func updateUIViewController(_ uiViewController: Controller, context: Context) {
+        uiViewController.setTabBarHidden(isHidden)
+    }
+
+    final class Controller: UIViewController {
+        private var wantsHidden = false
+
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            applyTabBarVisibility()
+        }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            applyTabBarVisibility()
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            restoreTabBar()
+        }
+
+        func setTabBarHidden(_ hidden: Bool) {
+            wantsHidden = hidden
+            applyTabBarVisibility()
+        }
+
+        private func applyTabBarVisibility() {
+            guard let tabBar = tabBarController?.tabBar else { return }
+            tabBar.isHidden = wantsHidden
+            tabBar.alpha = wantsHidden ? 0 : 1
+            for subview in tabBar.subviews {
+                subview.alpha = wantsHidden ? 0 : 1
+            }
+        }
+
+        private func restoreTabBar() {
+            guard let tabBar = tabBarController?.tabBar else { return }
+            tabBar.isHidden = false
+            tabBar.alpha = 1
+            for subview in tabBar.subviews {
+                subview.alpha = 1
+            }
+        }
     }
 }
 
