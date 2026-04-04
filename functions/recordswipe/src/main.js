@@ -244,7 +244,7 @@ async function ensureThreadParticipant(config, threadId, userId, permissions) {
     const participantRow = await createRow(config, config.threadParticipantsTableId, participantRowId, {
       threadId,
       userId,
-      role: "member",
+      role: "participant",
       lastReadAt: null,
       muted: false,
       pinned: false,
