@@ -25,14 +25,51 @@ struct ThreadDTO: Identifiable, Sendable {
     let name: String
     let avatar: String
     let isOnline: Bool
+    let lastSeenAt: Date?
+    let otherParticipantReadAt: Date?
+    let participantUserIds: [String]
     let messages: [MessageDTO]
+}
+
+enum MessageTypeDTO: String, Sendable {
+    case text
+    case image
+    case video
+    case file
+}
+
+struct MessageAttachmentDTO: Sendable, Hashable {
+    let fileId: String
+    let name: String?
+    let mimeType: String?
+    let size: Int?
+    let width: Int?
+    let height: Int?
+    let duration: Int?
+}
+
+struct OutgoingAttachmentDTO: Sendable {
+    let data: Data
+    let fileName: String
+    let mimeType: String
+    let type: MessageTypeDTO
+    let size: Int
+    let width: Int?
+    let height: Int?
+    let duration: Int?
 }
 
 struct MessageDTO: Identifiable, Sendable {
     let id: UUID
+    let remoteId: String
     let text: String
+    let messageType: MessageTypeDTO
+    let attachment: MessageAttachmentDTO?
     let isMe: Bool
     let time: String
+    let sentAt: Date
+    let replyToRemoteId: String?
+    let replyPreviewText: String?
 }
 
 enum SwipeDecisionDTO: String, Sendable {
@@ -70,11 +107,15 @@ protocol BackendAPI: Sendable {
     func fetchThreads() async throws -> [ThreadDTO]
     func fetchThread(threadId: String) async throws -> ThreadDTO?
     func createOrGetThread(otherUserId: String) async throws -> ThreadDTO
-    func sendMessage(threadId: String, text: String) async throws -> MessageDTO
+    func sendMessage(threadId: String, text: String, replyToMessageId: String?, attachment: OutgoingAttachmentDTO?) async throws -> MessageDTO
     func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO?
+    func markCurrentUserPresence(isOnline: Bool) async
+    func markThreadRead(threadId: String) async
+    func fetchAttachmentData(fileId: String) async throws -> Data?
 }
 
 extension Notification.Name {
     // Thread list and chat detail use this loose signal to refresh after sends, matches, and new threads.
     static let fyreThreadsDidChange = Notification.Name("fyreThreadsDidChange")
+    static let fyreThreadRemoved = Notification.Name("fyreThreadRemoved")
 }

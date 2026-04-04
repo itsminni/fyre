@@ -32,11 +32,23 @@ struct AppwriteBackendAPI: BackendAPI {
         try await service.createOrGetThreadDTO(otherUserId: otherUserId)
     }
 
-    func sendMessage(threadId: String, text: String) async throws -> MessageDTO {
-        try await service.sendMessage(threadId: threadId, text: text)
+    func sendMessage(threadId: String, text: String, replyToMessageId: String?, attachment: OutgoingAttachmentDTO?) async throws -> MessageDTO {
+        try await service.sendMessage(threadId: threadId, text: text, replyToMessageId: replyToMessageId, attachment: attachment)
     }
 
     func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
         try await service.submitSwipe(otherUserId: otherUserId, otherUserName: otherUserName, decision: decision)
+    }
+
+    func markCurrentUserPresence(isOnline: Bool) async {
+        await service.markCurrentUserPresence(isOnline: isOnline)
+    }
+
+    func markThreadRead(threadId: String) async {
+        await service.markThreadRead(threadId: threadId)
+    }
+
+    func fetchAttachmentData(fileId: String) async throws -> Data? {
+        try await service.fetchAttachmentData(fileId: fileId)
     }
 }

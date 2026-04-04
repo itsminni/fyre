@@ -25,11 +25,14 @@ final class AppServices {
         }
 
         do {
-            // If Appwrite is unavailable, fail.
+            // Prefer the real Appwrite backend, but fall back to an explicit unavailable backend
+            // so the app can surface configuration issues without crashing during startup.
             let configuration = try AppwriteConfiguration.load()
             self.backend = AppwriteBackendAPI(configuration: configuration)
         } catch {
+#if DEBUG
             debugPrint("AppServices initialization failed: \(error.localizedDescription)")
+#endif
             self.backend = UnavailableBackendAPI(reason: error.localizedDescription)
         }
     }
@@ -56,9 +59,11 @@ private struct UnavailableBackendAPI: BackendAPI {
         throw APIError.configuration(reason)
     }
 
-    func sendMessage(threadId: String, text: String) async throws -> MessageDTO {
+    func sendMessage(threadId: String, text: String, replyToMessageId: String?, attachment: OutgoingAttachmentDTO?) async throws -> MessageDTO {
         _ = threadId
         _ = text
+        _ = replyToMessageId
+        _ = attachment
         throw APIError.configuration(reason)
     }
 
@@ -66,6 +71,19 @@ private struct UnavailableBackendAPI: BackendAPI {
         _ = otherUserId
         _ = otherUserName
         _ = decision
+        throw APIError.configuration(reason)
+    }
+
+    func markCurrentUserPresence(isOnline: Bool) async {
+        _ = isOnline
+    }
+
+    func markThreadRead(threadId: String) async {
+        _ = threadId
+    }
+
+    func fetchAttachmentData(fileId: String) async throws -> Data? {
+        _ = fileId
         throw APIError.configuration(reason)
     }
 }
