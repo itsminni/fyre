@@ -11,9 +11,54 @@ import UIKit
 // Simple chat models used only for the UI layer in this test
 struct ChatMessage: Identifiable, Hashable {
     let id: UUID
+    let remoteId: String
     let text: String
+    let messageType: MessageTypeDTO
+    let attachment: MessageAttachmentDTO?
     let isMe: Bool
     let time: String
+    let sentAt: Date
+    let replyToRemoteId: String?
+    let replyPreviewText: String?
+
+    init(
+        id: UUID,
+        remoteId: String,
+        text: String,
+        messageType: MessageTypeDTO,
+        attachment: MessageAttachmentDTO?,
+        isMe: Bool,
+        time: String,
+        sentAt: Date,
+        replyToRemoteId: String? = nil,
+        replyPreviewText: String? = nil
+    ) {
+        self.id = id
+        self.remoteId = remoteId
+        self.text = text
+        self.messageType = messageType
+        self.attachment = attachment
+        self.isMe = isMe
+        self.time = time
+        self.sentAt = sentAt
+        self.replyToRemoteId = replyToRemoteId
+        self.replyPreviewText = replyPreviewText
+    }
+
+    init(dto: MessageDTO) {
+        self.init(
+            id: dto.id,
+            remoteId: dto.remoteId,
+            text: dto.text,
+            messageType: dto.messageType,
+            attachment: dto.attachment,
+            isMe: dto.isMe,
+            time: dto.time,
+            sentAt: dto.sentAt,
+            replyToRemoteId: dto.replyToRemoteId,
+            replyPreviewText: dto.replyPreviewText
+        )
+    }
 }
 
 struct ChatThread: Identifiable, Hashable {
@@ -22,10 +67,25 @@ struct ChatThread: Identifiable, Hashable {
     let name: String
     let avatar: String
     let isOnline: Bool
+    let lastSeenAt: Date?
+    let otherParticipantReadAt: Date?
+    let participantUserIds: [String]
     let messages: [ChatMessage]
 
     var lastMessage: String {
-        messages.last?.text ?? ""
+        guard let last = messages.last else { return "" }
+        if !last.text.isEmpty { return last.text }
+
+        switch last.messageType {
+        case .image:
+            return L10n.tr("chat.attachment.photo")
+        case .video:
+            return L10n.tr("chat.attachment.video")
+        case .file:
+            return last.attachment?.name ?? L10n.tr("chat.attachment.file")
+        case .text:
+            return ""
+        }
     }
 
     var lastTime: String {
@@ -83,6 +143,7 @@ struct MessagesView: View {
                 }
             }
             .navigationTitle(L10n.tr("messages.navigationTitle"))
+            .navigationBarTitleDisplayMode(.large)
             .alert(item: $threadPendingDeletion) { thread in
                 Alert(
                     title: Text(L10n.tr("messages.delete.confirmTitle")),
@@ -97,9 +158,6 @@ struct MessagesView: View {
         .task(id: reloadToken) {
             await loadThreads()
         }
-        .refreshable {
-            await loadThreads()
-        }
         .onAppear {
             startRealtime()
         }
@@ -110,6 +168,13 @@ struct MessagesView: View {
             // Swipe matches and chat sends publish this signal so the inbox can refresh lazily.
             reloadToken = UUID()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .fyreThreadRemoved)) { notification in
+            guard let remoteId = notification.object as? String else { return }
+            threads.removeAll { $0.remoteId == remoteId }
+        }
+        .background {
+            TabBarRestoreController()
+        }
     }
 
     private func loadThreads() async {
@@ -118,9 +183,9 @@ struct MessagesView: View {
             let existingNames = Dictionary(uniqueKeysWithValues: threads.map { ($0.remoteId, $0.name) })
             threads = dtos.map { dto in
                 let resolvedName: String
-                if isPlaceholderThreadName(dto.name),
+                if ThreadNaming.isPlaceholderThreadName(dto.name),
                    let cachedName = existingNames[dto.remoteId],
-                   !isPlaceholderThreadName(cachedName) {
+                   !ThreadNaming.isPlaceholderThreadName(cachedName) {
                     resolvedName = cachedName
                 } else {
                     resolvedName = dto.name
@@ -132,9 +197,10 @@ struct MessagesView: View {
                     name: resolvedName,
                     avatar: dto.avatar,
                     isOnline: dto.isOnline,
-                    messages: dto.messages.map {
-                        ChatMessage(id: $0.id, text: $0.text, isMe: $0.isMe, time: $0.time)
-                    }
+                    lastSeenAt: dto.lastSeenAt,
+                    otherParticipantReadAt: dto.otherParticipantReadAt,
+                    participantUserIds: dto.participantUserIds,
+                    messages: dto.messages.map(ChatMessage.init(dto:))
                 )
             }
         } catch {
@@ -142,11 +208,6 @@ struct MessagesView: View {
             debugPrint("Inbox refresh failed: \(error.localizedDescription)")
 #endif
         }
-    }
-
-    private func isPlaceholderThreadName(_ name: String) -> Bool {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty || trimmed == "Match" || trimmed == "Fyre match"
     }
 
     private func deleteThread(_ thread: ChatThread) {
@@ -182,9 +243,29 @@ struct MessagesView: View {
     private func scheduleRealtimeReload() {
         realtimeReloadTask?.cancel()
         realtimeReloadTask = Task {
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await Task.sleep(nanoseconds: 100_000_000)
             guard !Task.isCancelled else { return }
             await loadThreads()
+        }
+    }
+}
+
+private struct TabBarRestoreController: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Controller {
+        Controller()
+    }
+
+    func updateUIViewController(_ uiViewController: Controller, context: Context) {}
+
+    final class Controller: UIViewController {
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            guard let tabBar = tabBarController?.tabBar else { return }
+            tabBar.isHidden = false
+            tabBar.alpha = 1
+            for subview in tabBar.subviews {
+                subview.alpha = 1
+            }
         }
     }
 }
@@ -220,10 +301,37 @@ private struct ChatThreadRow: View {
                     Text(L10n.tr("messages.online"))
                         .font(.caption2)
                         .foregroundStyle(.green)
+                } else if let lastSeenAt = thread.lastSeenAt {
+                    Text(String(format: L10n.tr("messages.lastSeen"), lastSeenLabel(for: lastSeenAt)))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
     }
+
+    private func lastSeenLabel(for date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return Self.timeFormatter.string(from: date)
+        }
+
+        return Self.dateTimeFormatter.string(from: date)
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "it_IT")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "it_IT")
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }
 
 struct ChatAvatarView: View {
