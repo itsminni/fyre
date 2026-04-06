@@ -12,6 +12,10 @@ import UniformTypeIdentifiers
 import AVKit
 import AVFoundation
 import QuickLook
+import Combine
+import Combine
+import Combine
+import Combine
 
 private extension Color {
     var perceivedLuminance: Double {
@@ -2377,10 +2381,17 @@ struct ChatDetailView: View {
 
 @MainActor
 private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    let objectWillChange: ObservableObjectPublisher
+
     @Published private(set) var activeKey: String?
     @Published private(set) var loadingKey: String?
 
     private var player: AVAudioPlayer?
+
+    override init() {
+        objectWillChange = ObservableObjectPublisher()
+        super.init()
+    }
 
     func togglePendingAttachment(_ attachment: PendingChatAttachment, key: String) async {
         if activeKey == key {
@@ -2459,6 +2470,8 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
 
 @MainActor
 private final class ChatVoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
+    let objectWillChange: ObservableObjectPublisher
+
     @Published private(set) var isRecording = false
     @Published private(set) var elapsedDuration: TimeInterval = 0
 
@@ -2472,6 +2485,11 @@ private final class ChatVoiceRecorder: NSObject, ObservableObject, AVAudioRecord
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var timer: Timer?
+
+    override init() {
+        objectWillChange = ObservableObjectPublisher()
+        super.init()
+    }
 
     func start() async throws {
         guard !isRecording else { return }

@@ -133,6 +133,10 @@
 "account.showIntent.hint" = "Mostra cosa cerca il profilo nelle card discovery.";
 "account.showInterests" = "Mostra interessi";
 "account.showInterests.hint" = "Mostra i tag principali degli interessi nelle card discovery.";
+"account.showInstagramTag" = "Mostra tag Instagram";
+"account.showInstagramTag.hint" = "Mostra i tag Instagram nelle card discovery quando disponibili.";
+"account.showSpotifyTag" = "Mostra tag Spotify";
+"account.showSpotifyTag.hint" = "Mostra i tag Spotify nelle card discovery quando disponibili.";
 "account.showSocialTags" = "Mostra tag social";
 "account.showSocialTags.hint" = "Mostra i tag Instagram e Spotify nelle card discovery quando disponibili.";
 "account.preferences.hint" = "Queste impostazioni cambiano solo come vedi le card dentro l'app.";

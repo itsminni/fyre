@@ -76,7 +76,8 @@ struct AccountView: View {
     @AppStorage("settings_show_distance") private var showDistance = true
     @AppStorage("settings_show_intent") private var showIntent = true
     @AppStorage("settings_show_interests") private var showInterests = true
-    @AppStorage("settings_show_social_tags") private var showSocialTags = true
+    @AppStorage("settings_show_instagram_tag") private var showInstagramTag = true
+    @AppStorage("settings_show_spotify_tag") private var showSpotifyTag = true
     @AppStorage("settings_chat_background_style") private var chatBackgroundStyle = ChatBackgroundStyle.defaultDark.rawValue
     @AppStorage("settings_chat_background_brightness") private var chatBackgroundBrightness = 0.0
     @AppStorage("settings_chat_background_color_1") private var chatBackgroundColor1Hex = "#3F4755"
@@ -620,9 +621,14 @@ struct AccountView: View {
                             isOn: $showInterests
                         )
                         SettingsToggleField(
-                            title: L10n.tr("account.showSocialTags"),
-                            subtitle: L10n.tr("account.showSocialTags.hint"),
-                            isOn: $showSocialTags
+                            title: L10n.tr("account.showInstagramTag"),
+                            subtitle: L10n.tr("account.showInstagramTag.hint"),
+                            isOn: $showInstagramTag
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showSpotifyTag"),
+                            subtitle: L10n.tr("account.showSpotifyTag.hint"),
+                            isOn: $showSpotifyTag
                         )
                     }
                 }
@@ -1750,6 +1756,27 @@ private struct AccountPrimaryButtonStyle: ButtonStyle {
                 in: RoundedRectangle(cornerRadius: 20, style: .continuous)
             )
             .shadow(color: tint.opacity(0.22), radius: 18, y: 10)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct AccountSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            )
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
     }

@@ -35,7 +35,8 @@ struct SwipeHomeView: View {
     @AppStorage("settings_show_distance") private var showDistance = true
     @AppStorage("settings_show_intent") private var showIntent = true
     @AppStorage("settings_show_interests") private var showInterests = true
-    @AppStorage("settings_show_social_tags") private var showSocialTags = true
+    @AppStorage("settings_show_instagram_tag") private var showInstagramTag = true
+    @AppStorage("settings_show_spotify_tag") private var showSpotifyTag = true
     @State private var profiles: [SwipeProfile] = []
     @State private var dragOffset: CGSize = .zero
     @State private var isAnimatingDecision = false
@@ -170,14 +171,12 @@ struct SwipeHomeView: View {
                     }
                 }
 
-                if showSocialTags {
-                    let socialLabels = socialLabels(for: profile)
-                    if !socialLabels.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(socialLabels, id: \.self) { socialLabel in
-                                    tag(text: socialLabel, accent: .orange)
-                                }
+                let socialLabels = socialLabels(for: profile)
+                if !socialLabels.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(socialLabels, id: \.self) { socialLabel in
+                                tag(text: socialLabel, accent: .orange)
                             }
                         }
                     }
@@ -414,12 +413,14 @@ struct SwipeHomeView: View {
     private func socialLabels(for profile: SwipeProfile) -> [String] {
         var labels: [String] = []
 
-        if let instagramTag = normalizedSocialTag(profile.instagramTag) {
-            labels.append("\(L10n.tr(\"profile.instagramTag\")): @\(instagramTag)")
+        if showInstagramTag,
+           let instagramTag = normalizedSocialTag(profile.instagramTag) {
+            labels.append("\(L10n.tr("profile.instagramTag")): @\(instagramTag)")
         }
 
-        if let spotifyTag = normalizedSocialTag(profile.spotifyTag) {
-            labels.append("\(L10n.tr(\"profile.spotifyTag\")): @\(spotifyTag)")
+        if showSpotifyTag,
+           let spotifyTag = normalizedSocialTag(profile.spotifyTag) {
+            labels.append("\(L10n.tr("profile.spotifyTag")): @\(spotifyTag)")
         }
 
         return labels

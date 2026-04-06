@@ -170,7 +170,7 @@ struct User: Codable, Sendable {
         self.password = password
     }
 
-    static func normalizedSocialTag(_ value: String?) -> String? {
+    nonisolated static func normalizedSocialTag(_ value: String?) -> String? {
         guard let value else { return nil }
 
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

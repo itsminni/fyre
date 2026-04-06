@@ -129,6 +129,10 @@
 "account.showIntent.hint" = "Display what a profile is looking for on discovery cards.";
 "account.showInterests" = "Show interests";
 "account.showInterests.hint" = "Display the top shared-context tags on discovery cards.";
+"account.showInstagramTag" = "Show Instagram tag";
+"account.showInstagramTag.hint" = "Display Instagram tags on discovery cards when available.";
+"account.showSpotifyTag" = "Show Spotify tag";
+"account.showSpotifyTag.hint" = "Display Spotify tags on discovery cards when available.";
 "account.showSocialTags" = "Show social tags";
 "account.showSocialTags.hint" = "Display Instagram and Spotify tags on discovery cards when available.";
 "account.preferences.hint" = "These only affect how profile cards look in the app.";
