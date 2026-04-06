@@ -12,7 +12,7 @@ Repository structure
 - `ios/`: iOS app and SwiftUI components.
 - `android/`: Android app and Compose navigation.
 - `web/`: web frontend in TypeScript (React), mock-only (no real backend calls).
-- `backend/`: placeholder area for future services/APIs.
+- `functions/`: area for APIs.
 - `docs/`: project materials and support notes (prompts and planning).
 
 Documentation
