@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Combine
 import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
@@ -2873,9 +2872,13 @@ private struct ChatAttachmentPreview: Identifiable {
         let directory = fileManager.temporaryDirectory.appendingPathComponent("ChatAttachmentPreview", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let cleanedBaseName = (fileName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            ? fileName!
-            : UUID().uuidString)
+        let trimmedFileName = fileName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedBaseName: String
+        if let trimmedFileName, !trimmedFileName.isEmpty {
+            cleanedBaseName = trimmedFileName
+        } else {
+            cleanedBaseName = UUID().uuidString
+        }
         let baseNSString = cleanedBaseName as NSString
         let stem = baseNSString.deletingPathExtension.isEmpty ? cleanedBaseName : baseNSString.deletingPathExtension
         let ext = preferredExtension(fileName: fileName, mimeType: mimeType)

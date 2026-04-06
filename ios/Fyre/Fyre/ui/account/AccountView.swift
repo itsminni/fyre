@@ -709,6 +709,12 @@ struct AccountView: View {
                         }
                         .buttonStyle(AccountPrimaryButtonStyle())
 
+                        Button(action: openEmailChangeMail) {
+                            Label(L10n.tr("profile.security.changeEmailAction"), systemImage: "at.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(AccountSecondaryButtonStyle())
+
                         if let securityMessage {
                             Text(securityMessage)
                                 .font(.footnote)
@@ -1179,6 +1185,32 @@ struct AccountView: View {
         components.queryItems = [
             URLQueryItem(name: "subject", value: "Password reset request"),
             URLQueryItem(name: "body", value: "Profile email: \(email)")
+        ]
+
+        guard let url = components.url else {
+            securityMessage = L10n.tr("profile.security.mailFailed")
+            return
+        }
+
+        openURL(url) { accepted in
+            securityMessage = accepted
+            ? L10n.tr("profile.security.mailOpened")
+            : L10n.tr("profile.security.mailFailed")
+        }
+    }
+
+    private func openEmailChangeMail() {
+        guard let email = store.currentUser?.email else {
+            securityMessage = L10n.tr("profile.error.noCurrentUser")
+            return
+        }
+
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = supportEmail
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "Email change request"),
+            URLQueryItem(name: "body", value: "Current profile email: \(email)\nNew email: ")
         ]
 
         guard let url = components.url else {

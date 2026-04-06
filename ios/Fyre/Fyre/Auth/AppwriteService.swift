@@ -1,5 +1,5 @@
 //
-//  AppwriteRealtimeService.swift
+//  AppwriteService.swift
 //  Fyre
 //
 //  Created by Gabriele Mininni on 04/04/26.

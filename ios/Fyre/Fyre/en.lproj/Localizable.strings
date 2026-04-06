@@ -197,6 +197,7 @@
 "profile.email" = "Email";
 "profile.security.resetDescription" = "To reset the password, contact support at support@example.com and include the profile email below.";
 "profile.security.resetAction" = "Request password reset";
+"profile.security.changeEmailAction" = "Request email change";
 "profile.security.mailOpened" = "Mail app opened.";
 "profile.security.mailFailed" = "Unable to open the Mail app on this device.";
 "profile.complete" = "Complete profile";

@@ -1,24 +1,34 @@
 # Fyre
 
-Fyre is a mobile project with two clients:
-- iOS in SwiftUI
-- Android in Jetpack Compose
+Fyre is a multi-client social/dating project with:
+- iOS app in SwiftUI
+- Android app in Jetpack Compose
+- Web prototype in React + TypeScript (Vite)
 
-The repository now also contains a web frontend prototype built with React + TypeScript (Vite-style structure) that recreates the visible iOS flows using only client-side state and mock services.
+The product focus is profile discovery, messaging, event participation, and account management.
 
-The goal is to build an app focused on profile discovery, chat, and account management, starting from a local foundation and gradually moving to real backend and database services.
+## Repository structure
 
-Repository structure
-- `ios/`: iOS app and SwiftUI components.
-- `android/`: Android app and Compose navigation.
-- `web/`: web frontend in TypeScript (React), mock-only (no real backend calls).
-- `functions/`: area for APIs.
-- `docs/`: project materials and support notes (prompts and planning).
+- `ios/`: Apple app source, Xcode project, tests.
+- `android/`: Android app source and Gradle project.
+- `web/`: React + TypeScript frontend prototype (for now).
+- `functions/`: backend cloud functions used by the app domain.
+- `docs/`: notes and project support material.
 
-Documentation
-- `docs/` contains planning materials and useful notes, including AI prompts used during exploration.
+## Quick start
 
-Web run commands
+### iOS
+1. Open `ios/Fyre/Fyre.xcodeproj` in Xcode.
+2. Select scheme `Fyre` and a simulator/device.
+3. Run the app.
+
+More details about iOS architecture and flows: `ios/README.md`.
+
+### Android
+1. `cd android/Fyre`
+2. `./gradlew assembleDebug`
+
+### Web
 1. `cd web`
 2. `npm install`
 3. `npm run dev`

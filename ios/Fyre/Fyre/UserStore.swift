@@ -867,7 +867,7 @@ final class UserStore: @unchecked Sendable {
             }
         }
 
-        return await registerForMainEvent()
+        return registerForMainEventLocally()
     }
 
     @MainActor
@@ -897,7 +897,7 @@ final class UserStore: @unchecked Sendable {
             }
         }
 
-        return await cancelMainEventRegistration()
+        return cancelMainEventRegistrationLocally()
     }
 
     @MainActor
@@ -977,7 +977,7 @@ final class UserStore: @unchecked Sendable {
         await refreshRemoteMainEventState()
     }
 
-    func registerForMainEvent() -> String? {
+    private func registerForMainEventLocally() -> String? {
         guard let user = currentUser else { return L10n.tr("events.error.loginRequired") }
         guard !isCurrentUserRegisteredForMainEvent else { return L10n.tr("events.error.alreadyRegistered") }
         guard !isCurrentUserWaitingForMainEvent else { return L10n.tr("events.error.alreadyWaitlisted") }
@@ -1007,7 +1007,7 @@ final class UserStore: @unchecked Sendable {
         return nil
     }
 
-    func cancelMainEventRegistration() -> String? {
+    private func cancelMainEventRegistrationLocally() -> String? {
         guard let user = currentUser else { return L10n.tr("events.error.loginRequired") }
 
         let now = Date()
