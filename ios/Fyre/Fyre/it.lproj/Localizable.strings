@@ -133,6 +133,8 @@
 "account.showIntent.hint" = "Mostra cosa cerca il profilo nelle card discovery.";
 "account.showInterests" = "Mostra interessi";
 "account.showInterests.hint" = "Mostra i tag principali degli interessi nelle card discovery.";
+"account.showSocialTags" = "Mostra tag social";
+"account.showSocialTags.hint" = "Mostra i tag Instagram e Spotify nelle card discovery quando disponibili.";
 "account.preferences.hint" = "Queste impostazioni cambiano solo come vedi le card dentro l'app.";
 "account.notifications.hint" = "Notifiche locali per match, nuovi messaggi e promemoria eventi.";
 "account.notifications.masterHint" = "Attiva o disattiva tutte le notifiche di Fyre.";
@@ -187,8 +189,11 @@
 "profile.section.required" = "Obbligatorio";
 "profile.section.discovery" = "Scoperta";
 "profile.section.discoveryHint" = "Questi campi cambiano chi vedi e quanto i profili risultano rilevanti.";
+"profile.section.social" = "Social";
 "profile.section.preferences" = "Preferenze";
 "profile.section.preferencesHint" = "Questi dettagli restano modificabili.";
+"profile.instagramTag" = "Tag Instagram";
+"profile.spotifyTag" = "Tag Spotify";
 "profile.email" = "Email";
 "profile.security.resetDescription" = "Per resettare la password, invia una mail al supporto a support@example.com includendo l'email del profilo qui sotto.";
 "profile.security.resetAction" = "Richiedi reset password";

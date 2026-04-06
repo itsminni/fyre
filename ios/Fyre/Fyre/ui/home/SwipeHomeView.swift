@@ -17,6 +17,8 @@ private struct SwipeProfile: Identifiable {
     let distanceKm: Int?
     let intent: UserIntent?
     let interests: [String]
+    let instagramTag: String?
+    let spotifyTag: String?
     let avatarURL: URL?
 }
 
@@ -33,6 +35,7 @@ struct SwipeHomeView: View {
     @AppStorage("settings_show_distance") private var showDistance = true
     @AppStorage("settings_show_intent") private var showIntent = true
     @AppStorage("settings_show_interests") private var showInterests = true
+    @AppStorage("settings_show_social_tags") private var showSocialTags = true
     @State private var profiles: [SwipeProfile] = []
     @State private var dragOffset: CGSize = .zero
     @State private var isAnimatingDecision = false
@@ -166,6 +169,19 @@ struct SwipeHomeView: View {
                         }
                     }
                 }
+
+                if showSocialTags {
+                    let socialLabels = socialLabels(for: profile)
+                    if !socialLabels.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(socialLabels, id: \.self) { socialLabel in
+                                    tag(text: socialLabel, accent: .orange)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         .padding()
@@ -289,6 +305,8 @@ struct SwipeHomeView: View {
                     distanceKm: $0.distanceKm,
                     intent: $0.intent,
                     interests: $0.interests,
+                    instagramTag: $0.instagramTag,
+                    spotifyTag: $0.spotifyTag,
                     avatarURL: $0.avatarURL
                 )
             }
@@ -391,5 +409,33 @@ struct SwipeHomeView: View {
             return "\(profile.name), \(profile.age)"
         }
         return profile.name
+    }
+
+    private func socialLabels(for profile: SwipeProfile) -> [String] {
+        var labels: [String] = []
+
+        if let instagramTag = normalizedSocialTag(profile.instagramTag) {
+            labels.append("\(L10n.tr(\"profile.instagramTag\")): @\(instagramTag)")
+        }
+
+        if let spotifyTag = normalizedSocialTag(profile.spotifyTag) {
+            labels.append("\(L10n.tr(\"profile.spotifyTag\")): @\(spotifyTag)")
+        }
+
+        return labels
+    }
+
+    private func normalizedSocialTag(_ value: String?) -> String? {
+        guard let value else { return nil }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let withoutAtPrefix = String(trimmed.drop(while: { $0 == "@" }))
+        let withoutWhitespace = withoutAtPrefix.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        let withoutAt = withoutWhitespace.replacingOccurrences(of: "@", with: "")
+        guard !withoutAt.isEmpty else { return nil }
+
+        return String(withoutAt.prefix(64))
     }
 }

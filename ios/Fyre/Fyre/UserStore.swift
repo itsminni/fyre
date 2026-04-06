@@ -103,6 +103,8 @@ struct User: Codable, Sendable {
     var bio: String?
     var intent: UserIntent?
     var interests: String?
+    var instagramTag: String?
+    var spotifyTag: String?
     var avatarFileId: String?
     var profileImageData: Data?
 
@@ -143,6 +145,14 @@ struct User: Codable, Sendable {
         interests?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
+    nonisolated var normalizedInstagramTag: String {
+        Self.normalizedSocialTag(instagramTag) ?? ""
+    }
+
+    nonisolated var normalizedSpotifyTag: String {
+        Self.normalizedSocialTag(spotifyTag) ?? ""
+    }
+
     nonisolated var isProfileComplete: Bool {
         guard let firstName, !firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard let city, !city.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -158,6 +168,20 @@ struct User: Codable, Sendable {
     nonisolated init(email: String, password: String) {
         self.email = email
         self.password = password
+    }
+
+    static func normalizedSocialTag(_ value: String?) -> String? {
+        guard let value else { return nil }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let withoutAtPrefix = String(trimmed.drop(while: { $0 == "@" }))
+        let withoutWhitespace = withoutAtPrefix.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        let withoutAt = withoutWhitespace.replacingOccurrences(of: "@", with: "")
+        guard !withoutAt.isEmpty else { return nil }
+
+        return String(withoutAt.prefix(64))
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -181,6 +205,8 @@ struct User: Codable, Sendable {
         case bio
         case intent
         case interests
+        case instagramTag
+        case spotifyTag
         case avatarFileId
     }
 
@@ -206,6 +232,8 @@ struct User: Codable, Sendable {
         bio = try c.decodeIfPresent(String.self, forKey: .bio)
         intent = try c.decodeIfPresent(UserIntent.self, forKey: .intent)
         interests = try c.decodeIfPresent(String.self, forKey: .interests)
+        instagramTag = try c.decodeIfPresent(String.self, forKey: .instagramTag)
+        spotifyTag = try c.decodeIfPresent(String.self, forKey: .spotifyTag)
         avatarFileId = try c.decodeIfPresent(String.self, forKey: .avatarFileId)
         profileImageData = nil
     }
@@ -232,6 +260,8 @@ struct User: Codable, Sendable {
         try c.encodeIfPresent(bio, forKey: .bio)
         try c.encodeIfPresent(intent, forKey: .intent)
         try c.encodeIfPresent(interests, forKey: .interests)
+        try c.encodeIfPresent(instagramTag, forKey: .instagramTag)
+        try c.encodeIfPresent(spotifyTag, forKey: .spotifyTag)
         try c.encodeIfPresent(avatarFileId, forKey: .avatarFileId)
     }
 }
@@ -605,6 +635,8 @@ final class UserStore: @unchecked Sendable {
         bio: String,
         intent: UserIntent?,
         interests: String,
+        instagramTag: String,
+        spotifyTag: String,
         preferredGenders: [UserGender],
         minPreferredAge: Int,
         maxPreferredAge: Int,
@@ -618,6 +650,8 @@ final class UserStore: @unchecked Sendable {
         let normalizedCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedInterests = interests.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedInstagramTag = User.normalizedSocialTag(instagramTag)
+        let normalizedSpotifyTag = User.normalizedSocialTag(spotifyTag)
         let normalizedPreferredGenders = UserGender.allCases.filter { preferredGenders.contains($0) }
         let normalizedMinAge = min(max(minPreferredAge, 18), 98)
         let normalizedMaxAge = max(min(maxPreferredAge, 99), max(normalizedMinAge + 1, 19))
@@ -668,6 +702,8 @@ final class UserStore: @unchecked Sendable {
         user.bio = normalizedBio
         user.intent = intent
         user.interests = normalizedInterests
+        user.instagramTag = normalizedInstagramTag
+        user.spotifyTag = normalizedSpotifyTag
 
         if Self.shouldUseAppwrite {
             guard let appwriteService else {

@@ -22,6 +22,8 @@ struct AccountView: View {
         let bio: String
         let intent: UserIntent
         let interests: String
+        let instagramTag: String
+        let spotifyTag: String
         let preferredGenders: [UserGender]
         let minPreferredAge: Int
         let maxPreferredAge: Int
@@ -74,6 +76,7 @@ struct AccountView: View {
     @AppStorage("settings_show_distance") private var showDistance = true
     @AppStorage("settings_show_intent") private var showIntent = true
     @AppStorage("settings_show_interests") private var showInterests = true
+    @AppStorage("settings_show_social_tags") private var showSocialTags = true
     @AppStorage("settings_chat_background_style") private var chatBackgroundStyle = ChatBackgroundStyle.defaultDark.rawValue
     @AppStorage("settings_chat_background_brightness") private var chatBackgroundBrightness = 0.0
     @AppStorage("settings_chat_background_color_1") private var chatBackgroundColor1Hex = "#3F4755"
@@ -94,6 +97,8 @@ struct AccountView: View {
     @State private var bio = ""
     @State private var intent: UserIntent = .relationship
     @State private var interests = ""
+    @State private var instagramTag = ""
+    @State private var spotifyTag = ""
     @State private var preferredGenders = Set(UserStore.defaultPreferredGenders)
     @State private var minPreferredAge = 20
     @State private var maxPreferredAge = 32
@@ -426,6 +431,8 @@ struct AccountView: View {
                         ProfileToggleField(title: L10n.tr("profile.smokes"), isOn: $smokes)
                         ProfileToggleField(title: L10n.tr("profile.drinks"), isOn: $drinks)
                         ProfileTextField(title: L10n.tr("profile.interests"), text: $interests)
+                        ProfileTextField(title: L10n.tr("profile.instagramTag"), text: $instagramTag)
+                        ProfileTextField(title: L10n.tr("profile.spotifyTag"), text: $spotifyTag)
                     }
                 }
 
@@ -611,6 +618,11 @@ struct AccountView: View {
                             title: L10n.tr("account.showInterests"),
                             subtitle: L10n.tr("account.showInterests.hint"),
                             isOn: $showInterests
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showSocialTags"),
+                            subtitle: L10n.tr("account.showSocialTags.hint"),
+                            isOn: $showSocialTags
                         )
                     }
                 }
@@ -918,6 +930,8 @@ struct AccountView: View {
         bio = store.currentUser?.normalizedBio ?? ""
         intent = store.currentUser?.intent ?? .relationship
         interests = store.currentUser?.normalizedInterests ?? ""
+        instagramTag = store.currentUser?.normalizedInstagramTag ?? ""
+        spotifyTag = store.currentUser?.normalizedSpotifyTag ?? ""
         preferredGenders = Set(store.currentUser?.resolvedPreferredGenders ?? UserStore.defaultPreferredGenders)
         minPreferredAge = store.currentUser?.resolvedMinPreferredAge ?? 20
         maxPreferredAge = store.currentUser?.resolvedMaxPreferredAge ?? 32
@@ -936,6 +950,8 @@ struct AccountView: View {
             bio: bio,
             intent: intent,
             interests: interests,
+            instagramTag: instagramTag,
+            spotifyTag: spotifyTag,
             preferredGenders: orderedPreferredGenders,
             minPreferredAge: minPreferredAge,
             maxPreferredAge: maxPreferredAge,
@@ -955,6 +971,8 @@ struct AccountView: View {
             bio: user.normalizedBio,
             intent: user.intent ?? .relationship,
             interests: user.normalizedInterests,
+            instagramTag: user.normalizedInstagramTag,
+            spotifyTag: user.normalizedSpotifyTag,
             preferredGenders: user.resolvedPreferredGenders,
             minPreferredAge: user.resolvedMinPreferredAge,
             maxPreferredAge: user.resolvedMaxPreferredAge,
@@ -1102,6 +1120,8 @@ struct AccountView: View {
             bio: bio,
             intent: intent,
             interests: interests,
+            instagramTag: instagramTag,
+            spotifyTag: spotifyTag,
             preferredGenders: orderedPreferredGenders,
             minPreferredAge: minPreferredAge,
             maxPreferredAge: maxPreferredAge,

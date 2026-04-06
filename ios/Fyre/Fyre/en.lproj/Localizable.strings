@@ -129,6 +129,8 @@
 "account.showIntent.hint" = "Display what a profile is looking for on discovery cards.";
 "account.showInterests" = "Show interests";
 "account.showInterests.hint" = "Display the top shared-context tags on discovery cards.";
+"account.showSocialTags" = "Show social tags";
+"account.showSocialTags.hint" = "Display Instagram and Spotify tags on discovery cards when available.";
 "account.preferences.hint" = "These only affect how profile cards look in the app.";
 "account.notifications.hint" = "Local notifications for matches, new messages, and event reminders.";
 "account.notifications.masterHint" = "Turn all Fyre notifications on or off.";
@@ -187,8 +189,11 @@
 "profile.section.required" = "Required";
 "profile.section.discovery" = "Discovery";
 "profile.section.discoveryHint" = "These change who you see and how relevant profiles feel.";
+"profile.section.social" = "Social";
 "profile.section.preferences" = "Preferences";
 "profile.section.preferencesHint" = "These stay editable and add context without overcomplicating the profile.";
+"profile.instagramTag" = "Instagram tag";
+"profile.spotifyTag" = "Spotify tag";
 "profile.email" = "Email";
 "profile.security.resetDescription" = "To reset the password, contact support at support@example.com and include the profile email below.";
 "profile.security.resetAction" = "Request password reset";

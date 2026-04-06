@@ -182,6 +182,8 @@ function projectDiscoverProfile(row, distanceKm) {
     distanceKm: roundedDistance(distanceKm),
     bio: firstNonEmpty([row.bio]),
     interests: firstNonEmpty([row.interests]),
+    instagramTag: normalizeSocialTag(row.instagramTag),
+    spotifyTag: normalizeSocialTag(row.spotifyTag),
     avatarFileId: row.avatarFileId ?? null
   };
 }
@@ -344,6 +346,23 @@ function normalizeDistanceKm(value) {
 function normalizeCity(value) {
   const city = asString(value);
   return city ? city.toLowerCase() : null;
+}
+
+function normalizeSocialTag(value) {
+  const rawValue = asString(value);
+  if (!rawValue) {
+    return null;
+  }
+
+  const withoutAtPrefix = rawValue.replace(/^@+/, "");
+  const withoutWhitespace = withoutAtPrefix.replace(/\s+/g, "");
+  const sanitized = withoutWhitespace.replace(/@/g, "").trim();
+
+  if (!sanitized) {
+    return null;
+  }
+
+  return sanitized.slice(0, 64);
 }
 
 function numberValue(value) {

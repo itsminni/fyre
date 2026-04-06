@@ -492,6 +492,8 @@ actor AppwriteService {
         user.bio = stringValue(forKey: "bio", in: profileRow)
         user.intent = intentValue(for: stringValue(forKey: "intent", in: profileRow))
         user.interests = stringValue(forKey: "interests", in: profileRow)
+        user.instagramTag = socialTagValue(forKey: "instagramTag", in: profileRow)
+        user.spotifyTag = socialTagValue(forKey: "spotifyTag", in: profileRow)
         user.avatarFileId = stringValue(forKey: "avatarFileId", in: profileRow)
         user.profileImageData = avatarData
         return user
@@ -1186,6 +1188,8 @@ actor AppwriteService {
             "bio": nullOrString(user.normalizedBio),
             "intent": nullOrString(stringValue(for: user.intent)),
             "interests": nullOrString(user.normalizedInterests),
+            "instagramTag": nullOrString(user.normalizedInstagramTag),
+            "spotifyTag": nullOrString(user.normalizedSpotifyTag),
             "profileReady": user.isProfileComplete,
             "avatarFileId": nullOrString(user.avatarFileId)
         ]
@@ -1215,6 +1219,8 @@ actor AppwriteService {
             distanceKm: intValue(forKey: "distanceKm", in: row),
             intent: intentValue(for: stringValue(forKey: "intent", in: row)),
             interests: interestListValue(for: row),
+            instagramTag: socialTagValue(forKey: "instagramTag", in: row),
+            spotifyTag: socialTagValue(forKey: "spotifyTag", in: row),
             avatarURL: avatarURL(fileId: stringValue(forKey: "avatarFileId", in: row))
         )
     }
@@ -1306,6 +1312,10 @@ actor AppwriteService {
 
     private func interestListValue(for row: [String: Any]) -> [String] {
         interestListValue(for: stringValue(forKey: "interests", in: row))
+    }
+
+    private func socialTagValue(forKey key: String, in row: [String: Any]?) -> String? {
+        normalizedSocialTag(stringValue(forKey: key, in: row))
     }
 
     private func ageValue(from date: Date?) -> Int {
@@ -1463,6 +1473,20 @@ actor AppwriteService {
             .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == "|" })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private func normalizedSocialTag(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let withoutAtPrefix = String(trimmed.drop(while: { $0 == "@" }))
+        let withoutWhitespace = withoutAtPrefix.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+        let withoutAt = withoutWhitespace.replacingOccurrences(of: "@", with: "")
+        guard !withoutAt.isEmpty else { return nil }
+
+        return String(withoutAt.prefix(64))
     }
 
     private func avatarURL(fileId: String?) -> URL? {

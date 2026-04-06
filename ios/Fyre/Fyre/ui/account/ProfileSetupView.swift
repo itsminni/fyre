@@ -20,6 +20,8 @@ struct ProfileSetupView: View {
     @State private var bio = ""
     @State private var intent: UserIntent = .relationship
     @State private var interests = ""
+    @State private var instagramTag = ""
+    @State private var spotifyTag = ""
     @State private var preferredGenders = Set(UserStore.defaultPreferredGenders)
     @State private var minPreferredAge = 20
     @State private var maxPreferredAge = 32
@@ -107,6 +109,11 @@ struct ProfileSetupView: View {
                     )
 
                     multilineField(L10n.tr("profile.interests"), text: $interests)
+                }
+
+                Section(L10n.tr("profile.section.social")) {
+                    labeledField(L10n.tr("profile.instagramTag"), text: $instagramTag)
+                    labeledField(L10n.tr("profile.spotifyTag"), text: $spotifyTag)
                 }
 
                 Section(L10n.tr("profile.section.preferences")) {
@@ -272,6 +279,8 @@ struct ProfileSetupView: View {
         bio = user.normalizedBio.isEmpty ? bio : user.normalizedBio
         intent = user.intent ?? intent
         interests = user.normalizedInterests.isEmpty ? interests : user.normalizedInterests
+        instagramTag = user.normalizedInstagramTag
+        spotifyTag = user.normalizedSpotifyTag
         preferredGenders = Set(user.resolvedPreferredGenders)
         minPreferredAge = user.resolvedMinPreferredAge
         maxPreferredAge = user.resolvedMaxPreferredAge
@@ -318,6 +327,8 @@ struct ProfileSetupView: View {
             bio: bio,
             intent: intent,
             interests: interests,
+            instagramTag: instagramTag,
+            spotifyTag: spotifyTag,
             preferredGenders: orderedPreferredGenders,
             minPreferredAge: minPreferredAge,
             maxPreferredAge: maxPreferredAge,

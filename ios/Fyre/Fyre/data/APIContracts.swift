@@ -21,6 +21,8 @@ struct ProfileDTO: Identifiable, Sendable {
     let distanceKm: Int?
     let intent: UserIntent?
     let interests: [String]
+    let instagramTag: String?
+    let spotifyTag: String?
     let avatarURL: URL?
 }
 
