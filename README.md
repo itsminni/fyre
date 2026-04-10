@@ -30,5 +30,12 @@ More details about iOS architecture and flows: `ios/README.md`.
 
 ### Web
 1. `cd web`
-2. `npm install`
-3. `npm run dev`
+2. `cp .env.example .env.local`
+3. (Optional) Set `VITE_USE_APPWRITE_BACKEND=false` in `.env.local` to force local/mock mode.
+4. `npm install`
+5. `npm run dev`
+
+When `VITE_USE_APPWRITE_BACKEND=true` and required `VITE_APPWRITE_*` values are present,
+the web app uses the same Appwrite backend domain used by iOS (auth/profile/events/chat/discover).
+
+If backend env values are missing, web falls back to local/mock data.

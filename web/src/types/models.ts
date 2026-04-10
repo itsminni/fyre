@@ -9,21 +9,35 @@ export type UserOrientation =
   | 'pansexual'
   | 'other';
 export type UserShowMe = 'men' | 'women' | 'everyone';
+export type UserIntent = 'relationship' | 'casual' | 'friendship' | 'notSure';
 
 export interface User {
   email: string;
   password: string;
+  appwriteUserId?: string;
+  avatarFileId?: string;
   firstName?: string;
   lastName?: string;
+  city?: string;
   birthDate?: string;
   gender?: UserGender;
   orientation?: UserOrientation;
+  preferredGenders?: UserGender[];
+  minPreferredAge?: number;
+  maxPreferredAge?: number;
+  maxDistanceKm?: number;
+  latitude?: number;
+  longitude?: number;
   showMe: UserShowMe;
   smokes?: boolean;
   drinks?: boolean;
+  bio?: string;
+  intent?: UserIntent;
   hobbies?: string;
   passions?: string;
   lookingFor?: string;
+  instagramTag?: string;
+  spotifyTag?: string;
   favoriteSong?: string;
   favoriteMovie?: string;
   profileImageData?: string;
