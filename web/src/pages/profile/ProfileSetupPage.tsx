@@ -76,6 +76,7 @@ export function ProfileSetupPage(): JSX.Element {
   const [favoriteSong, setFavoriteSong] = useState(currentUser?.favoriteSong ?? '');
   const [favoriteMovie, setFavoriteMovie] = useState(currentUser?.favoriteMovie ?? '');
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const age = useMemo(() => calculateAge(birthDate), [birthDate]);
 
@@ -95,7 +96,7 @@ export function ProfileSetupPage(): JSX.Element {
 
     try {
       const imageData = await readFileAsDataUrl(file);
-      const error = updateProfileImage(imageData);
+      const error = await updateProfileImage(imageData);
       if (error) {
         setFeedbackMessage(error);
       }
@@ -104,7 +105,7 @@ export function ProfileSetupPage(): JSX.Element {
     }
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFeedbackMessage(null);
 
@@ -117,7 +118,8 @@ export function ProfileSetupPage(): JSX.Element {
       }
     }
 
-    const error = updateProfile({
+    setIsSaving(true);
+    const error = await updateProfile({
       firstName,
       lastName,
       birthDate,
@@ -132,6 +134,7 @@ export function ProfileSetupPage(): JSX.Element {
       favoriteSong,
       favoriteMovie
     });
+    setIsSaving(false);
 
     if (error) {
       setFeedbackMessage(error);
@@ -269,7 +272,9 @@ export function ProfileSetupPage(): JSX.Element {
 
             {feedbackMessage && <p className="form-feedback form-feedback--error">{feedbackMessage}</p>}
 
-            <Button fullWidth>Completa profilo</Button>
+            <Button fullWidth disabled={isSaving}>
+              {isSaving ? 'Salvataggio...' : 'Completa profilo'}
+            </Button>
           </form>
         </Card>
       </div>

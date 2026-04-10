@@ -8,6 +8,8 @@ export function ChatDetailPage(): JSX.Element {
   const { threadId } = useParams();
   const { persisted, sendMessage } = useAppStore();
   const [draft, setDraft] = useState('');
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const thread = useMemo(
@@ -19,13 +21,22 @@ export function ChatDetailPage(): JSX.Element {
     endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [thread?.messages.length]);
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!thread) {
       return;
     }
 
-    sendMessage(thread.id, draft);
+    setSendError(null);
+    setIsSending(true);
+    const error = await sendMessage(thread.id, draft);
+    setIsSending(false);
+
+    if (error) {
+      setSendError(error);
+      return;
+    }
+
     setDraft('');
   }
 
@@ -76,8 +87,12 @@ export function ChatDetailPage(): JSX.Element {
           onChange={(event) => setDraft(event.target.value)}
           placeholder="Messaggio"
         />
-        <Button disabled={!draft.trim()}>Invia</Button>
+        <Button disabled={!draft.trim() || isSending}>
+          {isSending ? 'Invio...' : 'Invia'}
+        </Button>
       </form>
+
+      {sendError && <p className="form-feedback form-feedback--error">{sendError}</p>}
     </section>
   );
 }

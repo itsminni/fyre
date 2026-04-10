@@ -15,6 +15,7 @@ export function EventDetailPage(): JSX.Element {
     cancelCurrentUserMainEventRegistration
   } = useAppStore();
   const [feedback, setFeedback] = useState<{ text: string; isError: boolean } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const eventDate = new Date(mainEventConfig.date);
 
@@ -44,10 +45,14 @@ export function EventDetailPage(): JSX.Element {
       ? 'Esci dalla waiting list'
       : 'Partecipa all evento';
 
-  function onPrimaryAction() {
+  async function onPrimaryAction() {
+    setIsSubmitting(true);
+
     const result = mainEventFlags.isRegistered || mainEventFlags.isWaiting
-      ? cancelCurrentUserMainEventRegistration()
-      : registerCurrentUserForMainEvent();
+      ? await cancelCurrentUserMainEventRegistration()
+      : await registerCurrentUserForMainEvent();
+
+    setIsSubmitting(false);
 
     setFeedback({
       text: result.message,
@@ -126,8 +131,9 @@ export function EventDetailPage(): JSX.Element {
           variant={mainEventFlags.isRegistered || mainEventFlags.isWaiting ? 'danger' : 'primary'}
           fullWidth
           onClick={onPrimaryAction}
+          disabled={isSubmitting}
         >
-          {actionLabel}
+          {isSubmitting ? 'Attendi...' : actionLabel}
         </Button>
 
         {feedback && (
