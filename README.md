@@ -1,6 +1,6 @@
 # Fyre
 
-Fyre is a multi-client social/dating project with:
+Fyre is a multi-client dating project with:
 - iOS app in SwiftUI
 - Android app in Jetpack Compose
 - Web prototype in React + TypeScript (Vite)
