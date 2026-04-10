@@ -13,6 +13,7 @@ export function SignUpPage(): JSX.Element {
   const [password, setPassword] = useState('');
   const [agree, setAgree] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isFormValid = useMemo(
     () => isValidEmail(email) && password.trim().length >= 6 && agree,
@@ -27,11 +28,14 @@ export function SignUpPage(): JSX.Element {
     return <Navigate to="/profile/setup" replace />;
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
+    setIsSubmitting(true);
 
-    const error = signUp(email, password);
+    const error = await signUp(email, password);
+    setIsSubmitting(false);
+
     if (error) {
       setErrorMessage(error);
       return;
@@ -78,8 +82,8 @@ export function SignUpPage(): JSX.Element {
 
             {errorMessage && <p className="form-feedback form-feedback--error">{errorMessage}</p>}
 
-            <Button fullWidth disabled={!isFormValid}>
-              Registrati
+            <Button fullWidth disabled={!isFormValid || isSubmitting}>
+              {isSubmitting ? 'Registrazione in corso...' : 'Registrati'}
             </Button>
           </form>
 

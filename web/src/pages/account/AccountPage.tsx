@@ -48,6 +48,7 @@ export function AccountPage(): JSX.Element {
   const {
     currentUser,
     currentUserUpcomingEventHistory,
+    isBackendMode,
     localUsers,
     persisted,
     createLocalUser,
@@ -76,6 +77,8 @@ export function AccountPage(): JSX.Element {
   const [localUserEmail, setLocalUserEmail] = useState('');
   const [localUserPassword, setLocalUserPassword] = useState('');
   const [localUsersFeedback, setLocalUsersFeedback] = useState<string | null>(null);
+  const [isSavingPreferences, setIsSavingPreferences] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const options = useMemo(
     () => [
@@ -91,7 +94,7 @@ export function AccountPage(): JSX.Element {
     return <Navigate to="/" replace />;
   }
 
-  function savePreferences() {
+  async function savePreferences() {
     if (!currentUser) {
       return;
     }
@@ -107,7 +110,8 @@ export function AccountPage(): JSX.Element {
       }
     }
 
-    const error = updateAccountPreferences({
+    setIsSavingPreferences(true);
+    const error = await updateAccountPreferences({
       orientation,
       showMe,
       smokes,
@@ -118,8 +122,15 @@ export function AccountPage(): JSX.Element {
       favoriteSong,
       favoriteMovie
     });
+    setIsSavingPreferences(false);
 
     setFeedback(error ?? 'Profilo aggiornato.');
+  }
+
+  async function handleLogOut() {
+    setIsLoggingOut(true);
+    await logOut();
+    setIsLoggingOut(false);
   }
 
   function handleCreateLocalUser(event: FormEvent<HTMLFormElement>) {
@@ -307,12 +318,14 @@ export function AccountPage(): JSX.Element {
               </label>
             </div>
 
-            <Button onClick={savePreferences}>Salva preferenze</Button>
+            <Button onClick={() => void savePreferences()} disabled={isSavingPreferences}>
+              {isSavingPreferences ? 'Salvataggio...' : 'Salva preferenze'}
+            </Button>
 
             {feedback && <p className="form-feedback">{feedback}</p>}
 
-            <Button variant="danger" onClick={logOut}>
-              Disconnettiti
+            <Button variant="danger" onClick={() => void handleLogOut()} disabled={isLoggingOut}>
+              {isLoggingOut ? 'Disconnessione...' : 'Disconnettiti'}
             </Button>
           </Card>
         </div>
@@ -417,6 +430,12 @@ export function AccountPage(): JSX.Element {
             title="Gestione utenti locale"
             subtitle="Solo client-side: utile per testare rapidamente i flussi senza backend."
           >
+            {isBackendMode ? (
+              <p className="text-muted">
+                Con backend Appwrite attivo la gestione utenti locale e disattivata.
+              </p>
+            ) : null}
+
             <form className="local-user-form" onSubmit={handleCreateLocalUser}>
               <label>
                 Email nuovo utente
@@ -438,14 +457,14 @@ export function AccountPage(): JSX.Element {
                 />
               </label>
 
-              <Button type="submit">Crea utente locale</Button>
+              <Button type="submit" disabled={isBackendMode}>Crea utente locale</Button>
             </form>
 
             <div className="local-user-tools">
-              <Button variant="secondary" onClick={handleSeedDemoUsers}>
+              <Button variant="secondary" onClick={handleSeedDemoUsers} disabled={isBackendMode}>
                 Aggiungi utenti demo
               </Button>
-              <Button variant="ghost" onClick={handleResetLocalData}>
+              <Button variant="ghost" onClick={handleResetLocalData} disabled={isBackendMode}>
                 Reset dati locali
               </Button>
             </div>
@@ -468,12 +487,12 @@ export function AccountPage(): JSX.Element {
                       {user.isCurrent ? (
                         <span className="local-user-badge">Attivo</span>
                       ) : (
-                        <Button variant="secondary" onClick={() => handleSwitchLocalUser(user.email)}>
+                        <Button variant="secondary" onClick={() => handleSwitchLocalUser(user.email)} disabled={isBackendMode}>
                           Usa utente
                         </Button>
                       )}
 
-                      <Button variant="ghost" onClick={() => handleRemoveLocalUser(user.email)}>
+                      <Button variant="ghost" onClick={() => handleRemoveLocalUser(user.email)} disabled={isBackendMode}>
                         Elimina
                       </Button>
                     </div>
