@@ -42,7 +42,8 @@ const intentLabels: Record<MatchIntent, string> = {
   relationship: 'Relazione',
   friendship: 'Amicizia',
   casual: 'Casual',
-  networking: 'Networking'
+  networking: 'Networking',
+  notSure: 'Non so ancora'
 };
 
 function readFileAsDataUrl(file: File): Promise<string> {

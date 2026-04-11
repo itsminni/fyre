@@ -8,11 +8,12 @@ import { isProfileComplete, isValidEmail } from '../../types/models';
 
 export function LoginPage(): JSX.Element {
   const navigate = useNavigate();
-  const { currentUser, localUsers, logIn, seedDemoUsers } = useAppStore();
+  const { currentUser, localUsers, logIn, seedDemoUsers, isBackendMode } = useAppStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [helperMessage, setHelperMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isFormValid = useMemo(
     () => isValidEmail(email) && password.trim().length >= 6,
@@ -27,11 +28,14 @@ export function LoginPage(): JSX.Element {
     return <Navigate to="/profile/setup" replace />;
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
+    setIsSubmitting(true);
 
-    const error = logIn(email, password);
+    const error = await logIn(email, password);
+    setIsSubmitting(false);
+
     if (error) {
       setErrorMessage(error);
       return;
@@ -78,8 +82,8 @@ export function LoginPage(): JSX.Element {
 
             {errorMessage && <p className="form-feedback form-feedback--error">{errorMessage}</p>}
 
-            <Button fullWidth disabled={!isFormValid}>
-              Accedi
+            <Button fullWidth disabled={!isFormValid || isSubmitting}>
+              {isSubmitting ? 'Accesso in corso...' : 'Accedi'}
             </Button>
           </form>
 
@@ -88,9 +92,13 @@ export function LoginPage(): JSX.Element {
           </p>
 
           <div className="auth-helper-box">
-            <p className="text-muted">Utenti locali disponibili: {localUsers.length}</p>
+            <p className="text-muted">
+              {isBackendMode
+                ? 'Backend Appwrite attivo: sessione gestita dal server.'
+                : `Utenti locali disponibili: ${localUsers.length}`}
+            </p>
 
-            {localUsers.length > 0 ? (
+            {!isBackendMode && localUsers.length > 0 ? (
               <div className="auth-helper-users">
                 {localUsers.map((user) => (
                   <button
@@ -109,14 +117,19 @@ export function LoginPage(): JSX.Element {
                   </button>
                 ))}
               </div>
-            ) : (
+            ) : !isBackendMode ? (
               <Button variant="secondary" onClick={seedDemoAccounts}>
                 Carica utenti demo
               </Button>
-            )}
+            ) : null}
 
-            {helperMessage && <p className="form-feedback">{helperMessage}</p>}
+            {isBackendMode ? (
+              <p className="text-muted">Usa email/password registrate su Appwrite.</p>
+            ) : null}
+
+            {helperMessage && !isBackendMode && <p className="form-feedback">{helperMessage}</p>}
           </div>
+
         </Card>
       </main>
     </GradientBackdrop>

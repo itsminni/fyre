@@ -71,6 +71,7 @@ interface SwipeDecisionResult {
 
 interface AppContextValue {
   persisted: PersistedAppState;
+  isBackendMode: boolean;
   currentUser: User | null;
   localUsers: LocalUserSummary[];
   discoverProfiles: DiscoverProfile[];
@@ -1454,6 +1455,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   const contextValue = useMemo<AppContextValue>(
     () => ({
       persisted,
+      isBackendMode: false,
       currentUser,
       localUsers,
       discoverProfiles,

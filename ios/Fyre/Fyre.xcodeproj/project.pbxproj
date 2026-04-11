@@ -171,7 +171,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2620;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					3F9C19CD2F3C71A10045CA2F = {
 						CreatedOnToolsVersion = 26.2;
@@ -275,6 +275,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -340,6 +341,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -408,9 +410,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Fyre;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare la foto profilo.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare foto profilo e allegati chat.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Fyre usa la posizione per mostrare distanza e profili nelle vicinanze.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere la foto profilo.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Fyre usa il microfono per registrare messaggi vocali in chat.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere foto profilo e allegati chat.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -453,9 +456,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Fyre;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare la foto profilo.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Fyre usa la fotocamera per scattare foto profilo e allegati chat.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Fyre usa la posizione per mostrare distanza e profili nelle vicinanze.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere la foto profilo.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Fyre usa il microfono per registrare messaggi vocali in chat.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Fyre usa la libreria foto per scegliere foto profilo e allegati chat.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

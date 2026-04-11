@@ -41,7 +41,8 @@ const intentLabels: Record<MatchIntent, string> = {
   relationship: 'Relazione',
   friendship: 'Amicizia',
   casual: 'Casual',
-  networking: 'Networking'
+  networking: 'Networking',
+  notSure: 'Non so ancora'
 };
 
 const historyStatusLabels: Record<EventHistoryStatus, string> = {

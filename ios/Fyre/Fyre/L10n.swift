@@ -10,7 +10,7 @@ import Foundation
 // Lightweight localization helper.
 // Note: actual translations live in `Localizable.strings` per language.
 enum L10n {
-    static func tr(_ key: String) -> String {
+    nonisolated static func tr(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
 }

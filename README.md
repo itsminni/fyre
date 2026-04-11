@@ -1,32 +1,41 @@
 # Fyre
 
-Fyre is a mobile project with two clients:
-- iOS in SwiftUI
-- Android in Jetpack Compose
+Fyre is a multi-client dating project with:
+- iOS app in SwiftUI
+- Android app in Jetpack Compose
+- Web prototype in React + TypeScript (Vite)
 
-The repository now also contains a web frontend prototype built with React + TypeScript (Vite-style structure) that recreates the visible iOS flows using only client-side state and mock services.
+The product focus is profile discovery, messaging, event participation, and account management.
 
-The goal is to build an app focused on profile discovery, chat, and account management, starting from a local foundation and gradually moving to real backend and database services.
+## Repository structure
 
-Repository structure
-- `ios/`: iOS app and SwiftUI components.
-- `android/`: Android app and Compose navigation.
-- `web/`: web frontend in TypeScript (React), mock-only (no real backend calls).
-- `backend/`: placeholder area for future services/APIs.
-- `docs/`: project materials and support notes (prompts and planning).
+- `ios/`: Apple app source, Xcode project, tests.
+- `android/`: Android app source and Gradle project.
+- `web/`: React + TypeScript frontend prototype (for now).
+- `functions/`: backend cloud functions used by the app domain.
+- `docs/`: notes and project support material.
 
-Documentation
-- `docs/` contains planning materials and useful notes, including AI prompts used during exploration.
+## Quick start
 
-Web frontend notes
-- The web app is intentionally frontend-only.
-- No server, no database, no real API integration is implemented.
-- Backend-dependent flows are simulated via local state, localStorage persistence, and mock services.
-- Future backend integration points are marked in `web/src/services/mockBackend.ts`.
-- Local user management for testing is available in login/account screens.
-- Demo users can be injected locally from UI with default password: `DEMO_PASSWORD_REDACTED`.
+### iOS
+1. Open `ios/Fyre/Fyre.xcodeproj` in Xcode.
+2. Select scheme `Fyre` and a simulator/device.
+3. Run the app.
 
-Web run commands
+More details about iOS architecture and flows: `ios/README.md`.
+
+### Android
+1. `cd android/Fyre`
+2. `./gradlew assembleDebug`
+
+### Web
 1. `cd web`
-2. `npm install`
-3. `npm run dev`
+2. `cp .env.example .env.local`
+3. (Optional) Set `VITE_USE_APPWRITE_BACKEND=false` in `.env.local` to force local/mock mode.
+4. `npm install`
+5. `npm run dev`
+
+When `VITE_USE_APPWRITE_BACKEND=true` and required `VITE_APPWRITE_*` values are present,
+the web app uses the same Appwrite backend domain used by iOS (auth/profile/events/chat/discover).
+
+If backend env values are missing, web falls back to local/mock data.

@@ -7,34 +7,60 @@
 
 import SwiftUI
 import PhotosUI
+import UIKit
+
+private struct PendingChatBackgroundPreview: Identifiable {
+    let id = UUID()
+    let style: ChatBackgroundStyle
+}
 
 struct AccountView: View {
     private struct EditableProfileDraft: Equatable {
+        let city: String
+        let gender: UserGender
         let orientation: UserOrientation
-        let showMe: UserShowMe
+        let bio: String
+        let intent: UserIntent
+        let interests: String
+        let instagramTag: String
+        let spotifyTag: String
+        let preferredGenders: [UserGender]
+        let minPreferredAge: Int
+        let maxPreferredAge: Int
+        let maxDistanceKm: Int?
         let smokes: Bool
         let drinks: Bool
-        let hobbies: String
-        let passions: String
-        let lookingFor: String
-        let favoriteSong: String
-        let favoriteMovie: String
     }
 
-    private enum AccountSection: String, CaseIterable, Identifiable {
-        case profile
+    private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
+        case account
+        case preferences
+        case notifications
         case security
+        case appearance
         case events
-        case settings
 
         var id: String { rawValue }
 
         var titleKey: String {
             switch self {
-            case .profile: return "account.segment.profile"
-            case .security: return "account.segment.security"
-            case .events: return "account.segment.events"
-            case .settings: return "account.segment.settings"
+            case .account: return "account.menu.account"
+            case .preferences: return "account.section.preferences"
+            case .notifications: return "account.notifications"
+            case .security: return "profile.section.security"
+            case .appearance: return "account.section.appearance"
+            case .events: return "account.section.events"
+            }
+        }
+
+        var iconName: String {
+            switch self {
+            case .account: return "key.fill"
+            case .preferences: return "slider.horizontal.3"
+            case .notifications: return "bell.fill"
+            case .security: return "lock.fill"
+            case .appearance: return "paintpalette.fill"
+            case .events: return "calendar.badge.clock"
             }
         }
     }
@@ -43,30 +69,58 @@ struct AccountView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("settings_theme_mode") private var themeMode = "system"
     @AppStorage("settings_notifications_enabled") private var notificationsEnabled = true
+    @AppStorage("settings_notifications_matches") private var matchNotificationsEnabled = true
+    @AppStorage("settings_notifications_messages") private var messageNotificationsEnabled = true
+    @AppStorage("settings_notifications_event_reminders") private var eventReminderNotificationsEnabled = true
     @AppStorage("settings_show_age") private var showAge = true
     @AppStorage("settings_show_distance") private var showDistance = true
+    @AppStorage("settings_show_intent") private var showIntent = true
+    @AppStorage("settings_show_interests") private var showInterests = true
+    @AppStorage("settings_show_instagram_tag") private var showInstagramTag = true
+    @AppStorage("settings_show_spotify_tag") private var showSpotifyTag = true
+    @AppStorage("settings_chat_background_style") private var chatBackgroundStyle = ChatBackgroundStyle.defaultDark.rawValue
+    @AppStorage("settings_chat_background_brightness") private var chatBackgroundBrightness = 0.0
+    @AppStorage("settings_chat_background_color_1") private var chatBackgroundColor1Hex = "#3F4755"
+    @AppStorage("settings_chat_background_color_2") private var chatBackgroundColor2Hex = "#8B7A74"
+    @AppStorage("settings_chat_background_color_3") private var chatBackgroundColor3Hex = "#B9A89B"
+    @AppStorage("settings_chat_outgoing_bubble_palette") private var outgoingBubblePalette = ChatBubblePalette.default.rawValue
+    @AppStorage("settings_chat_incoming_bubble_palette") private var incomingBubblePalette = ChatBubblePalette.default.rawValue
+    @AppStorage("settings_send_button_color_1") private var sendButtonColor1Hex = "#FF9A00"
+    @AppStorage("settings_send_button_color_2") private var sendButtonColor2Hex = "#FF8A1F"
+    @AppStorage("settings_send_button_color_3") private var sendButtonColor3Hex = "#E14D33"
 
-    @State private var selectedSection: AccountSection = .profile
     @State private var firstName = ""
     @State private var lastName = ""
+    @State private var city = ""
     @State private var birthDate = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
+    @State private var gender: UserGender = .male
     @State private var orientation: UserOrientation = .straight
-    @State private var showMe: UserShowMe = .everyone
+    @State private var bio = ""
+    @State private var intent: UserIntent = .relationship
+    @State private var interests = ""
+    @State private var instagramTag = ""
+    @State private var spotifyTag = ""
+    @State private var preferredGenders = Set(UserStore.defaultPreferredGenders)
+    @State private var minPreferredAge = 20
+    @State private var maxPreferredAge = 32
+    @State private var maxDistanceKm: Int? = 50
     @State private var smokes = false
     @State private var drinks = false
-    @State private var hobbies = ""
-    @State private var passions = ""
-    @State private var lookingFor = ""
-    @State private var favoriteSong = ""
-    @State private var favoriteMovie = ""
     @State private var profileMessage: String?
     @State private var profileMessageIsError = false
     @State private var securityMessage: String?
     @State private var pickedPhotoItem: PhotosPickerItem?
+    @State private var pendingChatBackgroundPreview: PendingChatBackgroundPreview?
+    @State private var chatBackgroundStyleSelection = ChatBackgroundStyle.defaultDark.rawValue
+    @State private var chatBackgroundSettingsMessage: String?
+    @State private var chatBackgroundSettingsMessageIsError = false
     @State private var showEventRemovalAlert = false
+    @State private var pendingDangerousGender: UserGender?
     @State private var pendingDangerousOrientation: UserOrientation?
     @State private var isHydratingProfileForm = false
     @State private var hasLoadedProfileForm = false
+    @State private var isSavingProfile = false
+    @State private var isLoggingOut = false
 
     private let supportEmail = "support@example.com"
 
@@ -79,43 +133,45 @@ struct AccountView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                Picker("", selection: $selectedSection) {
-                    ForEach(AccountSection.allCases) { section in
-                        Text(L10n.tr(section.titleKey)).tag(section)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.top, 8)
-
-                Group {
-                    switch selectedSection {
-                    case .profile:
-                        profileSettings
-                    case .security:
-                        securitySettings
-                    case .events:
-                        eventsSettings
-                    case .settings:
-                        appSettings
-                    }
-                }
-            }
-            .navigationTitle(L10n.tr("tab.account"))
+            settingsHome
             .onAppear {
                 fillFromUser()
+                chatBackgroundStyleSelection = chatBackgroundStyle
             }
-            .onChange(of: orientation) { oldValue, newValue in
-                handleOrientationChange(from: oldValue, to: newValue)
+            .task {
+                // Keep event registration state fresh so dangerous profile-change warnings are accurate.
+                await store.refreshRemoteMainEventState()
+            }
+            .onChange(of: gender) { _, _ in
+                handleIdentityFieldChange()
+            }
+            .onChange(of: orientation) { _, _ in
+                handleIdentityFieldChange()
             }
             .task(id: pickedPhotoItem) {
                 guard let pickedPhotoItem else { return }
                 if let data = try? await pickedPhotoItem.loadTransferable(type: Data.self) {
-                    _ = store.updateProfileImage(data)
+                    // Avatar uploads are handled separately so autosaving text fields never reuploads the image.
+                    let result = await store.updateProfileImage(data)
+                    if let result {
+                        profileMessage = result
+                        profileMessageIsError = true
+                    } else {
+                        profileMessage = nil
+                        profileMessageIsError = false
+                        fillFromUser()
+                    }
                 }
             }
+            .onChange(of: chatBackgroundStyleSelection) { _, newValue in
+                guard newValue != chatBackgroundStyle else { return }
+                let style = ChatBackgroundStyle(rawValue: newValue) ?? .defaultDark
+                pendingChatBackgroundPreview = PendingChatBackgroundPreview(
+                    style: style
+                )
+            }
             .task(id: editableProfileDraft) {
+                // Only editable profile fields participate in autosave; identity fields stay read-only above.
                 await autosaveProfileIfNeeded()
             }
             .alert(
@@ -123,18 +179,196 @@ struct AccountView: View {
                 isPresented: $showEventRemovalAlert
             ) {
                 Button(L10n.tr("profile.eventsRemoval.warning.confirm"), role: .destructive) {
-                    performProfileSave(
-                        orientationOverride: pendingDangerousOrientation,
-                        notifyEventRemoval: true,
-                        showSuccessMessage: true
-                    )
-                    pendingDangerousOrientation = nil
+                    Task {
+                        await performProfileSave(
+                            genderOverride: pendingDangerousGender,
+                            orientationOverride: pendingDangerousOrientation,
+                            notifyEventRemoval: true,
+                            showSuccessMessage: true
+                        )
+                        pendingDangerousGender = nil
+                        pendingDangerousOrientation = nil
+                    }
                 }
                 Button(L10n.tr("common.cancel"), role: .cancel) {
-                    pendingDangerousOrientation = nil
+                    rollbackPendingDangerousProfileChanges()
                 }
             } message: {
                 Text(L10n.tr("profile.eventsRemoval.warning.message"))
+            }
+            .fullScreenCover(item: $pendingChatBackgroundPreview) { preview in
+                ChatBackgroundConfirmationView(
+                    preview: preview,
+                    brightness: $chatBackgroundBrightness,
+                    backgroundGradientColors: chatBackgroundGradientColors,
+                    outgoingPalette: ChatBubblePalette(rawValue: outgoingBubblePalette) ?? .default,
+                    incomingPalette: ChatBubblePalette(rawValue: incomingBubblePalette) ?? .default,
+                    onCancel: {
+                        chatBackgroundStyleSelection = chatBackgroundStyle
+                        pendingChatBackgroundPreview = nil
+                    },
+                    onApply: {
+                        applyChatBackgroundStyle(preview.style)
+                        pendingChatBackgroundPreview = nil
+                    }
+                )
+            }
+            .navigationDestination(for: SettingsDestination.self) { destination in
+                settingsDestinationView(destination)
+                    .navigationTitle(L10n.tr(destination.titleKey))
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+    }
+
+    private var settingsHome: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                profileHubHeader
+
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionEyebrow(L10n.tr("account.segment.settings"))
+                    settingsNavigationList
+                }
+
+                eventsHubCard
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 28)
+        }
+        .scrollIndicators(.hidden)
+        .background(accountBackground.ignoresSafeArea())
+    }
+
+    private var profileHubHeader: some View {
+        VStack(spacing: 12) {
+            PhotosPicker(selection: $pickedPhotoItem, matching: .images) {
+                profileAvatar(size: 95)
+                    .overlay(alignment: .bottomTrailing) {
+                        ZStack {
+                            Circle()
+                                .fill(.black.opacity(0.72))
+                            Image(systemName: "camera.fill")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 30, height: 30)
+                        .overlay {
+                            Circle()
+                                .stroke(.white.opacity(0.12), lineWidth: 1)
+                        }
+                        .offset(x: 2, y: 2)
+                    }
+            }
+            .buttonStyle(.plain)
+
+            Text(profileHeaderFirstName)
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private var profileHeaderFirstName: String {
+        let candidates = [
+            store.currentUser?.firstName,
+            firstName
+        ]
+
+        for candidate in candidates {
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        return "Fyre"
+    }
+
+    private var settingsNavigationList: some View {
+        VStack(spacing: 0) {
+            ForEach(Array([
+                SettingsDestination.account,
+                .preferences,
+                .notifications,
+                .security,
+                .appearance
+            ].enumerated()), id: \.element) { index, destination in
+                NavigationLink(value: destination) {
+                    settingsNavigationRow(destination)
+                }
+                .buttonStyle(.plain)
+
+                if index < 4 {
+                    Divider()
+                        .overlay(.white.opacity(0.08))
+                        .padding(.leading, 64)
+                }
+            }
+        }
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var eventsHubCard: some View {
+        AccountCard(
+            title: L10n.tr("account.section.events"),
+            icon: SettingsDestination.events.iconName
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                let recent = Array(store.currentUserUpcomingEventHistory.prefix(2))
+                if recent.isEmpty {
+                    Text(L10n.tr("account.events.empty"))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(recent) { item in
+                        EventHistoryRow(item: item)
+                    }
+                }
+
+                NavigationLink(value: SettingsDestination.events) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+
+                        Text(L10n.tr("account.events.openAll"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        Spacer(minLength: 0)
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func settingsDestinationView(_ destination: SettingsDestination) -> some View {
+        Group {
+            switch destination {
+            case .account:
+                profileSettings
+            case .preferences:
+                preferencesSettings
+            case .notifications:
+                notificationSettings
+            case .security:
+                securitySettings
+            case .appearance:
+                appearanceSettings
+            case .events:
+                eventsSettings
             }
         }
     }
@@ -144,7 +378,7 @@ struct AccountView: View {
             VStack(spacing: 18) {
                 AccountCard(
                     title: L10n.tr("profile.section.information"),
-                    subtitle: L10n.tr("profile.section.informationHint"),
+                    subtitleText: informationHintText,
                     icon: "person.text.rectangle.fill"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
@@ -177,14 +411,16 @@ struct AccountView: View {
                             ProfileReadOnlyRow(title: L10n.tr("profile.email"), value: store.currentUser?.email ?? "-")
                             cardDivider
                             ProfileReadOnlyRow(title: L10n.tr("profile.birthDate"), value: birthDateLabel)
-                            cardDivider
-                            ProfileReadOnlyRow(title: L10n.tr("profile.gender"), value: genderLabel)
                         }
-                    }
-                }
 
-                AccountCard(title: L10n.tr("profile.section.preferences"), icon: "slider.horizontal.3") {
-                    VStack(spacing: 14) {
+                        ProfilePickerField(
+                            title: L10n.tr("profile.gender"),
+                            selection: $gender,
+                            options: UserGender.allCases
+                        ) { option in
+                            L10n.tr(option.localizationKey)
+                        }
+
                         ProfilePickerField(
                             title: L10n.tr("profile.orientation"),
                             selection: $orientation,
@@ -193,21 +429,49 @@ struct AccountView: View {
                             L10n.tr(option.localizationKey)
                         }
 
+                        ProfileToggleField(title: L10n.tr("profile.smokes"), isOn: $smokes)
+                        ProfileToggleField(title: L10n.tr("profile.drinks"), isOn: $drinks)
+                        ProfileTextField(title: L10n.tr("profile.interests"), text: $interests)
+                        ProfileTextField(title: L10n.tr("profile.instagramTag"), text: $instagramTag)
+                        ProfileTextField(title: L10n.tr("profile.spotifyTag"), text: $spotifyTag)
+                    }
+                }
+
+                AccountCard(
+                    title: L10n.tr("profile.section.discovery"),
+                    subtitle: L10n.tr("profile.section.discoveryHint"),
+                    icon: "scope"
+                ) {
+                    VStack(spacing: 14) {
+                        ProfileTextField(
+                            title: L10n.tr("profile.city"),
+                            subtitle: L10n.tr("profile.city.hint"),
+                            text: $city
+                        )
+                        ProfileTextField(title: L10n.tr("profile.bio"), text: $bio)
+
                         ProfilePickerField(
-                            title: L10n.tr("profile.showMe"),
-                            selection: $showMe,
-                            options: UserShowMe.allCases
+                            title: L10n.tr("profile.intent"),
+                            selection: $intent,
+                            options: UserIntent.allCases
                         ) { option in
                             L10n.tr(option.localizationKey)
                         }
 
-                        ProfileToggleField(title: L10n.tr("profile.smokes"), isOn: $smokes)
-                        ProfileToggleField(title: L10n.tr("profile.drinks"), isOn: $drinks)
-                        ProfileTextField(title: L10n.tr("profile.hobbies"), text: $hobbies)
-                        ProfileTextField(title: L10n.tr("profile.passions"), text: $passions)
-                        ProfileTextField(title: L10n.tr("profile.lookingFor"), text: $lookingFor)
-                        ProfileTextField(title: L10n.tr("profile.favoriteSong"), text: $favoriteSong)
-                        ProfileTextField(title: L10n.tr("profile.favoriteMovie"), text: $favoriteMovie)
+                        ProfileMultiSelectField(
+                            title: L10n.tr("profile.preferredGenders"),
+                            options: UserGender.allCases,
+                            selected: $preferredGenders
+                        ) { option in
+                            L10n.tr(option.localizationKey)
+                        }
+
+                        ProfileAgeRangeField(
+                            minAge: $minPreferredAge,
+                            maxAge: $maxPreferredAge
+                        )
+
+                        ProfileDistanceField(maxDistanceKm: $maxDistanceKm)
                     }
                 }
 
@@ -226,31 +490,209 @@ struct AccountView: View {
                 }
 
                 Button(L10n.tr("auth.logout.action")) {
-                    store.logOut()
+                    Task {
+                        await performLogout()
+                    }
                 }
                 .buttonStyle(AccountPrimaryButtonStyle(tint: .red))
+                .disabled(isLoggingOut)
             }
             .padding(.horizontal)
-            .padding(.top, 8)
+            .padding(.top, 2)
+            .padding(.bottom, 28)
+        }
+        .onDisappear {
+            Task {
+                await flushPendingProfileEdits()
+            }
+        }
+        .scrollIndicators(.hidden)
+        .background(accountBackground.ignoresSafeArea())
+    }
+
+    private var appearanceSettings: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                AccountCard(
+                    title: L10n.tr("account.section.appearance"),
+                    icon: "paintpalette.fill"
+                ) {
+                    VStack(spacing: 14) {
+                        SettingsPickerField(
+                            title: L10n.tr("account.theme"),
+                            selection: $themeMode,
+                            options: ["system", "light", "dark"]
+                        ) { option in
+                            switch option {
+                            case "light":
+                                return L10n.tr("account.theme.light")
+                            case "dark":
+                                return L10n.tr("account.theme.dark")
+                            default:
+                                return L10n.tr("account.theme.system")
+                            }
+                        }
+
+                        SettingsPickerField(
+                            title: L10n.tr("account.chatBackground"),
+                            selection: $chatBackgroundStyleSelection,
+                            options: ChatBackgroundStyle.allCases.map(\.rawValue)
+                        ) { option in
+                            let style = ChatBackgroundStyle(rawValue: option) ?? .defaultDark
+                            return L10n.tr(style.localizationKey)
+                        }
+
+                        ChatBackgroundGradientSettings(
+                            colorOne: chatBackgroundColorOneBinding,
+                            colorTwo: chatBackgroundColorTwoBinding,
+                            colorThree: chatBackgroundColorThreeBinding,
+                            onApply: applyCustomChatBackgroundGradient
+                        )
+
+                        SettingsPickerField(
+                            title: L10n.tr("account.chatBubble.outgoing"),
+                            selection: $outgoingBubblePalette,
+                            options: ChatBubblePalette.allCases.map(\.rawValue)
+                        ) { option in
+                            let palette = ChatBubblePalette(rawValue: option) ?? .default
+                            return L10n.tr(palette.localizationKey)
+                        }
+
+                        SettingsPickerField(
+                            title: L10n.tr("account.chatBubble.incoming"),
+                            selection: $incomingBubblePalette,
+                            options: ChatBubblePalette.allCases.map(\.rawValue)
+                        ) { option in
+                            let palette = ChatBubblePalette(rawValue: option) ?? .default
+                            return L10n.tr(palette.localizationKey)
+                        }
+
+                        SendButtonGradientSettings(
+                            colorOne: sendButtonColorOneBinding,
+                            colorTwo: sendButtonColorTwoBinding,
+                            colorThree: sendButtonColorThreeBinding
+                        )
+
+                        if let chatBackgroundSettingsMessage {
+                            Text(chatBackgroundSettingsMessage)
+                                .font(.footnote)
+                                .foregroundStyle(chatBackgroundSettingsMessageIsError ? .red : .secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 2)
             .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
         .background(accountBackground.ignoresSafeArea())
     }
 
-    private var appSettings: some View {
-        Form {
-            Section(L10n.tr("account.section.settings")) {
-                Picker(L10n.tr("account.theme"), selection: $themeMode) {
-                    Text(L10n.tr("account.theme.system")).tag("system")
-                    Text(L10n.tr("account.theme.light")).tag("light")
-                    Text(L10n.tr("account.theme.dark")).tag("dark")
+    private var preferencesSettings: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                AccountCard(
+                    title: L10n.tr("account.section.preferences"),
+                    subtitle: L10n.tr("account.preferences.hint"),
+                    icon: "slider.horizontal.3"
+                ) {
+                    VStack(spacing: 14) {
+                        SettingsToggleField(
+                            title: L10n.tr("account.showAge"),
+                            subtitle: L10n.tr("account.showAge.hint"),
+                            isOn: $showAge
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showDistance"),
+                            subtitle: L10n.tr("account.showDistance.hint"),
+                            isOn: $showDistance
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showIntent"),
+                            subtitle: L10n.tr("account.showIntent.hint"),
+                            isOn: $showIntent
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showInterests"),
+                            subtitle: L10n.tr("account.showInterests.hint"),
+                            isOn: $showInterests
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showInstagramTag"),
+                            subtitle: L10n.tr("account.showInstagramTag.hint"),
+                            isOn: $showInstagramTag
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.showSpotifyTag"),
+                            subtitle: L10n.tr("account.showSpotifyTag.hint"),
+                            isOn: $showSpotifyTag
+                        )
+                    }
                 }
-                Toggle(L10n.tr("account.notifications"), isOn: $notificationsEnabled)
-                Toggle(L10n.tr("account.showAge"), isOn: $showAge)
-                Toggle(L10n.tr("account.showDistance"), isOn: $showDistance)
             }
+            .padding(.horizontal)
+            .padding(.top, 2)
+            .padding(.bottom, 28)
         }
+        .scrollIndicators(.hidden)
+        .background(accountBackground.ignoresSafeArea())
+    }
+
+    private var notificationSettings: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                AccountCard(
+                    title: L10n.tr("account.notifications"),
+                    subtitle: L10n.tr("account.notifications.hint"),
+                    icon: "bell.fill"
+                ) {
+                    VStack(spacing: 14) {
+                        SettingsToggleField(
+                            title: L10n.tr("account.notifications"),
+                            subtitle: L10n.tr("account.notifications.masterHint"),
+                            isOn: $notificationsEnabled
+                        )
+                        SettingsToggleField(
+                            title: L10n.tr("account.notifications.matches"),
+                            subtitle: L10n.tr("account.notifications.matches.hint"),
+                            isOn: $matchNotificationsEnabled
+                        )
+                        .disabled(!notificationsEnabled)
+                        .opacity(notificationsEnabled ? 1 : 0.45)
+
+                        SettingsToggleField(
+                            title: L10n.tr("account.notifications.messages"),
+                            subtitle: L10n.tr("account.notifications.messages.hint"),
+                            isOn: $messageNotificationsEnabled
+                        )
+                        .disabled(!notificationsEnabled)
+                        .opacity(notificationsEnabled ? 1 : 0.45)
+
+                        SettingsToggleField(
+                            title: L10n.tr("account.notifications.events"),
+                            subtitle: L10n.tr("account.notifications.events.hint"),
+                            isOn: $eventReminderNotificationsEnabled
+                        )
+                        .disabled(!notificationsEnabled)
+                        .opacity(notificationsEnabled ? 1 : 0.45)
+
+                        Button(action: openSystemNotificationSettings) {
+                            Label(L10n.tr("account.notifications.openSettings"), systemImage: "arrow.up.right.square")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(AccountPrimaryButtonStyle())
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 2)
+            .padding(.bottom, 28)
+        }
+        .scrollIndicators(.hidden)
+        .background(accountBackground.ignoresSafeArea())
     }
 
     private var securitySettings: some View {
@@ -273,6 +715,12 @@ struct AccountView: View {
                         }
                         .buttonStyle(AccountPrimaryButtonStyle())
 
+                        Button(action: openEmailChangeMail) {
+                            Label(L10n.tr("profile.security.changeEmailAction"), systemImage: "at.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(AccountSecondaryButtonStyle())
+
                         if let securityMessage {
                             Text(securityMessage)
                                 .font(.footnote)
@@ -282,7 +730,7 @@ struct AccountView: View {
                 }
             }
             .padding(.horizontal)
-            .padding(.top, 8)
+            .padding(.top, 2)
             .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
@@ -327,9 +775,73 @@ struct AccountView: View {
         )
     }
 
+    private var sendButtonColorOneBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: sendButtonColor1Hex) ?? .orange },
+            set: { sendButtonColor1Hex = $0.hexRGB ?? "#FF9A00" }
+        )
+    }
+
+    private var chatBackgroundGradientColors: [Color] {
+        [
+            Color(hex: chatBackgroundColor1Hex),
+            Color(hex: chatBackgroundColor2Hex),
+            Color(hex: chatBackgroundColor3Hex)
+        ]
+        .compactMap { $0 }
+    }
+
+    private var chatBackgroundColorOneBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: chatBackgroundColor1Hex) ?? Color(red: 0.25, green: 0.28, blue: 0.33) },
+            set: { chatBackgroundColor1Hex = $0.hexRGB ?? "#3F4755" }
+        )
+    }
+
+    private var chatBackgroundColorTwoBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: chatBackgroundColor2Hex) ?? Color(red: 0.55, green: 0.48, blue: 0.46) },
+            set: { chatBackgroundColor2Hex = $0.hexRGB ?? "#8B7A74" }
+        )
+    }
+
+    private var chatBackgroundColorThreeBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: chatBackgroundColor3Hex) ?? Color(red: 0.73, green: 0.66, blue: 0.61) },
+            set: { chatBackgroundColor3Hex = $0.hexRGB ?? "#B9A89B" }
+        )
+    }
+
+    private var sendButtonColorTwoBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: sendButtonColor2Hex) ?? Color(red: 1.0, green: 0.54, blue: 0.12) },
+            set: { sendButtonColor2Hex = $0.hexRGB ?? "#FF8A1F" }
+        )
+    }
+
+    private var sendButtonColorThreeBinding: Binding<Color> {
+        Binding(
+            get: { Color(hex: sendButtonColor3Hex) ?? Color(red: 0.88, green: 0.30, blue: 0.20) },
+            set: { sendButtonColor3Hex = $0.hexRGB ?? "#E14D33" }
+        )
+    }
+
     private var cardDivider: some View {
         Divider()
             .overlay(.white.opacity(0.08))
+    }
+
+    private var informationHintText: Text {
+        let localized = L10n.tr("profile.section.informationHint")
+
+        guard let emailRange = localized.range(of: supportEmail) else {
+            return Text(localized)
+        }
+
+        let beforeEmail = String(localized[..<emailRange.lowerBound])
+        let afterEmail = String(localized[emailRange.upperBound...])
+
+        return Text(beforeEmail) + Text(supportEmail).bold() + Text(afterEmail)
     }
 
     @ViewBuilder
@@ -368,36 +880,96 @@ struct AccountView: View {
         return trimmed.isEmpty ? "-" : trimmed
     }
 
+    @ViewBuilder
+    private func sectionEyebrow(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 19, weight: .bold, design: .default))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private func settingsNavigationRow(_ destination: SettingsDestination) -> some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.white.opacity(0.04))
+                .frame(width: 30, height: 30)
+                .overlay {
+                    Image(systemName: destination.iconName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+
+            Text(L10n.tr(destination.titleKey))
+                .font(.body)
+                .fontWeight(.bold)
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+
+    private func applyChatBackgroundStyle(_ style: ChatBackgroundStyle) {
+        chatBackgroundStyle = style.rawValue
+        chatBackgroundStyleSelection = style.rawValue
+        chatBackgroundSettingsMessage = nil
+        chatBackgroundSettingsMessageIsError = false
+    }
+
+    private func applyCustomChatBackgroundGradient() {
+        chatBackgroundStyle = ChatBackgroundStyle.customGradient.rawValue
+        chatBackgroundStyleSelection = ChatBackgroundStyle.customGradient.rawValue
+        chatBackgroundSettingsMessage = L10n.tr("account.chatBackground.customApplied")
+        chatBackgroundSettingsMessageIsError = false
+    }
+
     private func fillFromUser() {
         // Sync the editable fields from storage before autosave or validation kicks in.
         isHydratingProfileForm = true
         firstName = store.currentUser?.firstName ?? ""
         lastName = store.currentUser?.lastName ?? ""
+        city = store.currentUser?.city ?? ""
         birthDate = store.currentUser?.birthDate ?? birthDate
+        gender = store.currentUser?.gender ?? .male
         orientation = store.currentUser?.orientation ?? .straight
-        showMe = store.currentUser?.showMe ?? .everyone
+        bio = store.currentUser?.normalizedBio ?? ""
+        intent = store.currentUser?.intent ?? .relationship
+        interests = store.currentUser?.normalizedInterests ?? ""
+        instagramTag = store.currentUser?.normalizedInstagramTag ?? ""
+        spotifyTag = store.currentUser?.normalizedSpotifyTag ?? ""
+        preferredGenders = Set(store.currentUser?.resolvedPreferredGenders ?? UserStore.defaultPreferredGenders)
+        minPreferredAge = store.currentUser?.resolvedMinPreferredAge ?? 20
+        maxPreferredAge = store.currentUser?.resolvedMaxPreferredAge ?? 32
+        maxDistanceKm = store.currentUser?.normalizedMaxDistanceKm
         smokes = store.currentUser?.smokes ?? false
         drinks = store.currentUser?.drinks ?? false
-        hobbies = store.currentUser?.hobbies ?? ""
-        passions = store.currentUser?.passions ?? ""
-        lookingFor = store.currentUser?.lookingFor ?? ""
-        favoriteSong = store.currentUser?.favoriteSong ?? ""
-        favoriteMovie = store.currentUser?.favoriteMovie ?? ""
         isHydratingProfileForm = false
         hasLoadedProfileForm = true
     }
 
     private var editableProfileDraft: EditableProfileDraft {
         EditableProfileDraft(
+            city: city,
+            gender: gender,
             orientation: orientation,
-            showMe: showMe,
+            bio: bio,
+            intent: intent,
+            interests: interests,
+            instagramTag: instagramTag,
+            spotifyTag: spotifyTag,
+            preferredGenders: orderedPreferredGenders,
+            minPreferredAge: minPreferredAge,
+            maxPreferredAge: maxPreferredAge,
+            maxDistanceKm: maxDistanceKm,
             smokes: smokes,
-            drinks: drinks,
-            hobbies: hobbies,
-            passions: passions,
-            lookingFor: lookingFor,
-            favoriteSong: favoriteSong,
-            favoriteMovie: favoriteMovie
+            drinks: drinks
         )
     }
 
@@ -405,36 +977,94 @@ struct AccountView: View {
         guard let user = store.currentUser else { return nil }
 
         return EditableProfileDraft(
+            city: user.city ?? "",
+            gender: user.gender ?? .male,
             orientation: user.orientation ?? .straight,
-            showMe: user.showMe,
+            bio: user.normalizedBio,
+            intent: user.intent ?? .relationship,
+            interests: user.normalizedInterests,
+            instagramTag: user.normalizedInstagramTag,
+            spotifyTag: user.normalizedSpotifyTag,
+            preferredGenders: user.resolvedPreferredGenders,
+            minPreferredAge: user.resolvedMinPreferredAge,
+            maxPreferredAge: user.resolvedMaxPreferredAge,
+            maxDistanceKm: user.normalizedMaxDistanceKm,
             smokes: user.smokes ?? false,
-            drinks: user.drinks ?? false,
-            hobbies: user.hobbies ?? "",
-            passions: user.passions ?? "",
-            lookingFor: user.lookingFor ?? "",
-            favoriteSong: user.favoriteSong ?? "",
-            favoriteMovie: user.favoriteMovie ?? ""
+            drinks: user.drinks ?? false
         )
     }
 
-    private func handleOrientationChange(from oldValue: UserOrientation, to newValue: UserOrientation) {
+    private var orderedPreferredGenders: [UserGender] {
+        UserGender.allCases.filter { preferredGenders.contains($0) }
+    }
+
+    private func stageDangerousProfileChanges(targetGender: UserGender, targetOrientation: UserOrientation) {
+        guard let user = store.currentUser else {
+            pendingDangerousGender = nil
+            pendingDangerousOrientation = nil
+            return
+        }
+
+        pendingDangerousGender = user.gender != targetGender ? targetGender : nil
+        pendingDangerousOrientation = user.orientation != targetOrientation ? targetOrientation : nil
+    }
+
+    private func rollbackPendingDangerousProfileChanges() {
+        guard pendingDangerousGender != nil || pendingDangerousOrientation != nil else { return }
+
+        if let user = store.currentUser {
+            isHydratingProfileForm = true
+            if pendingDangerousGender != nil {
+                gender = user.gender ?? .male
+            }
+            if pendingDangerousOrientation != nil {
+                orientation = user.orientation ?? .straight
+            }
+            isHydratingProfileForm = false
+        }
+
+        pendingDangerousGender = nil
+        pendingDangerousOrientation = nil
+    }
+
+    private func handleIdentityFieldChange() {
         guard hasLoadedProfileForm,
               !isHydratingProfileForm,
-              oldValue != newValue else { return }
+              !isSavingProfile,
+              !showEventRemovalAlert else { return }
 
-        guard store.willCurrentUserLoseMainEventRegistrations(orientation: newValue) else { return }
+        let targetGender = gender
+        let targetOrientation = orientation
 
-        pendingDangerousOrientation = newValue
-        isHydratingProfileForm = true
-        orientation = oldValue
-        isHydratingProfileForm = false
+        guard store.willCurrentUserLoseMainEventRegistrations(
+            changingGenderTo: targetGender,
+            orientation: targetOrientation
+        ) else {
+            return
+        }
+
+        stageDangerousProfileChanges(targetGender: targetGender, targetOrientation: targetOrientation)
         showEventRemovalAlert = true
+    }
+
+    @MainActor
+    private func flushPendingProfileEdits() async {
+        guard hasLoadedProfileForm,
+              !isHydratingProfileForm,
+              !isSavingProfile,
+              pendingDangerousGender == nil,
+              pendingDangerousOrientation == nil,
+              editableProfileDraft != storedEditableProfileDraft else { return }
+
+        await performProfileSave(showSuccessMessage: false)
     }
 
     private func autosaveProfileIfNeeded() async {
         // Debounce rapid edits so we only persist once the user pauses.
         guard hasLoadedProfileForm,
               !isHydratingProfileForm,
+              !isSavingProfile,
+              pendingDangerousGender == nil,
               pendingDangerousOrientation == nil,
               editableProfileDraft != storedEditableProfileDraft else { return }
 
@@ -442,19 +1072,32 @@ struct AccountView: View {
         guard !Task.isCancelled,
               hasLoadedProfileForm,
               !isHydratingProfileForm,
+              !isSavingProfile,
+              pendingDangerousGender == nil,
               pendingDangerousOrientation == nil,
               editableProfileDraft != storedEditableProfileDraft else { return }
 
-        performProfileSave(showSuccessMessage: false)
+        await performProfileSave(showSuccessMessage: false)
     }
 
+    @MainActor
     private func performProfileSave(
+        genderOverride: UserGender? = nil,
         orientationOverride: UserOrientation? = nil,
         notifyEventRemoval: Bool = false,
         showSuccessMessage: Bool = false
-    ) {
+    ) async {
+        guard !isSavingProfile else { return }
+
         // Preserve the draft when the save fails so the form stays consistent.
         let previousDraft = editableProfileDraft
+
+        if notifyEventRemoval,
+           let genderOverride {
+            isHydratingProfileForm = true
+            gender = genderOverride
+            isHydratingProfileForm = false
+        }
 
         if notifyEventRemoval,
            let orientationOverride {
@@ -463,34 +1106,50 @@ struct AccountView: View {
             isHydratingProfileForm = false
         }
 
+        let targetGender = genderOverride ?? gender
         let targetOrientation = orientationOverride ?? orientation
         let shouldShowEventRemovalMessage = notifyEventRemoval
-            || store.willCurrentUserLoseMainEventRegistrations(orientation: targetOrientation)
+            || store.willCurrentUserLoseMainEventRegistrations(
+                changingGenderTo: targetGender,
+                orientation: targetOrientation
+            )
 
-        if shouldShowEventRemovalMessage && pendingDangerousOrientation == nil && !notifyEventRemoval {
-            pendingDangerousOrientation = targetOrientation
+        if shouldShowEventRemovalMessage && !notifyEventRemoval {
+            stageDangerousProfileChanges(targetGender: targetGender, targetOrientation: targetOrientation)
             showEventRemovalAlert = true
             return
         }
 
-        let result = store.updateProfile(
+        isSavingProfile = true
+
+        let result = await store.updateProfile(
             firstName: firstName,
             lastName: lastName,
+            gender: targetGender,
+            city: city,
             birthDate: birthDate,
             orientation: targetOrientation,
-            showMe: showMe,
+            bio: bio,
+            intent: intent,
+            interests: interests,
+            instagramTag: instagramTag,
+            spotifyTag: spotifyTag,
+            preferredGenders: orderedPreferredGenders,
+            minPreferredAge: minPreferredAge,
+            maxPreferredAge: maxPreferredAge,
+            maxDistanceKm: maxDistanceKm,
             smokes: smokes,
-            drinks: drinks,
-            hobbies: hobbies,
-            passions: passions,
-            lookingFor: lookingFor,
-            favoriteSong: favoriteSong,
-            favoriteMovie: favoriteMovie
+            drinks: drinks
         )
 
         if let result {
             profileMessage = result
             profileMessageIsError = true
+            if genderOverride != nil {
+                isHydratingProfileForm = true
+                gender = previousDraft.gender
+                isHydratingProfileForm = false
+            }
             if orientationOverride != nil {
                 isHydratingProfileForm = true
                 orientation = previousDraft.orientation
@@ -508,6 +1167,16 @@ struct AccountView: View {
             }
             fillFromUser()
         }
+
+        isSavingProfile = false
+    }
+
+    @MainActor
+    private func performLogout() async {
+        guard !isLoggingOut else { return }
+        isLoggingOut = true
+        await store.logOut()
+        isLoggingOut = false
     }
 
     private func openPasswordResetMail() {
@@ -535,11 +1204,46 @@ struct AccountView: View {
             : L10n.tr("profile.security.mailFailed")
         }
     }
+
+    private func openEmailChangeMail() {
+        guard let email = store.currentUser?.email else {
+            securityMessage = L10n.tr("profile.error.noCurrentUser")
+            return
+        }
+
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = supportEmail
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "Email change request"),
+            URLQueryItem(name: "body", value: "Current profile email: \(email)\nNew email: ")
+        ]
+
+        guard let url = components.url else {
+            securityMessage = L10n.tr("profile.security.mailFailed")
+            return
+        }
+
+        openURL(url) { accepted in
+            securityMessage = accepted
+            ? L10n.tr("profile.security.mailOpened")
+            : L10n.tr("profile.security.mailFailed")
+        }
+    }
+
+    private func openSystemNotificationSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            return
+        }
+
+        openURL(url)
+    }
 }
 
 private struct AccountCard<Content: View>: View {
     let title: String
     var subtitle: String? = nil
+    var subtitleText: Text? = nil
     var icon: String
     @ViewBuilder var content: Content
 
@@ -556,7 +1260,11 @@ private struct AccountCard<Content: View>: View {
                     Text(title)
                         .font(.title3.weight(.semibold))
 
-                    if let subtitle {
+                    if let subtitleText {
+                        subtitleText
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if let subtitle {
                         Text(subtitle)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -599,6 +1307,7 @@ private struct ProfileReadOnlyRow: View {
 
 private struct ProfileTextField: View {
     let title: String
+    var subtitle: String? = nil
     @Binding var text: String
 
     var body: some View {
@@ -606,6 +1315,12 @@ private struct ProfileTextField: View {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
+
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             TextField(title, text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -657,6 +1372,371 @@ private struct ProfilePickerField<Option: Identifiable & Hashable>: View {
     }
 }
 
+private struct ProfileMultiSelectField<Option: Identifiable & Hashable>: View {
+    let title: String
+    let options: [Option]
+    @Binding var selected: Set<Option>
+    let titleForOption: (Option) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title + ":")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(options) { option in
+                Toggle(isOn: binding(for: option)) {
+                    Text(titleForOption(option))
+                        .font(.subheadline)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func binding(for option: Option) -> Binding<Bool> {
+        Binding(
+            get: { selected.contains(option) },
+            set: { isSelected in
+                if isSelected {
+                    selected.insert(option)
+                } else {
+                    selected.remove(option)
+                }
+            }
+        )
+    }
+}
+
+private struct ProfileAgeRangeField: View {
+    @Binding var minAge: Int
+    @Binding var maxAge: Int
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ProfileInlineNumericField(
+                title: L10n.tr("profile.ageRange.min"),
+                text: minAgeText
+            )
+
+            Divider()
+                .overlay(.white.opacity(0.08))
+
+            ProfileInlineNumericField(
+                title: L10n.tr("profile.ageRange.max"),
+                text: maxAgeText
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var minAgeText: Binding<String> {
+        Binding(
+            get: { String(minAge) },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                guard !digits.isEmpty, let parsed = Int(digits) else { return }
+                let clamped = min(max(parsed, 18), 98)
+                minAge = clamped
+                if maxAge <= clamped {
+                    maxAge = min(max(clamped + 1, 19), 99)
+                }
+            }
+        )
+    }
+
+    private var maxAgeText: Binding<String> {
+        Binding(
+            get: { String(maxAge) },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                guard !digits.isEmpty, let parsed = Int(digits) else { return }
+                let minimum = max(minAge + 1, 19)
+                maxAge = max(min(parsed, 99), minimum)
+            }
+        )
+    }
+}
+
+private struct ProfileDistanceField: View {
+    @Binding var maxDistanceKm: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ProfileInlineNumericField(
+                title: L10n.tr("profile.maxDistanceKm"),
+                subtitle: L10n.tr("profile.maxDistanceKm.hint"),
+                text: maxDistanceText,
+                prompt: L10n.tr("common.none"),
+                suffix: "km"
+            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var maxDistanceText: Binding<String> {
+        Binding(
+            get: { maxDistanceKm.map(String.init) ?? "" },
+            set: { newValue in
+                let digits = newValue.filter(\.isNumber)
+                if digits.isEmpty {
+                    maxDistanceKm = nil
+                    return
+                }
+
+                guard let parsed = Int(digits) else { return }
+                maxDistanceKm = max(parsed, 5)
+            }
+        )
+    }
+}
+
+private struct ProfileInlineNumericField: View {
+    let title: String
+    var subtitle: String? = nil
+    @Binding var text: String
+    var prompt: String = ""
+    var suffix: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 0)
+
+                HStack(alignment: .center, spacing: 6) {
+                    TextField(prompt, text: $text)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 64, alignment: .trailing)
+
+                    if let suffix, !text.isEmpty {
+                        Text(suffix)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(minHeight: 34)
+
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct SettingsToggleField: View {
+    let title: String
+    var subtitle: String? = nil
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline)
+
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct SettingsPickerField: View {
+    let title: String
+    @Binding var selection: String
+    let options: [String]
+    let titleForOption: (String) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Picker(title, selection: $selection) {
+                ForEach(options, id: \.self) { option in
+                    Text(titleForOption(option)).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct SendButtonGradientSettings: View {
+    @Binding var colorOne: Color
+    @Binding var colorTwo: Color
+    @Binding var colorThree: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("account.sendButtonGradient"))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color1"), color: $colorOne)
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color2"), color: $colorTwo)
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color3"), color: $colorThree)
+            }
+
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [colorOne, colorTwo, colorThree],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 44, height: 44)
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.28), lineWidth: 1)
+                }
+                .overlay {
+                    Image(systemName: "paperplane.fill")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct ChatBackgroundGradientSettings: View {
+    @Binding var colorOne: Color
+    @Binding var colorTwo: Color
+    @Binding var colorThree: Color
+    let onApply: () -> Void
+
+    @State private var draftColorOne: Color
+    @State private var draftColorTwo: Color
+    @State private var draftColorThree: Color
+
+    init(
+        colorOne: Binding<Color>,
+        colorTwo: Binding<Color>,
+        colorThree: Binding<Color>,
+        onApply: @escaping () -> Void
+    ) {
+        self._colorOne = colorOne
+        self._colorTwo = colorTwo
+        self._colorThree = colorThree
+        self.onApply = onApply
+        _draftColorOne = State(initialValue: colorOne.wrappedValue)
+        _draftColorTwo = State(initialValue: colorTwo.wrappedValue)
+        _draftColorThree = State(initialValue: colorThree.wrappedValue)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.tr("account.chatBackgroundGradient"))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color1"), color: $draftColorOne)
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color2"), color: $draftColorTwo)
+                SendButtonColorSwatch(title: L10n.tr("account.sendButtonGradient.color3"), color: $draftColorThree)
+            }
+
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [draftColorOne, draftColorTwo, draftColorThree],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(height: 88)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    Text(L10n.tr("chat.message.placeholder"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                }
+
+            Button(L10n.tr("common.apply")) {
+                colorOne = draftColorOne
+                colorTwo = draftColorTwo
+                colorThree = draftColorThree
+                onApply()
+            }
+            .buttonStyle(AccountPrimaryButtonStyle())
+            .disabled(!hasPendingChanges)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var hasPendingChanges: Bool {
+        draftColorOne.hexRGB != colorOne.hexRGB
+            || draftColorTwo.hexRGB != colorTwo.hexRGB
+            || draftColorThree.hexRGB != colorThree.hexRGB
+    }
+}
+
+private struct SendButtonColorSwatch: View {
+    let title: String
+    @Binding var color: Color
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ColorPicker(title, selection: $color, supportsOpacity: false)
+                .labelsHidden()
+
+            Circle()
+                .fill(color)
+                .frame(width: 28, height: 28)
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.18), lineWidth: 1)
+                }
+
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 private struct AccountPrimaryButtonStyle: ButtonStyle {
     var tint: Color = .orange
 
@@ -678,5 +1758,274 @@ private struct AccountPrimaryButtonStyle: ButtonStyle {
             .shadow(color: tint.opacity(0.22), radius: 18, y: 10)
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct AccountSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct ChatBackgroundConfirmationView: View {
+    let preview: PendingChatBackgroundPreview
+    @Binding var brightness: Double
+    let backgroundGradientColors: [Color]
+    let outgoingPalette: ChatBubblePalette
+    let incomingPalette: ChatBubblePalette
+    let onCancel: () -> Void
+    let onApply: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            previewBackground
+
+            Rectangle()
+                .fill(.black.opacity(colorScheme == .dark ? 0.10 : 0.04))
+                .ignoresSafeArea()
+
+            VStack {
+                Spacer(minLength: 0)
+                VStack(spacing: 16) {
+                    previewBubble(
+                        text: "Hey, this feels better.",
+                        palette: incomingPalette,
+                        isOutgoing: false,
+                        alignment: .leading
+                    )
+
+                    previewBubble(
+                        text: "Much closer to the real chat.",
+                        palette: outgoingPalette,
+                        isOutgoing: true,
+                        alignment: .trailing
+                    )
+                }
+                .padding(.horizontal, 18)
+                Spacer(minLength: 0)
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            previewTopBar
+        }
+        .safeAreaInset(edge: .bottom) {
+            previewBottomBar
+        }
+    }
+
+    @ViewBuilder
+    private var previewBackground: some View {
+        preview.style.backgroundView(
+            colorScheme: colorScheme,
+            customGradientColors: backgroundGradientColors
+        )
+        .brightness(brightness)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private var previewTopBar: some View {
+        if #available(iOS 26.0, *) {
+            HStack {
+                Button(action: onCancel) {
+                    Image(systemName: "chevron.left")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background {
+                            Circle()
+                                .fill(.clear)
+                                .glassEffect(in: Circle())
+                        }
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 16)
+
+                Button(action: onApply) {
+                    Text(L10n.tr("common.apply"))
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .frame(height: 44)
+                        .background {
+                            Capsule(style: .continuous)
+                                .fill(.clear)
+                                .glassEffect(in: Capsule(style: .continuous))
+                                .overlay {
+                                    Capsule(style: .continuous)
+                                        .fill(topBarPrimaryBackground.opacity(0.78))
+                                }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+            .background(
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(.white.opacity(0.08))
+                            .frame(height: 1)
+                    }
+                    .ignoresSafeArea(edges: .top)
+            )
+        } else {
+            HStack(spacing: 12) {
+                Button(action: onCancel) {
+                    Image(systemName: "chevron.left")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .frame(width: 44, height: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 0)
+
+                Button(action: onApply) {
+                    Text(L10n.tr("common.apply"))
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .background(
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(alignment: .bottom) {
+                        Rectangle()
+                            .fill(.white.opacity(0.10))
+                            .frame(height: 1)
+                    }
+                    .ignoresSafeArea(edges: .top)
+            )
+        }
+    }
+
+    private var topBarPrimaryBackground: LinearGradient {
+        LinearGradient(
+            colors: [.orange, .orange.opacity(0.82)],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    private var brightnessControl: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sun.min.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.88))
+
+            Slider(value: $brightness, in: -0.35...0.35)
+                .tint(.orange)
+                .frame(width: 132)
+
+            Image(systemName: "sun.max.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.88))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background {
+            if #available(iOS 26.0, *) {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
+        }
+    }
+
+    private var previewBottomBar: some View {
+        HStack(alignment: .center, spacing: 12) {
+            brightnessControl
+
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.70))
+
+                        Text(L10n.tr("chat.message.placeholder"))
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.70))
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(height: 52)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background(
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(.white.opacity(0.08))
+                        .frame(height: 1)
+                }
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
+
+    @ViewBuilder
+    private func previewBubble(
+        text: String,
+        palette: ChatBubblePalette,
+        isOutgoing: Bool,
+        alignment: HorizontalAlignment
+    ) -> some View {
+        HStack {
+            if isOutgoing { Spacer(minLength: 48) }
+
+            Text(text)
+                .font(.body)
+                .foregroundStyle(palette.textColor(colorScheme: colorScheme, isOutgoing: isOutgoing))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(palette.fillStyle(colorScheme: colorScheme, isOutgoing: isOutgoing))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .stroke(palette.strokeColor(colorScheme: colorScheme, isOutgoing: isOutgoing), lineWidth: 1)
+                        }
+                )
+                .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: isOutgoing ? .trailing : .leading)
+
+            if !isOutgoing { Spacer(minLength: 48) }
+        }
+        .frame(maxWidth: .infinity, alignment: isOutgoing ? .trailing : .leading)
     }
 }

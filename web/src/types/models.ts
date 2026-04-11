@@ -3,7 +3,7 @@ export type RealtimeConnectionState = 'connecting' | 'connected' | 'disconnected
 export type ChatAttachmentType = 'image' | 'video' | 'audio' | 'file';
 export type ChatDeliveryState = 'sending' | 'sent' | 'delivered' | 'read';
 export type NotificationType = 'chat' | 'match' | 'event' | 'system';
-export type MatchIntent = 'relationship' | 'friendship' | 'casual' | 'networking';
+export type MatchIntent = 'relationship' | 'friendship' | 'casual' | 'networking' | 'notSure';
 
 export type UserGender = 'male' | 'female' | 'nonBinary' | 'other';
 export type UserOrientation =
@@ -18,18 +18,24 @@ export type UserShowMe = 'men' | 'women' | 'everyone';
 export interface User {
   email: string;
   password: string;
+  appwriteUserId?: string;
   firstName?: string;
   lastName?: string;
   city?: string;
   cityLat?: number;
   cityLng?: number;
+  latitude?: number;
+  longitude?: number;
   birthDate?: string;
   gender?: UserGender;
   orientation?: UserOrientation;
   showMe: UserShowMe;
+  preferredGenders?: UserGender[];
   smokes?: boolean;
   drinks?: boolean;
   bio?: string;
+  minPreferredAge?: number;
+  maxPreferredAge?: number;
   ageRangeMin?: number;
   ageRangeMax?: number;
   maxDistanceKm?: number;
@@ -38,10 +44,13 @@ export interface User {
   passions?: string;
   lookingFor?: string;
   instagram?: string;
+  instagramTag?: string;
   telegram?: string;
+  spotifyTag?: string;
   website?: string;
   favoriteSong?: string;
   favoriteMovie?: string;
+  avatarFileId?: string;
   profileImageData?: string;
 }
 
