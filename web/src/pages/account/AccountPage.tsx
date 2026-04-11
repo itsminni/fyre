@@ -6,6 +6,7 @@ import { SegmentedControl } from '../../components/ui/SegmentedControl';
 import { useAppStore } from '../../hooks/useAppStore';
 import {
   EventHistoryStatus,
+  MatchIntent,
   UserGender,
   UserOrientation,
   UserShowMe,
@@ -36,6 +37,13 @@ const genderLabels: Record<UserGender, string> = {
   other: 'Altro'
 };
 
+const intentLabels: Record<MatchIntent, string> = {
+  relationship: 'Relazione',
+  friendship: 'Amicizia',
+  casual: 'Casual',
+  networking: 'Networking'
+};
+
 const historyStatusLabels: Record<EventHistoryStatus, string> = {
   confirmed: 'Confermato',
   waitlisted: 'In waiting list',
@@ -58,21 +66,36 @@ export function AccountPage(): JSX.Element {
     removeLocalUser,
     seedDemoUsers,
     resetLocalData,
-    logOut
+    logOut,
+    requestBrowserNotificationsPermission,
+    markAllNotificationsRead,
+    unreadNotificationsCount,
+    unreadThreadsCount,
+    notificationPermission
   } = useAppStore();
 
   const [section, setSection] = useState<Section>('profile');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [settingsFeedback, setSettingsFeedback] = useState<string | null>(null);
 
   const [orientation, setOrientation] = useState<UserOrientation>(currentUser?.orientation ?? 'straight');
   const [showMe, setShowMe] = useState<UserShowMe>(currentUser?.showMe ?? 'everyone');
   const [smokes, setSmokes] = useState(Boolean(currentUser?.smokes));
   const [drinks, setDrinks] = useState(Boolean(currentUser?.drinks));
+  const [bio, setBio] = useState(currentUser?.bio ?? '');
+  const [ageRangeMin, setAgeRangeMin] = useState(currentUser?.ageRangeMin ?? 24);
+  const [ageRangeMax, setAgeRangeMax] = useState(currentUser?.ageRangeMax ?? 40);
+  const [maxDistanceKm, setMaxDistanceKm] = useState(currentUser?.maxDistanceKm ?? 40);
+  const [intent, setIntent] = useState<MatchIntent>(currentUser?.intent ?? 'relationship');
   const [hobbies, setHobbies] = useState(currentUser?.hobbies ?? '');
   const [passions, setPassions] = useState(currentUser?.passions ?? '');
   const [lookingFor, setLookingFor] = useState(currentUser?.lookingFor ?? '');
+  const [instagram, setInstagram] = useState(currentUser?.instagram ?? '');
+  const [telegram, setTelegram] = useState(currentUser?.telegram ?? '');
+  const [website, setWebsite] = useState(currentUser?.website ?? '');
   const [favoriteSong, setFavoriteSong] = useState(currentUser?.favoriteSong ?? '');
   const [favoriteMovie, setFavoriteMovie] = useState(currentUser?.favoriteMovie ?? '');
+
   const [localUserEmail, setLocalUserEmail] = useState('');
   const [localUserPassword, setLocalUserPassword] = useState('');
   const [localUsersFeedback, setLocalUsersFeedback] = useState<string | null>(null);
@@ -112,14 +135,36 @@ export function AccountPage(): JSX.Element {
       showMe,
       smokes,
       drinks,
+      bio,
+      ageRangeMin,
+      ageRangeMax,
+      maxDistanceKm,
+      intent,
       hobbies,
       passions,
       lookingFor,
+      instagram,
+      telegram,
+      website,
       favoriteSong,
       favoriteMovie
     });
 
-    setFeedback(error ?? 'Profilo aggiornato.');
+    setFeedback(error ?? 'Preferenze aggiornate.');
+  }
+
+  async function handleEnablePushNotifications() {
+    const permission = await requestBrowserNotificationsPermission();
+    if (permission === 'unsupported') {
+      setSettingsFeedback('Il browser non supporta le notifiche push.');
+      return;
+    }
+
+    setSettingsFeedback(
+      permission === 'granted'
+        ? 'Notifiche browser abilitate.'
+        : 'Permesso notifiche browser non concesso.'
+    );
   }
 
   function handleCreateLocalUser(event: FormEvent<HTMLFormElement>) {
@@ -194,7 +239,7 @@ export function AccountPage(): JSX.Element {
 
       {section === 'profile' && (
         <div className="account-stack">
-          <Card title="Informazioni" subtitle="Dati base bloccati dopo il setup iniziale.">
+          <Card title="Informazioni" subtitle="Dati base e geolocalizzazione profilo.">
             <div className="account-profile-head">
               {currentUser.profileImageData ? (
                 <img src={currentUser.profileImageData} alt="Profilo" />
@@ -218,6 +263,18 @@ export function AccountPage(): JSX.Element {
                 <dd>{currentUser.lastName ?? '-'}</dd>
               </div>
               <div>
+                <dt>Citta</dt>
+                <dd>{currentUser.city ?? '-'}</dd>
+              </div>
+              <div>
+                <dt>Coordinate</dt>
+                <dd>
+                  {typeof currentUser.cityLat === 'number' && typeof currentUser.cityLng === 'number'
+                    ? `${currentUser.cityLat.toFixed(4)}, ${currentUser.cityLng.toFixed(4)}`
+                    : '-'}
+                </dd>
+              </div>
+              <div>
                 <dt>Data di nascita</dt>
                 <dd>{currentUser.birthDate ?? '-'}</dd>
               </div>
@@ -226,13 +283,9 @@ export function AccountPage(): JSX.Element {
                 <dd>{currentUser.gender ? genderLabels[currentUser.gender] : '-'}</dd>
               </div>
             </dl>
-
-            <p className="text-muted">
-              I dati anagrafici principali sono gestiti nel setup iniziale, come nella versione iOS.
-            </p>
           </Card>
 
-          <Card title="Preferenze">
+          <Card title="Preferenze avanzate">
             <div className="account-form-grid">
               <label>
                 Orientamento
@@ -260,6 +313,55 @@ export function AccountPage(): JSX.Element {
               </label>
 
               <label>
+                Intent
+                <select value={intent} onChange={(event) => setIntent(event.target.value as MatchIntent)}>
+                  {(Object.keys(intentLabels) as MatchIntent[]).map((option) => (
+                    <option key={option} value={option}>
+                      {intentLabels[option]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Bio
+                <textarea value={bio} onChange={(event) => setBio(event.target.value)} rows={2} />
+              </label>
+
+              <label>
+                Eta min
+                <input
+                  type="number"
+                  min={18}
+                  max={80}
+                  value={ageRangeMin}
+                  onChange={(event) => setAgeRangeMin(Number(event.target.value))}
+                />
+              </label>
+
+              <label>
+                Eta max
+                <input
+                  type="number"
+                  min={18}
+                  max={80}
+                  value={ageRangeMax}
+                  onChange={(event) => setAgeRangeMax(Number(event.target.value))}
+                />
+              </label>
+
+              <label>
+                Distanza max (km)
+                <input
+                  type="number"
+                  min={1}
+                  max={300}
+                  value={maxDistanceKm}
+                  onChange={(event) => setMaxDistanceKm(Number(event.target.value))}
+                />
+              </label>
+
+              <label>
                 Hobby
                 <textarea value={hobbies} onChange={(event) => setHobbies(event.target.value)} rows={2} />
               </label>
@@ -276,6 +378,21 @@ export function AccountPage(): JSX.Element {
                   onChange={(event) => setLookingFor(event.target.value)}
                   rows={2}
                 />
+              </label>
+
+              <label>
+                Instagram
+                <input value={instagram} onChange={(event) => setInstagram(event.target.value)} />
+              </label>
+
+              <label>
+                Telegram
+                <input value={telegram} onChange={(event) => setTelegram(event.target.value)} />
+              </label>
+
+              <label>
+                Sito
+                <input value={website} onChange={(event) => setWebsite(event.target.value)} />
               </label>
 
               <label>
@@ -308,7 +425,6 @@ export function AccountPage(): JSX.Element {
             </div>
 
             <Button onClick={savePreferences}>Salva preferenze</Button>
-
             {feedback && <p className="form-feedback">{feedback}</p>}
 
             <Button variant="danger" onClick={logOut}>
@@ -366,6 +482,55 @@ export function AccountPage(): JSX.Element {
 
       {section === 'settings' && (
         <div className="account-stack">
+          <Card title="Realtime e notifiche">
+            <div className="settings-stack">
+              <p className="text-muted">
+                Stato realtime: <strong>{persisted.realtimeState}</strong>
+              </p>
+              <p className="text-muted">Thread non letti: {unreadThreadsCount}</p>
+              <p className="text-muted">Notifiche non lette: {unreadNotificationsCount}</p>
+
+              <label className="inline-checkbox">
+                <input
+                  type="checkbox"
+                  checked={persisted.settings.notificationsEnabled}
+                  onChange={(event) => updateSettings({ notificationsEnabled: event.target.checked })}
+                />
+                <span>Notifiche inbox abilitate</span>
+              </label>
+
+              <label className="inline-checkbox">
+                <input
+                  type="checkbox"
+                  checked={persisted.settings.notificationsPollingEnabled}
+                  onChange={(event) =>
+                    updateSettings({ notificationsPollingEnabled: event.target.checked })
+                  }
+                />
+                <span>Polling notifiche abilitato</span>
+              </label>
+
+              <label className="inline-checkbox">
+                <input
+                  type="checkbox"
+                  checked={persisted.settings.browserPushEnabled}
+                  onChange={(event) => updateSettings({ browserPushEnabled: event.target.checked })}
+                />
+                <span>Push browser abilitate</span>
+              </label>
+
+              <Button variant="secondary" onClick={handleEnablePushNotifications}>
+                Richiedi permesso push ({notificationPermission})
+              </Button>
+
+              <Button variant="ghost" onClick={markAllNotificationsRead}>
+                Segna notifiche lette
+              </Button>
+
+              {settingsFeedback && <p className="form-feedback">{settingsFeedback}</p>}
+            </div>
+          </Card>
+
           <Card title="Impostazioni app">
             <div className="settings-stack">
               <label>
@@ -380,17 +545,6 @@ export function AccountPage(): JSX.Element {
                   <option value="light">Chiaro</option>
                   <option value="dark">Scuro</option>
                 </select>
-              </label>
-
-              <label className="inline-checkbox">
-                <input
-                  type="checkbox"
-                  checked={persisted.settings.notificationsEnabled}
-                  onChange={(event) =>
-                    updateSettings({ notificationsEnabled: event.target.checked })
-                  }
-                />
-                <span>Notifiche</span>
               </label>
 
               <label className="inline-checkbox">
@@ -459,9 +613,7 @@ export function AccountPage(): JSX.Element {
                     <div className="local-user-row__meta">
                       <p>{user.displayName}</p>
                       <small>{user.email}</small>
-                      <small>
-                        {user.isProfileComplete ? 'Profilo completo' : 'Profilo incompleto'}
-                      </small>
+                      <small>{user.isProfileComplete ? 'Profilo completo' : 'Profilo incompleto'}</small>
                     </div>
 
                     <div className="local-user-row__actions">

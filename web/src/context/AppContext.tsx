@@ -1,19 +1,26 @@
 import {
-  useContext,
-  createContext,
   ReactNode,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from 'react';
 import {
+  AppNotification,
   AppSettings,
+  ChatAttachment,
+  ChatMessage,
   ChatThread,
   DiscoverProfile,
   EventHistoryItem,
   LocalUserSummary,
+  MainEventConfig,
+  MainEventInfo,
   MainEventSnapshot,
+  MatchIntent,
   PersistedAppState,
   ProfileUpdateInput,
   User,
@@ -35,23 +42,31 @@ import {
   cancelMainEventRegistration,
   getFlags,
   getSnapshot,
-  MainEventConfig,
   registerForMainEvent,
   removeUserFromMainEvent,
   willLoseMainEventRegistrations
 } from '../services/eventEngine';
-import {
-  formatTime,
-  getMainEventDate,
-  MAIN_EVENT_INFO,
-  MAIN_EVENT_TITLE,
-  MAX_PARTICIPANTS,
-  MAX_PER_GENDER
-} from '../data/mockData';
+import { formatTime } from '../data/mockData';
 
 interface EventFeedback {
   message: string;
   isError: boolean;
+}
+
+interface SendMessageInput {
+  threadId: string;
+  text: string;
+  replyToMessageId?: string;
+  attachments?: ChatAttachment[];
+}
+
+type SwipeDecision = 'left' | 'right';
+type ParticipantBucket = 'participants' | 'waitingList';
+
+interface SwipeDecisionResult {
+  matched: boolean;
+  message: string;
+  threadId?: string;
 }
 
 interface AppContextValue {
@@ -60,13 +75,17 @@ interface AppContextValue {
   localUsers: LocalUserSummary[];
   discoverProfiles: DiscoverProfile[];
   mainEventConfig: MainEventConfig;
-  mainEventInfo: typeof MAIN_EVENT_INFO;
+  mainEventInfo: MainEventInfo;
+  isEventAdmin: boolean;
   mainEventSnapshot: MainEventSnapshot;
   mainEventFlags: {
     isRegistered: boolean;
     isWaiting: boolean;
   };
   currentUserUpcomingEventHistory: EventHistoryItem[];
+  unreadNotificationsCount: number;
+  unreadThreadsCount: number;
+  notificationPermission: NotificationPermission | 'unsupported';
   signUp(email: string, password: string): string | null;
   createLocalUser(email: string, password: string): string | null;
   logIn(email: string, password: string): string | null;
@@ -82,17 +101,38 @@ interface AppContextValue {
     showMe: User['showMe'];
     smokes: boolean;
     drinks: boolean;
+    bio: string;
+    ageRangeMin: number;
+    ageRangeMax: number;
+    maxDistanceKm: number;
+    intent: MatchIntent;
     hobbies: string;
     passions: string;
     lookingFor: string;
+    instagram: string;
+    telegram: string;
+    website: string;
     favoriteSong: string;
     favoriteMovie: string;
   }): string | null;
   willUserLoseEventRegistrations(nextGender: UserGender, nextOrientation: UserOrientation): boolean;
   registerCurrentUserForMainEvent(): EventFeedback;
   cancelCurrentUserMainEventRegistration(): EventFeedback;
-  sendMessage(threadId: string, text: string): void;
+  updateMainEventConfig(patch: Partial<MainEventConfig>): string | null;
+  updateMainEventInfo(patch: Partial<MainEventInfo>): void;
+  adminAddMainEventParticipant(
+    email: string,
+    gender: UserGender,
+    destination: ParticipantBucket
+  ): string | null;
+  adminRemoveMainEventParticipant(email: string, destination: ParticipantBucket): string | null;
+  sendMessage(input: SendMessageInput): void;
+  markThreadRead(threadId: string): void;
   deleteThread(threadId: string): void;
+  submitSwipeDecision(profileId: string, decision: SwipeDecision): SwipeDecisionResult;
+  markNotificationRead(notificationId: string): void;
+  markAllNotificationsRead(): void;
+  requestBrowserNotificationsPermission(): Promise<NotificationPermission | 'unsupported'>;
   updateSettings(patch: Partial<AppSettings>): void;
   setThreads(threads: ChatThread[]): void;
   hydrateMockDiscoverProfiles(): Promise<void>;
@@ -101,7 +141,19 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
-const MAIN_EVENT_DATE = getMainEventDate();
+const INCOMING_MESSAGE_LIBRARY = [
+  'Ti va un aperitivo questa settimana?',
+  'Ho visto il tuo profilo, ottima energia.',
+  'Ci sentiamo dopo cena?',
+  'Quando sei libera/o per un caffe?',
+  'Hai idee per il weekend?'
+];
+
+const POLL_NOTIFICATION_LIBRARY = [
+  'Ricorda di confermare la tua disponibilita per il Main Event.',
+  'Nuovi profili compatibili disponibili nella Home.',
+  'Hai una chat con messaggi non letti.'
+];
 
 const DEMO_USERS: User[] = [
   {
@@ -109,15 +161,26 @@ const DEMO_USERS: User[] = [
     password: 'DEMO_PASSWORD_REDACTED',
     firstName: 'Giulia',
     lastName: 'Rossi',
+    city: 'Reggio Emilia',
+    cityLat: 44.6983,
+    cityLng: 10.6318,
     birthDate: '1998-05-22',
     gender: 'female',
     orientation: 'straight',
     showMe: 'men',
     smokes: false,
     drinks: true,
+    bio: 'Amo concerti, viaggi brevi e persone genuine.',
+    ageRangeMin: 24,
+    ageRangeMax: 38,
+    maxDistanceKm: 45,
+    intent: 'relationship',
     hobbies: 'Concerti e viaggi brevi',
     passions: 'Arte contemporanea',
     lookingFor: 'Connessioni autentiche',
+    instagram: 'giulia.fyre',
+    telegram: 'giuliafyre',
+    website: '',
     favoriteSong: 'Dancing Queen',
     favoriteMovie: 'La La Land'
   },
@@ -126,15 +189,26 @@ const DEMO_USERS: User[] = [
     password: 'DEMO_PASSWORD_REDACTED',
     firstName: 'Marco',
     lastName: 'Bianchi',
+    city: 'Parma',
+    cityLat: 44.8015,
+    cityLng: 10.3279,
     birthDate: '1995-09-03',
     gender: 'male',
     orientation: 'straight',
     showMe: 'women',
     smokes: false,
     drinks: true,
+    bio: 'Sport, cocktail bar e road trip spontanei.',
+    ageRangeMin: 23,
+    ageRangeMax: 36,
+    maxDistanceKm: 60,
+    intent: 'casual',
     hobbies: 'Sport e trekking',
     passions: 'Musica live',
     lookingFor: 'Nuove conoscenze',
+    instagram: 'marco.ontheroad',
+    telegram: '',
+    website: '',
     favoriteSong: 'Lose Yourself',
     favoriteMovie: 'Inception'
   },
@@ -143,37 +217,110 @@ const DEMO_USERS: User[] = [
     password: 'DEMO_PASSWORD_REDACTED',
     firstName: 'Sara',
     lastName: 'Neri',
+    city: 'Modena',
+    cityLat: 44.6471,
+    cityLng: 10.9252,
     birthDate: '1996-12-14',
     gender: 'female',
     orientation: 'bisexual',
     showMe: 'everyone',
     smokes: false,
     drinks: false,
+    bio: 'Fotografia, yoga e chiacchiere profonde.',
+    ageRangeMin: 24,
+    ageRangeMax: 42,
+    maxDistanceKm: 70,
+    intent: 'friendship',
     hobbies: 'Fotografia e yoga',
     passions: 'Cinema e podcast',
     lookingFor: 'Persone affini',
+    instagram: '',
+    telegram: 'saraflow',
+    website: '',
     favoriteSong: 'Halo',
     favoriteMovie: 'Arrival'
   }
 ];
 
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function formatLastSeen(dateIso: string | undefined): string {
+  if (!dateIso) {
+    return 'Ultimo accesso non disponibile';
+  }
+
+  const timestamp = new Date(dateIso).getTime();
+  if (Number.isNaN(timestamp)) {
+    return 'Ultimo accesso non disponibile';
+  }
+
+  const diffMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (diffMinutes <= 1) {
+    return 'Attivo poco fa';
+  }
+  if (diffMinutes < 60) {
+    return `Attivo ${diffMinutes} min fa`;
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `Attivo ${diffHours} h fa`;
+  }
+
+  return `Attivo il ${new Intl.DateTimeFormat('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(timestamp))}`;
+}
+
+function createHistoryEntry(
+  email: string,
+  status: EventHistoryItem['status'],
+  config: MainEventConfig
+): EventHistoryItem {
+  return {
+    id: crypto.randomUUID(),
+    email,
+    eventTitle: config.title,
+    eventDate: config.date,
+    status,
+    timestamp: nowIso()
+  };
+}
+
 export function AppProvider({ children }: { children: ReactNode }): JSX.Element {
   const [persisted, setPersisted] = useState<PersistedAppState>(() => loadPersistedState());
   const [discoverProfiles, setDiscoverProfiles] = useState<DiscoverProfile[]>([]);
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermission | 'unsupported'
+  >(() => {
+    if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+      return 'unsupported';
+    }
+    return Notification.permission;
+  });
 
-  const mainEventConfig = useMemo<MainEventConfig>(
-    () => ({
-      date: MAIN_EVENT_DATE,
-      title: MAIN_EVENT_TITLE,
-      maxParticipants: MAX_PARTICIPANTS,
-      maxPerGender: MAX_PER_GENDER
-    }),
-    []
-  );
+  const pendingTimeoutsRef = useRef<number[]>([]);
+  const lastBrowserNotificationRef = useRef<string | null>(null);
 
   useEffect(() => {
     persistState(persisted);
   }, [persisted]);
+
+  useEffect(
+    () => () => {
+      pendingTimeoutsRef.current.forEach((timer) => window.clearTimeout(timer));
+      pendingTimeoutsRef.current = [];
+    },
+    []
+  );
+
+  const mainEventConfig = persisted.mainEventConfig;
+  const mainEventInfo = persisted.mainEventInfo;
 
   const hydrateMockDiscoverProfiles = useCallback(async (): Promise<void> => {
     const profiles = await backendApi.fetchDiscoverProfiles();
@@ -206,6 +353,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       persisted.users.find((candidate) => candidate.email === persisted.currentUserEmail) ?? null
     );
   }, [persisted.currentUserEmail, persisted.users]);
+
+  const isEventAdmin = useMemo(() => {
+    if (!currentUser) {
+      return false;
+    }
+
+    return currentUser.email === 'admin@fyre.local' || currentUser.email.endsWith('.demo@fyre.local');
+  }, [currentUser]);
 
   const localUsers = useMemo<LocalUserSummary[]>(
     () =>
@@ -245,6 +400,16 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       );
   }, [currentUser, persisted.mainEventState.history]);
 
+  const unreadNotificationsCount = useMemo(
+    () => persisted.notifications.filter((notification) => !notification.readAt).length,
+    [persisted.notifications]
+  );
+
+  const unreadThreadsCount = useMemo(
+    () => persisted.threads.filter((thread) => thread.unreadCount > 0).length,
+    [persisted.threads]
+  );
+
   const withCurrentUser = useCallback(
     (callback: (user: User) => User): void => {
       setPersisted((prev) => {
@@ -273,88 +438,121 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     []
   );
 
-  const signUp = useCallback((email: string, password: string): string | null => {
-    if (!isValidEmail(email)) {
-      return 'Inserisci un indirizzo email valido.';
-    }
+  const pushNotification = useCallback(
+    (payload: Omit<AppNotification, 'id' | 'createdAt' | 'readAt'>): void => {
+      if (!persisted.settings.notificationsEnabled) {
+        return;
+      }
 
-    if (password.length < 6) {
-      return 'La password deve contenere almeno 6 caratteri.';
-    }
+      setPersisted((prev) => ({
+        ...prev,
+        notifications: [
+          {
+            id: crypto.randomUUID(),
+            type: payload.type,
+            title: payload.title,
+            body: payload.body,
+            threadId: payload.threadId,
+            createdAt: nowIso()
+          },
+          ...prev.notifications
+        ].slice(0, 180)
+      }));
+    },
+    [persisted.settings.notificationsEnabled]
+  );
 
-    const normalized = normalizeEmail(email);
-    const alreadyExists = persisted.users.some((candidate) => candidate.email === normalized);
-    if (alreadyExists) {
-      return 'Esiste gia un account con questa email.';
-    }
+  const signUp = useCallback(
+    (email: string, password: string): string | null => {
+      if (!isValidEmail(email)) {
+        return 'Inserisci un indirizzo email valido.';
+      }
 
-    const nextUser: User = {
-      email: normalized,
-      password,
-      showMe: 'everyone'
-    };
+      if (password.length < 6) {
+        return 'La password deve contenere almeno 6 caratteri.';
+      }
 
-    setPersisted((prev) => ({
-      ...prev,
-      users: [...prev.users, nextUser],
-      currentUserEmail: nextUser.email
-    }));
+      const normalized = normalizeEmail(email);
+      const alreadyExists = persisted.users.some((candidate) => candidate.email === normalized);
+      if (alreadyExists) {
+        return 'Esiste gia un account con questa email.';
+      }
 
-    return null;
-  }, [persisted.users]);
+      const nextUser: User = {
+        email: normalized,
+        password,
+        showMe: 'everyone'
+      };
 
-  const createLocalUser = useCallback((email: string, password: string): string | null => {
-    if (!isValidEmail(email)) {
-      return 'Inserisci un indirizzo email valido.';
-    }
+      setPersisted((prev) => ({
+        ...prev,
+        users: [...prev.users, nextUser],
+        currentUserEmail: nextUser.email
+      }));
 
-    if (password.length < 6) {
-      return 'La password deve contenere almeno 6 caratteri.';
-    }
+      return null;
+    },
+    [persisted.users]
+  );
 
-    const normalized = normalizeEmail(email);
-    const alreadyExists = persisted.users.some((candidate) => candidate.email === normalized);
-    if (alreadyExists) {
-      return 'Esiste gia un account con questa email.';
-    }
+  const createLocalUser = useCallback(
+    (email: string, password: string): string | null => {
+      if (!isValidEmail(email)) {
+        return 'Inserisci un indirizzo email valido.';
+      }
 
-    const nextUser: User = {
-      email: normalized,
-      password,
-      showMe: 'everyone'
-    };
+      if (password.length < 6) {
+        return 'La password deve contenere almeno 6 caratteri.';
+      }
 
-    setPersisted((prev) => ({
-      ...prev,
-      users: [...prev.users, nextUser]
-    }));
+      const normalized = normalizeEmail(email);
+      const alreadyExists = persisted.users.some((candidate) => candidate.email === normalized);
+      if (alreadyExists) {
+        return 'Esiste gia un account con questa email.';
+      }
 
-    return null;
-  }, [persisted.users]);
+      const nextUser: User = {
+        email: normalized,
+        password,
+        showMe: 'everyone'
+      };
 
-  const logIn = useCallback((email: string, password: string): string | null => {
-    if (!isValidEmail(email)) {
-      return 'Inserisci un indirizzo email valido.';
-    }
+      setPersisted((prev) => ({
+        ...prev,
+        users: [...prev.users, nextUser]
+      }));
 
-    const normalized = normalizeEmail(email);
-    const account = persisted.users.find((candidate) => candidate.email === normalized);
+      return null;
+    },
+    [persisted.users]
+  );
 
-    if (!account) {
-      return 'Nessun account trovato con questa email.';
-    }
+  const logIn = useCallback(
+    (email: string, password: string): string | null => {
+      if (!isValidEmail(email)) {
+        return 'Inserisci un indirizzo email valido.';
+      }
 
-    if (account.password !== password) {
-      return 'Password errata.';
-    }
+      const normalized = normalizeEmail(email);
+      const account = persisted.users.find((candidate) => candidate.email === normalized);
 
-    setPersisted((prev) => ({
-      ...prev,
-      currentUserEmail: normalized
-    }));
+      if (!account) {
+        return 'Nessun account trovato con questa email.';
+      }
 
-    return null;
-  }, [persisted.users]);
+      if (account.password !== password) {
+        return 'Password errata.';
+      }
+
+      setPersisted((prev) => ({
+        ...prev,
+        currentUserEmail: normalized
+      }));
+
+      return null;
+    },
+    [persisted.users]
+  );
 
   const logOut = useCallback(() => {
     setPersisted((prev) => ({
@@ -363,49 +561,55 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     }));
   }, []);
 
-  const switchLocalUser = useCallback((email: string): string | null => {
-    const normalized = normalizeEmail(email);
-    const exists = persisted.users.some((candidate) => candidate.email === normalized);
+  const switchLocalUser = useCallback(
+    (email: string): string | null => {
+      const normalized = normalizeEmail(email);
+      const exists = persisted.users.some((candidate) => candidate.email === normalized);
 
-    if (!exists) {
-      return 'Utente non trovato nella memoria locale.';
-    }
+      if (!exists) {
+        return 'Utente non trovato nella memoria locale.';
+      }
 
-    setPersisted((prev) => ({
-      ...prev,
-      currentUserEmail: normalized
-    }));
-
-    return null;
-  }, [persisted.users]);
-
-  const removeLocalUser = useCallback((email: string): string | null => {
-    const normalized = normalizeEmail(email);
-    const exists = persisted.users.some((candidate) => candidate.email === normalized);
-
-    if (!exists) {
-      return 'Utente non trovato nella memoria locale.';
-    }
-
-    setPersisted((prev) => {
-      const users = prev.users.filter((candidate) => candidate.email !== normalized);
-      const nextCurrentUserEmail =
-        prev.currentUserEmail === normalized ? users[0]?.email ?? null : prev.currentUserEmail;
-
-      return {
+      setPersisted((prev) => ({
         ...prev,
-        users,
-        currentUserEmail: nextCurrentUserEmail,
-        mainEventState: {
-          participants: prev.mainEventState.participants.filter((item) => item.email !== normalized),
-          waitingList: prev.mainEventState.waitingList.filter((item) => item.email !== normalized),
-          history: prev.mainEventState.history.filter((item) => item.email !== normalized)
-        }
-      };
-    });
+        currentUserEmail: normalized
+      }));
 
-    return null;
-  }, [persisted.users]);
+      return null;
+    },
+    [persisted.users]
+  );
+
+  const removeLocalUser = useCallback(
+    (email: string): string | null => {
+      const normalized = normalizeEmail(email);
+      const exists = persisted.users.some((candidate) => candidate.email === normalized);
+
+      if (!exists) {
+        return 'Utente non trovato nella memoria locale.';
+      }
+
+      setPersisted((prev) => {
+        const users = prev.users.filter((candidate) => candidate.email !== normalized);
+        const nextCurrentUserEmail =
+          prev.currentUserEmail === normalized ? users[0]?.email ?? null : prev.currentUserEmail;
+
+        return {
+          ...prev,
+          users,
+          currentUserEmail: nextCurrentUserEmail,
+          mainEventState: {
+            participants: prev.mainEventState.participants.filter((item) => item.email !== normalized),
+            waitingList: prev.mainEventState.waitingList.filter((item) => item.email !== normalized),
+            history: prev.mainEventState.history.filter((item) => item.email !== normalized)
+          }
+        };
+      });
+
+      return null;
+    },
+    [persisted.users]
+  );
 
   const seedDemoUsers = useCallback((): number => {
     const existingEmails = new Set(persisted.users.map((user) => user.email));
@@ -463,6 +667,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       const requiredFields = [
         input.firstName,
         input.lastName,
+        input.city,
+        input.bio,
         input.hobbies,
         input.passions,
         input.lookingFor,
@@ -477,6 +683,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       const age = calculateAge(input.birthDate);
       if (age < 18) {
         return 'Devi avere almeno 18 anni.';
+      }
+
+      if (input.ageRangeMin < 18 || input.ageRangeMax < input.ageRangeMin) {
+        return 'Il range di eta non e valido.';
+      }
+
+      if (input.maxDistanceKm < 1 || input.maxDistanceKm > 300) {
+        return 'La distanza massima deve essere tra 1 e 300 km.';
       }
 
       const shouldRemoveMainEvent = willLoseMainEventRegistrations(
@@ -501,15 +715,26 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           ...existing,
           firstName: input.firstName.trim(),
           lastName: input.lastName.trim(),
+          city: input.city.trim(),
+          cityLat: input.cityLat,
+          cityLng: input.cityLng,
           birthDate: input.birthDate,
           gender: input.gender,
           orientation: input.orientation,
           showMe: input.showMe,
           smokes: input.smokes,
           drinks: input.drinks,
+          bio: input.bio.trim(),
+          ageRangeMin: input.ageRangeMin,
+          ageRangeMax: input.ageRangeMax,
+          maxDistanceKm: input.maxDistanceKm,
+          intent: input.intent,
           hobbies: input.hobbies.trim(),
           passions: input.passions.trim(),
           lookingFor: input.lookingFor.trim(),
+          instagram: input.instagram.trim(),
+          telegram: input.telegram.trim(),
+          website: input.website.trim(),
           favoriteSong: input.favoriteSong.trim(),
           favoriteMovie: input.favoriteMovie.trim()
         };
@@ -521,14 +746,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           ...prev,
           users,
           mainEventState: shouldRemoveMainEvent
-            ? removeUserFromMainEvent(prev.mainEventState, updatedUser.email, mainEventConfig)
+            ? removeUserFromMainEvent(prev.mainEventState, updatedUser.email, prev.mainEventConfig)
             : prev.mainEventState
         };
       });
 
       return null;
     },
-    [currentUser, mainEventConfig, persisted.mainEventState]
+    [currentUser, persisted.mainEventState]
   );
 
   const updateAccountPreferences = useCallback(
@@ -537,14 +762,30 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       showMe: User['showMe'];
       smokes: boolean;
       drinks: boolean;
+      bio: string;
+      ageRangeMin: number;
+      ageRangeMax: number;
+      maxDistanceKm: number;
+      intent: MatchIntent;
       hobbies: string;
       passions: string;
       lookingFor: string;
+      instagram: string;
+      telegram: string;
+      website: string;
       favoriteSong: string;
       favoriteMovie: string;
     }): string | null => {
       if (!currentUser) {
         return 'Effettua di nuovo l accesso.';
+      }
+
+      if (input.ageRangeMin < 18 || input.ageRangeMax < input.ageRangeMin) {
+        return 'Range eta non valido.';
+      }
+
+      if (input.maxDistanceKm < 1 || input.maxDistanceKm > 300) {
+        return 'Distanza non valida.';
       }
 
       const shouldRemoveMainEvent = willLoseMainEventRegistrations(
@@ -560,9 +801,17 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         showMe: input.showMe,
         smokes: input.smokes,
         drinks: input.drinks,
+        bio: input.bio.trim(),
+        ageRangeMin: input.ageRangeMin,
+        ageRangeMax: input.ageRangeMax,
+        maxDistanceKm: input.maxDistanceKm,
+        intent: input.intent,
         hobbies: input.hobbies.trim(),
         passions: input.passions.trim(),
         lookingFor: input.lookingFor.trim(),
+        instagram: input.instagram.trim(),
+        telegram: input.telegram.trim(),
+        website: input.website.trim(),
         favoriteSong: input.favoriteSong.trim(),
         favoriteMovie: input.favoriteMovie.trim()
       }));
@@ -577,7 +826,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
             mainEventState: removeUserFromMainEvent(
               prev.mainEventState,
               prev.currentUserEmail,
-              mainEventConfig
+              prev.mainEventConfig
             )
           };
         });
@@ -585,14 +834,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       return null;
     },
-    [currentUser, mainEventConfig, persisted.mainEventState, withCurrentUser]
+    [currentUser, persisted.mainEventState, withCurrentUser]
   );
 
   const registerCurrentUserForMainEvent = useCallback((): EventFeedback => {
     const result = registerForMainEvent(
       persisted.mainEventState,
       currentUser,
-      mainEventConfig
+      persisted.mainEventConfig
     );
 
     if (result.nextState !== persisted.mainEventState) {
@@ -606,13 +855,13 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       message: result.message,
       isError: result.isError
     };
-  }, [currentUser, mainEventConfig, persisted.mainEventState]);
+  }, [currentUser, persisted.mainEventConfig, persisted.mainEventState]);
 
   const cancelCurrentUserMainEventRegistration = useCallback((): EventFeedback => {
     const result = cancelMainEventRegistration(
       persisted.mainEventState,
       currentUser,
-      mainEventConfig
+      persisted.mainEventConfig
     );
 
     if (result.nextState !== persisted.mainEventState) {
@@ -626,13 +875,256 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       message: result.message,
       isError: result.isError
     };
-  }, [currentUser, mainEventConfig, persisted.mainEventState]);
+  }, [currentUser, persisted.mainEventConfig, persisted.mainEventState]);
 
-  const sendMessage = useCallback((threadId: string, text: string): void => {
-    const normalizedText = text.trim();
-    if (!normalizedText) {
-      return;
+  const updateMainEventConfig = useCallback((patch: Partial<MainEventConfig>): string | null => {
+    if (patch.maxParticipants !== undefined && patch.maxParticipants < 2) {
+      return 'La capienza totale deve essere almeno 2.';
     }
+
+    if (patch.maxPerGender !== undefined && patch.maxPerGender < 1) {
+      return 'I posti per genere devono essere almeno 1.';
+    }
+
+    if (patch.date !== undefined && Number.isNaN(new Date(patch.date).getTime())) {
+      return 'Data evento non valida.';
+    }
+
+    setPersisted((prev) => {
+      const merged: MainEventConfig = {
+        ...prev.mainEventConfig,
+        ...patch
+      };
+
+      const maxParticipants = Math.max(2, Math.round(merged.maxParticipants));
+      const maxPerGender = Math.max(1, Math.min(Math.round(merged.maxPerGender), maxParticipants));
+
+      return {
+        ...prev,
+        mainEventConfig: {
+          ...merged,
+          maxParticipants,
+          maxPerGender
+        }
+      };
+    });
+
+    return null;
+  }, []);
+
+  const updateMainEventInfo = useCallback((patch: Partial<MainEventInfo>): void => {
+    setPersisted((prev) => ({
+      ...prev,
+      mainEventInfo: {
+        ...prev.mainEventInfo,
+        ...patch,
+        rules: patch.rules ?? prev.mainEventInfo.rules
+      }
+    }));
+  }, []);
+
+  const adminAddMainEventParticipant = useCallback(
+    (email: string, gender: UserGender, destination: ParticipantBucket): string | null => {
+      const normalized = normalizeEmail(email);
+      if (!isValidEmail(normalized)) {
+        return 'Inserisci una email valida.';
+      }
+
+      if (gender !== 'male' && gender !== 'female') {
+        return 'Per questo evento admin sono ammessi solo uomo/donna.';
+      }
+
+      const alreadyPresent =
+        persisted.mainEventState.participants.some((item) => item.email === normalized) ||
+        persisted.mainEventState.waitingList.some((item) => item.email === normalized);
+
+      if (alreadyPresent) {
+        return 'Questo utente e gia presente in evento o waiting list.';
+      }
+
+      setPersisted((prev) => ({
+        ...prev,
+        mainEventState: {
+          ...prev.mainEventState,
+          participants:
+            destination === 'participants'
+              ? [...prev.mainEventState.participants, { email: normalized, gender }]
+              : prev.mainEventState.participants,
+          waitingList:
+            destination === 'waitingList'
+              ? [...prev.mainEventState.waitingList, { email: normalized, gender }]
+              : prev.mainEventState.waitingList,
+          history: [
+            ...prev.mainEventState.history,
+            createHistoryEntry(
+              normalized,
+              destination === 'participants' ? 'confirmed' : 'waitlisted',
+              prev.mainEventConfig
+            )
+          ]
+        }
+      }));
+
+      pushNotification({
+        type: 'event',
+        title: 'Evento aggiornato',
+        body:
+          destination === 'participants'
+            ? `${normalized} aggiunto ai partecipanti.`
+            : `${normalized} aggiunto alla waiting list.`
+      });
+
+      return null;
+    },
+    [persisted.mainEventState.participants, persisted.mainEventState.waitingList, pushNotification]
+  );
+
+  const adminRemoveMainEventParticipant = useCallback(
+    (email: string, destination: ParticipantBucket): string | null => {
+      const normalized = normalizeEmail(email);
+
+      if (destination === 'participants') {
+        const exists = persisted.mainEventState.participants.some((item) => item.email === normalized);
+        if (!exists) {
+          return 'Utente non presente tra i partecipanti.';
+        }
+
+        setPersisted((prev) => ({
+          ...prev,
+          mainEventState: removeUserFromMainEvent(prev.mainEventState, normalized, prev.mainEventConfig)
+        }));
+      } else {
+        const exists = persisted.mainEventState.waitingList.some((item) => item.email === normalized);
+        if (!exists) {
+          return 'Utente non presente in waiting list.';
+        }
+
+        setPersisted((prev) => ({
+          ...prev,
+          mainEventState: {
+            ...prev.mainEventState,
+            waitingList: prev.mainEventState.waitingList.filter((item) => item.email !== normalized),
+            history: [
+              ...prev.mainEventState.history,
+              createHistoryEntry(normalized, 'cancelled', prev.mainEventConfig)
+            ]
+          }
+        }));
+      }
+
+      pushNotification({
+        type: 'event',
+        title: 'Evento aggiornato',
+        body: `${normalized} rimosso da ${destination === 'participants' ? 'partecipanti' : 'waiting list'}.`
+      });
+
+      return null;
+    },
+    [persisted.mainEventState.participants, persisted.mainEventState.waitingList, pushNotification]
+  );
+
+  const updateMessageDeliveryState = useCallback(
+    (
+      threadId: string,
+      messageId: string,
+      patch: Partial<Pick<ChatMessage, 'deliveryState' | 'readAt'>>
+    ): void => {
+      setPersisted((prev) => ({
+        ...prev,
+        threads: prev.threads.map((thread) => {
+          if (thread.id !== threadId) {
+            return thread;
+          }
+
+          return {
+            ...thread,
+            messages: thread.messages.map((message) => {
+              if (message.id !== messageId) {
+                return message;
+              }
+
+              return {
+                ...message,
+                ...patch
+              };
+            })
+          };
+        })
+      }));
+    },
+    []
+  );
+
+  const sendMessage = useCallback(
+    (input: SendMessageInput): void => {
+      const normalizedText = input.text.trim();
+      const attachments = input.attachments ?? [];
+
+      if (!normalizedText && attachments.length === 0) {
+        return;
+      }
+
+      const targetThread = persisted.threads.find((thread) => thread.id === input.threadId);
+      if (!targetThread) {
+        return;
+      }
+
+      const now = new Date();
+      const messageId = crypto.randomUUID();
+
+      setPersisted((prev) => ({
+        ...prev,
+        threads: prev.threads.map((thread) => {
+          if (thread.id !== input.threadId) {
+            return thread;
+          }
+
+          return {
+            ...thread,
+            messages: [
+              ...thread.messages,
+              {
+                id: messageId,
+                text: normalizedText,
+                isMe: true,
+                time: formatTime(now),
+                createdAt: now.toISOString(),
+                senderName: currentUser ? getDisplayName(currentUser) : 'Tu',
+                replyToMessageId: input.replyToMessageId,
+                attachments,
+                deliveryState: 'sending'
+              }
+            ],
+            isTyping: false
+          };
+        })
+      }));
+
+      const sentTimeout = window.setTimeout(() => {
+        updateMessageDeliveryState(input.threadId, messageId, { deliveryState: 'sent' });
+      }, 220);
+
+      const deliveredTimeout = window.setTimeout(() => {
+        updateMessageDeliveryState(input.threadId, messageId, { deliveryState: 'delivered' });
+      }, 900);
+
+      pendingTimeoutsRef.current.push(sentTimeout, deliveredTimeout);
+
+      if (targetThread.isOnline) {
+        const readTimeout = window.setTimeout(() => {
+          updateMessageDeliveryState(input.threadId, messageId, {
+            deliveryState: 'read',
+            readAt: nowIso()
+          });
+        }, 2600);
+        pendingTimeoutsRef.current.push(readTimeout);
+      }
+    },
+    [currentUser, persisted.threads, updateMessageDeliveryState]
+  );
+
+  const markThreadRead = useCallback((threadId: string): void => {
+    const readAt = nowIso();
 
     setPersisted((prev) => ({
       ...prev,
@@ -643,25 +1135,171 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
         return {
           ...thread,
-          messages: [
-            ...thread.messages,
-            {
-              id: crypto.randomUUID(),
-              text: normalizedText,
-              isMe: true,
-              time: formatTime(new Date())
-            }
-          ]
+          unreadCount: 0,
+          messages: thread.messages.map((message) =>
+            !message.isMe && !message.readAt
+              ? {
+                  ...message,
+                  readAt,
+                  deliveryState: 'read'
+                }
+              : message
+          )
         };
-      })
+      }),
+      notifications: prev.notifications.map((notification) =>
+        notification.threadId === threadId && !notification.readAt
+          ? {
+              ...notification,
+              readAt
+            }
+          : notification
+      )
     }));
   }, []);
 
   const deleteThread = useCallback((threadId: string): void => {
     setPersisted((prev) => ({
       ...prev,
-      threads: prev.threads.filter((thread) => thread.id !== threadId)
+      threads: prev.threads.filter((thread) => thread.id !== threadId),
+      notifications: prev.notifications.filter((notification) => notification.threadId !== threadId)
     }));
+  }, []);
+
+  const submitSwipeDecision = useCallback(
+    (profileId: string, decision: SwipeDecision): SwipeDecisionResult => {
+      const profile = discoverProfiles.find((candidate) => candidate.id === profileId);
+      if (!profile) {
+        return {
+          matched: false,
+          message: 'Profilo non disponibile.'
+        };
+      }
+
+      if (decision === 'left') {
+        return {
+          matched: false,
+          message: `Hai saltato ${profile.name}.`
+        };
+      }
+
+      const existingThread = persisted.threads.find(
+        (thread) => thread.name.toLowerCase() === profile.name.toLowerCase()
+      );
+
+      if (existingThread) {
+        return {
+          matched: true,
+          threadId: existingThread.id,
+          message: `Hai gia una chat con ${profile.name}.`
+        };
+      }
+
+      const matched = Math.random() > 0.38;
+      if (!matched) {
+        return {
+          matched: false,
+          message: `Like inviato a ${profile.name}. In attesa di risposta.`
+        };
+      }
+
+      const createdAt = nowIso();
+      const threadId = crypto.randomUUID();
+      const openerMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        text: `Ehi! Match fatto. Ti va di sentirci qui?`,
+        isMe: false,
+        time: formatTime(new Date()),
+        createdAt,
+        senderName: profile.name,
+        deliveryState: 'delivered'
+      };
+
+      const newThread: ChatThread = {
+        id: threadId,
+        name: profile.name,
+        avatar: profile.name.slice(0, 1).toUpperCase(),
+        isOnline: true,
+        isTyping: false,
+        unreadCount: 1,
+        createdAt,
+        matchedAt: createdAt,
+        lastSeenAt: createdAt,
+        messages: [openerMessage]
+      };
+
+      const matchNotification: AppNotification = {
+        id: crypto.randomUUID(),
+        type: 'match',
+        title: `Nuovo match con ${profile.name}`,
+        body: 'La chat e stata creata automaticamente.',
+        createdAt,
+        threadId
+      };
+
+      setPersisted((prev) => ({
+        ...prev,
+        threads: [newThread, ...prev.threads],
+        notifications: [matchNotification, ...prev.notifications].slice(0, 180)
+      }));
+
+      return {
+        matched: true,
+        threadId,
+        message: `It s a match con ${profile.name}!`
+      };
+    },
+    [discoverProfiles, persisted.threads]
+  );
+
+  const markNotificationRead = useCallback((notificationId: string): void => {
+    const readAt = nowIso();
+
+    setPersisted((prev) => ({
+      ...prev,
+      notifications: prev.notifications.map((notification) =>
+        notification.id === notificationId
+          ? {
+              ...notification,
+              readAt
+            }
+          : notification
+      )
+    }));
+  }, []);
+
+  const markAllNotificationsRead = useCallback((): void => {
+    const readAt = nowIso();
+
+    setPersisted((prev) => ({
+      ...prev,
+      notifications: prev.notifications.map((notification) => ({
+        ...notification,
+        readAt: notification.readAt ?? readAt
+      }))
+    }));
+  }, []);
+
+  const requestBrowserNotificationsPermission = useCallback(async (): Promise<
+    NotificationPermission | 'unsupported'
+  > => {
+    if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+      setNotificationPermission('unsupported');
+      return 'unsupported';
+    }
+
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+
+    setPersisted((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        browserPushEnabled: permission === 'granted'
+      }
+    }));
+
+    return permission;
   }, []);
 
   const updateSettings = useCallback((patch: Partial<AppSettings>): void => {
@@ -681,6 +1319,138 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     }));
   }, []);
 
+  useEffect(() => {
+    setPersisted((prev) => ({
+      ...prev,
+      realtimeState: 'connecting'
+    }));
+
+    const connectTimer = window.setTimeout(() => {
+      setPersisted((prev) => ({
+        ...prev,
+        realtimeState: 'connected'
+      }));
+    }, 900);
+
+    const realtimeTimer = window.setInterval(() => {
+      setPersisted((prev) => {
+        if (prev.threads.length === 0 || Math.random() < 0.32) {
+          return prev;
+        }
+
+        const randomIndex = Math.floor(Math.random() * prev.threads.length);
+        const target = prev.threads[randomIndex];
+        const messageText =
+          INCOMING_MESSAGE_LIBRARY[Math.floor(Math.random() * INCOMING_MESSAGE_LIBRARY.length)];
+        const createdAt = nowIso();
+
+        const incomingMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          text: messageText,
+          isMe: false,
+          time: formatTime(new Date()),
+          createdAt,
+          senderName: target.name,
+          deliveryState: 'delivered'
+        };
+
+        const nextThreads: ChatThread[] = prev.threads.map((thread, index): ChatThread => {
+          if (index !== randomIndex) {
+            return thread;
+          }
+
+          return {
+            ...thread,
+            isOnline: Math.random() > 0.22,
+            lastSeenAt: createdAt,
+            unreadCount: thread.unreadCount + 1,
+            messages: [...thread.messages, incomingMessage]
+          };
+        });
+
+        const incomingNotification: AppNotification = {
+          id: crypto.randomUUID(),
+          type: 'chat',
+          title: `Nuovo messaggio da ${target.name}`,
+          body: messageText,
+          createdAt,
+          threadId: target.id
+        };
+
+        const nextNotifications: AppNotification[] = prev.settings.notificationsEnabled
+          ? [incomingNotification, ...prev.notifications].slice(0, 180)
+          : prev.notifications;
+
+        return {
+          ...prev,
+          realtimeState: 'connected',
+          threads: nextThreads,
+          notifications: nextNotifications
+        };
+      });
+    }, 14000);
+
+    return () => {
+      window.clearTimeout(connectTimer);
+      window.clearInterval(realtimeTimer);
+      setPersisted((prev) => ({
+        ...prev,
+        realtimeState: 'disconnected'
+      }));
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!persisted.settings.notificationsPollingEnabled) {
+      return;
+    }
+
+    const pollTimer = window.setInterval(() => {
+      if (Math.random() < 0.55) {
+        return;
+      }
+
+      const content =
+        POLL_NOTIFICATION_LIBRARY[Math.floor(Math.random() * POLL_NOTIFICATION_LIBRARY.length)];
+      pushNotification({
+        type: 'system',
+        title: 'Aggiornamento inbox',
+        body: content
+      });
+    }, 30000);
+
+    return () => {
+      window.clearInterval(pollTimer);
+    };
+  }, [persisted.settings.notificationsPollingEnabled, pushNotification]);
+
+  useEffect(() => {
+    if (
+      notificationPermission !== 'granted' ||
+      !persisted.settings.browserPushEnabled ||
+      typeof window === 'undefined' ||
+      typeof Notification === 'undefined'
+    ) {
+      return;
+    }
+
+    const latestUnread = persisted.notifications.find((notification) => !notification.readAt);
+    if (!latestUnread || latestUnread.id === lastBrowserNotificationRef.current) {
+      return;
+    }
+
+    lastBrowserNotificationRef.current = latestUnread.id;
+    const browserNotification = new Notification(latestUnread.title, {
+      body: latestUnread.body
+    });
+
+    if (latestUnread.threadId) {
+      browserNotification.onclick = () => {
+        window.focus();
+      };
+    }
+  }, [notificationPermission, persisted.notifications, persisted.settings.browserPushEnabled]);
+
   const contextValue = useMemo<AppContextValue>(
     () => ({
       persisted,
@@ -688,10 +1458,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       localUsers,
       discoverProfiles,
       mainEventConfig,
-      mainEventInfo: MAIN_EVENT_INFO,
+      mainEventInfo,
+      isEventAdmin,
       mainEventSnapshot,
       mainEventFlags,
       currentUserUpcomingEventHistory,
+      unreadNotificationsCount,
+      unreadThreadsCount,
+      notificationPermission,
       signUp,
       createLocalUser,
       logIn,
@@ -706,8 +1480,17 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       willUserLoseEventRegistrations,
       registerCurrentUserForMainEvent,
       cancelCurrentUserMainEventRegistration,
+      updateMainEventConfig,
+      updateMainEventInfo,
+      adminAddMainEventParticipant,
+      adminRemoveMainEventParticipant,
       sendMessage,
+      markThreadRead,
       deleteThread,
+      submitSwipeDecision,
+      markNotificationRead,
+      markAllNotificationsRead,
+      requestBrowserNotificationsPermission,
       updateSettings,
       setThreads,
       hydrateMockDiscoverProfiles,
@@ -719,9 +1502,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       localUsers,
       discoverProfiles,
       mainEventConfig,
+      mainEventInfo,
+      isEventAdmin,
       mainEventSnapshot,
       mainEventFlags,
       currentUserUpcomingEventHistory,
+      unreadNotificationsCount,
+      unreadThreadsCount,
+      notificationPermission,
       signUp,
       createLocalUser,
       logIn,
@@ -736,8 +1524,17 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       willUserLoseEventRegistrations,
       registerCurrentUserForMainEvent,
       cancelCurrentUserMainEventRegistration,
+      updateMainEventConfig,
+      updateMainEventInfo,
+      adminAddMainEventParticipant,
+      adminRemoveMainEventParticipant,
       sendMessage,
+      markThreadRead,
       deleteThread,
+      submitSwipeDecision,
+      markNotificationRead,
+      markAllNotificationsRead,
+      requestBrowserNotificationsPermission,
       updateSettings,
       setThreads,
       hydrateMockDiscoverProfiles,
@@ -755,3 +1552,5 @@ export function useAppStoreContext(): AppContextValue {
   }
   return context;
 }
+
+export { formatLastSeen };

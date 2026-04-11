@@ -1,11 +1,31 @@
-import { AppSettings, MainEventState, PersistedAppState } from '../types/models';
-import { createInitialMainEventState, createMockThreads } from '../data/mockData';
+import {
+  AppNotification,
+  AppSettings,
+  ChatAttachment,
+  ChatDeliveryState,
+  ChatMessage,
+  ChatThread,
+  MainEventConfig,
+  MainEventInfo,
+  MainEventState,
+  PersistedAppState,
+  RealtimeConnectionState,
+  UserGender
+} from '../types/models';
+import {
+  createDefaultMainEventConfig,
+  createDefaultMainEventInfo,
+  createInitialMainEventState,
+  createMockThreads
+} from '../data/mockData';
 
 const STORAGE_KEY = 'fyre_web_state_v1';
 
 const defaultSettings: AppSettings = {
   themeMode: 'system',
   notificationsEnabled: true,
+  notificationsPollingEnabled: true,
+  browserPushEnabled: false,
   showAge: true,
   showDistance: true
 };
@@ -14,6 +34,10 @@ export function createDefaultPersistedState(): PersistedAppState {
   return {
     users: [],
     currentUserEmail: null,
+    realtimeState: 'disconnected',
+    notifications: [],
+    mainEventConfig: createDefaultMainEventConfig(),
+    mainEventInfo: createDefaultMainEventInfo(),
     mainEventState: createInitialMainEventState(),
     threads: createMockThreads(),
     settings: defaultSettings
@@ -41,8 +65,12 @@ export function loadPersistedState(): PersistedAppState {
         typeof parsed.currentUserEmail === 'string' || parsed.currentUserEmail === null
           ? parsed.currentUserEmail
           : fallbackState.currentUserEmail,
+      realtimeState: sanitizeRealtimeState(parsed.realtimeState, fallbackState.realtimeState),
+      notifications: sanitizeNotifications(parsed.notifications),
+      mainEventConfig: sanitizeMainEventConfig(parsed.mainEventConfig, fallbackState.mainEventConfig),
+      mainEventInfo: sanitizeMainEventInfo(parsed.mainEventInfo, fallbackState.mainEventInfo),
       mainEventState: sanitizeMainEventState(parsed.mainEventState, fallbackState.mainEventState),
-      threads: Array.isArray(parsed.threads) ? parsed.threads : fallbackState.threads,
+      threads: sanitizeThreads(parsed.threads, fallbackState.threads),
       settings: {
         ...defaultSettings,
         ...(parsed.settings ?? {})
@@ -57,15 +85,303 @@ function sanitizeMainEventState(
   value: PersistedAppState['mainEventState'] | undefined,
   fallback: MainEventState
 ): MainEventState {
-  if (!value) {
+  if (!isRecord(value)) {
     return fallback;
   }
 
   return {
-    participants: Array.isArray(value.participants) ? value.participants : fallback.participants,
-    waitingList: Array.isArray(value.waitingList) ? value.waitingList : fallback.waitingList,
-    history: Array.isArray(value.history) ? value.history : fallback.history
+    participants: sanitizeParticipants(value.participants),
+    waitingList: sanitizeParticipants(value.waitingList),
+    history: sanitizeHistory(value.history)
   };
+}
+
+function sanitizeHistory(value: unknown): MainEventState['history'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!isRecord(item) || typeof item.email !== 'string') {
+        return null;
+      }
+
+      return {
+        id: typeof item.id === 'string' ? item.id : crypto.randomUUID(),
+        email: item.email,
+        eventTitle: typeof item.eventTitle === 'string' ? item.eventTitle : 'Fyre Event',
+        eventDate: typeof item.eventDate === 'string' ? item.eventDate : new Date().toISOString(),
+        status:
+          item.status === 'confirmed' ||
+          item.status === 'waitlisted' ||
+          item.status === 'cancelled' ||
+          item.status === 'promoted'
+            ? item.status
+            : 'confirmed',
+        timestamp: typeof item.timestamp === 'string' ? item.timestamp : new Date().toISOString()
+      };
+    })
+    .filter((item): item is MainEventState['history'][number] => Boolean(item));
+}
+
+function sanitizeParticipants(value: unknown): MainEventState['participants'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!isRecord(item) || typeof item.email !== 'string') {
+        return null;
+      }
+
+      const gender = sanitizeParticipantGender(item.gender);
+      if (!gender) {
+        return null;
+      }
+
+      return {
+        email: item.email,
+        gender
+      };
+    })
+    .filter((item): item is MainEventState['participants'][number] => Boolean(item));
+}
+
+function sanitizeParticipantGender(value: unknown): UserGender | null {
+  if (value === 'male' || value === 'female' || value === 'nonBinary' || value === 'other') {
+    return value;
+  }
+  return null;
+}
+
+function sanitizeRealtimeState(
+  value: unknown,
+  fallback: RealtimeConnectionState
+): RealtimeConnectionState {
+  if (value === 'connecting' || value === 'connected' || value === 'disconnected') {
+    return value;
+  }
+  return fallback;
+}
+
+function sanitizeMainEventConfig(
+  value: unknown,
+  fallback: MainEventConfig
+): MainEventConfig {
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  return {
+    date: typeof value.date === 'string' ? value.date : fallback.date,
+    title: typeof value.title === 'string' ? value.title : fallback.title,
+    maxParticipants:
+      typeof value.maxParticipants === 'number' && value.maxParticipants > 0
+        ? Math.round(value.maxParticipants)
+        : fallback.maxParticipants,
+    maxPerGender:
+      typeof value.maxPerGender === 'number' && value.maxPerGender > 0
+        ? Math.round(value.maxPerGender)
+        : fallback.maxPerGender
+  };
+}
+
+function sanitizeMainEventInfo(value: unknown, fallback: MainEventInfo): MainEventInfo {
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  return {
+    venue: typeof value.venue === 'string' ? value.venue : fallback.venue,
+    address: typeof value.address === 'string' ? value.address : fallback.address,
+    timeLabel: typeof value.timeLabel === 'string' ? value.timeLabel : fallback.timeLabel,
+    contribution: typeof value.contribution === 'string' ? value.contribution : fallback.contribution,
+    contact: typeof value.contact === 'string' ? value.contact : fallback.contact,
+    dressCode: typeof value.dressCode === 'string' ? value.dressCode : fallback.dressCode,
+    description: typeof value.description === 'string' ? value.description : fallback.description,
+    rules: Array.isArray(value.rules)
+      ? value.rules.filter((rule): rule is string => typeof rule === 'string')
+      : fallback.rules
+  };
+}
+
+function sanitizeThreads(value: unknown, fallback: ChatThread[]): ChatThread[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const sanitized = value
+    .map((thread) => sanitizeThread(thread))
+    .filter((thread): thread is ChatThread => Boolean(thread));
+
+  return sanitized.length > 0 ? sanitized : fallback;
+}
+
+function sanitizeThread(value: unknown): ChatThread | null {
+  if (!isRecord(value) || typeof value.name !== 'string') {
+    return null;
+  }
+
+  const messages = sanitizeMessages(value.messages);
+  const unreadFromMessages = messages.filter((message) => !message.isMe && !message.readAt).length;
+
+  return {
+    id: typeof value.id === 'string' ? value.id : crypto.randomUUID(),
+    name: value.name,
+    avatar: typeof value.avatar === 'string' ? value.avatar : value.name.slice(0, 1).toUpperCase(),
+    isOnline: typeof value.isOnline === 'boolean' ? value.isOnline : false,
+    isTyping: typeof value.isTyping === 'boolean' ? value.isTyping : false,
+    unreadCount:
+      typeof value.unreadCount === 'number' && value.unreadCount >= 0
+        ? Math.round(value.unreadCount)
+        : unreadFromMessages,
+    createdAt:
+      typeof value.createdAt === 'string'
+        ? value.createdAt
+        : messages[0]?.createdAt ?? new Date().toISOString(),
+    matchedAt: typeof value.matchedAt === 'string' ? value.matchedAt : undefined,
+    lastSeenAt: typeof value.lastSeenAt === 'string' ? value.lastSeenAt : undefined,
+    messages
+  };
+}
+
+function sanitizeMessages(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((message) => sanitizeMessage(message))
+    .filter((message): message is ChatMessage => Boolean(message));
+}
+
+function sanitizeMessage(value: unknown): ChatMessage | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const createdAt =
+    typeof value.createdAt === 'string'
+      ? value.createdAt
+      : typeof value.time === 'string'
+        ? new Date().toISOString()
+        : null;
+
+  if (!createdAt) {
+    return null;
+  }
+
+  const text = typeof value.text === 'string' ? value.text : '';
+  const attachments = sanitizeAttachments(value.attachments);
+  if (!text && attachments.length === 0) {
+    return null;
+  }
+
+  return {
+    id: typeof value.id === 'string' ? value.id : crypto.randomUUID(),
+    text,
+    isMe: typeof value.isMe === 'boolean' ? value.isMe : false,
+    time: typeof value.time === 'string' ? value.time : '--:--',
+    createdAt,
+    senderName: typeof value.senderName === 'string' ? value.senderName : undefined,
+    replyToMessageId:
+      typeof value.replyToMessageId === 'string' ? value.replyToMessageId : undefined,
+    attachments,
+    readAt: typeof value.readAt === 'string' ? value.readAt : undefined,
+    deliveryState: sanitizeDeliveryState(value.deliveryState)
+  };
+}
+
+function sanitizeDeliveryState(value: unknown): ChatDeliveryState | undefined {
+  if (value === 'sending' || value === 'sent' || value === 'delivered' || value === 'read') {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeAttachments(value: unknown): ChatAttachment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((attachment) => {
+      if (!isRecord(attachment) || typeof attachment.dataUrl !== 'string') {
+        return null;
+      }
+
+      return {
+        id: typeof attachment.id === 'string' ? attachment.id : crypto.randomUUID(),
+        type: sanitizeAttachmentType(attachment.type, attachment.mimeType),
+        name: typeof attachment.name === 'string' ? attachment.name : 'attachment',
+        mimeType: typeof attachment.mimeType === 'string' ? attachment.mimeType : 'application/octet-stream',
+        sizeBytes: typeof attachment.sizeBytes === 'number' ? attachment.sizeBytes : 0,
+        dataUrl: attachment.dataUrl
+      };
+    })
+    .filter((attachment): attachment is ChatAttachment => Boolean(attachment));
+}
+
+function sanitizeAttachmentType(
+  value: unknown,
+  mimeType: unknown
+): ChatAttachment['type'] {
+  if (value === 'image' || value === 'video' || value === 'audio' || value === 'file') {
+    return value;
+  }
+
+  if (typeof mimeType === 'string') {
+    if (mimeType.startsWith('image/')) {
+      return 'image';
+    }
+    if (mimeType.startsWith('video/')) {
+      return 'video';
+    }
+    if (mimeType.startsWith('audio/')) {
+      return 'audio';
+    }
+  }
+
+  return 'file';
+}
+
+function sanitizeNotifications(value: unknown): AppNotification[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const mapped: Array<AppNotification | null> = value
+    .map((item) => {
+      if (!isRecord(item) || typeof item.title !== 'string' || typeof item.body !== 'string') {
+        return null;
+      }
+
+      const type: AppNotification['type'] =
+        item.type === 'chat' ||
+        item.type === 'match' ||
+        item.type === 'event' ||
+        item.type === 'system'
+          ? item.type
+          : 'system';
+
+      return {
+        id: typeof item.id === 'string' ? item.id : crypto.randomUUID(),
+        type,
+        title: item.title,
+        body: item.body,
+        createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+        readAt: typeof item.readAt === 'string' ? item.readAt : undefined,
+        threadId: typeof item.threadId === 'string' ? item.threadId : undefined
+      };
+    });
+
+  return mapped.filter((item): item is AppNotification => item !== null);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 export function persistState(value: PersistedAppState): void {

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { SwipeCard } from '../../components/home/SwipeCard';
 import { useAppStore } from '../../hooks/useAppStore';
@@ -7,7 +8,8 @@ import { audienceMatches } from '../../types/models';
 type Decision = 'left' | 'right';
 
 export function HomePage(): JSX.Element {
-  const { currentUser, discoverProfiles } = useAppStore();
+  const navigate = useNavigate();
+  const { currentUser, discoverProfiles, submitSwipeDecision } = useAppStore();
 
   const filteredProfiles = useMemo(() => {
     const showMe = currentUser?.showMe ?? 'everyone';
@@ -16,21 +18,39 @@ export function HomePage(): JSX.Element {
 
   const [index, setIndex] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
+  const [swipeFeedback, setSwipeFeedback] = useState<string | null>(null);
+  const [lastMatch, setLastMatch] = useState<{ name: string; threadId: string } | null>(null);
   const pointerStart = useRef<number | null>(null);
 
   const activeProfile = filteredProfiles[index] ?? null;
 
-  function performDecision(): void {
+  function performDecision(decision: Decision): void {
+    if (!activeProfile) {
+      return;
+    }
+
+    const result = submitSwipeDecision(activeProfile.id, decision);
+    setSwipeFeedback(result.message);
+
+    if (result.matched && result.threadId) {
+      setLastMatch({
+        name: activeProfile.name,
+        threadId: result.threadId
+      });
+    } else {
+      setLastMatch(null);
+    }
+
     pointerStart.current = null;
     setDragOffset(0);
     setIndex((prev) => prev + 1);
   }
 
-  function onDecision(_: Decision): void {
+  function onDecision(decision: Decision): void {
     if (!activeProfile) {
       return;
     }
-    performDecision();
+    performDecision(decision);
   }
 
   function onPointerDown(clientX: number): void {
@@ -46,7 +66,7 @@ export function HomePage(): JSX.Element {
 
   function onPointerUp(): void {
     if (Math.abs(dragOffset) > 120) {
-      performDecision();
+      performDecision(dragOffset > 0 ? 'right' : 'left');
       return;
     }
     setDragOffset(0);
@@ -86,6 +106,23 @@ export function HomePage(): JSX.Element {
             </Button>
             <Button onClick={() => onDecision('right')}>Fyre</Button>
           </div>
+
+          {swipeFeedback && <p className="swipe-feedback">{swipeFeedback}</p>}
+
+          {lastMatch && (
+            <article className="match-panel">
+              <h3>It s a match con {lastMatch.name}</h3>
+              <p>La chat e stata creata. Puoi iniziare a scrivere subito.</p>
+              <div className="match-panel__actions">
+                <Button onClick={() => navigate(`/app/messages/${lastMatch.threadId}`)}>
+                  Apri chat
+                </Button>
+                <Button variant="secondary" onClick={() => setLastMatch(null)}>
+                  Continua swipe
+                </Button>
+              </div>
+            </article>
+          )}
         </div>
       ) : (
         <div className="empty-panel">

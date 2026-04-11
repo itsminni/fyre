@@ -3,10 +3,12 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { useAppStore } from '../../hooks/useAppStore';
+import { findCityByLabel, searchCities } from '../../services/geocode';
 import {
   GENDER_OPTIONS,
   ORIENTATION_OPTIONS,
   SHOW_ME_OPTIONS,
+  MatchIntent,
   UserGender,
   UserOrientation,
   UserShowMe,
@@ -36,6 +38,13 @@ const showMeLabels: Record<UserShowMe, string> = {
   everyone: 'Tutti'
 };
 
+const intentLabels: Record<MatchIntent, string> = {
+  relationship: 'Relazione',
+  friendship: 'Amicizia',
+  casual: 'Casual',
+  networking: 'Networking'
+};
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -53,31 +62,38 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 export function ProfileSetupPage(): JSX.Element {
   const navigate = useNavigate();
-  const {
-    currentUser,
-    updateProfile,
-    updateProfileImage,
-    willUserLoseEventRegistrations
-  } = useAppStore();
+  const { currentUser, updateProfile, updateProfileImage, willUserLoseEventRegistrations } =
+    useAppStore();
 
   const [firstName, setFirstName] = useState(currentUser?.firstName ?? '');
   const [lastName, setLastName] = useState(currentUser?.lastName ?? '');
+  const [city, setCity] = useState(currentUser?.city ?? '');
   const [birthDate, setBirthDate] = useState(
-    currentUser?.birthDate ?? new Date(new Date().setFullYear(new Date().getFullYear() - 25)).toISOString().slice(0, 10)
+    currentUser?.birthDate ??
+      new Date(new Date().setFullYear(new Date().getFullYear() - 25)).toISOString().slice(0, 10)
   );
   const [gender, setGender] = useState<UserGender>(currentUser?.gender ?? 'male');
   const [orientation, setOrientation] = useState<UserOrientation>(currentUser?.orientation ?? 'straight');
   const [showMe, setShowMe] = useState<UserShowMe>(currentUser?.showMe ?? 'everyone');
   const [smokes, setSmokes] = useState(Boolean(currentUser?.smokes));
   const [drinks, setDrinks] = useState(Boolean(currentUser?.drinks));
+  const [bio, setBio] = useState(currentUser?.bio ?? '');
+  const [ageRangeMin, setAgeRangeMin] = useState(currentUser?.ageRangeMin ?? 24);
+  const [ageRangeMax, setAgeRangeMax] = useState(currentUser?.ageRangeMax ?? 40);
+  const [maxDistanceKm, setMaxDistanceKm] = useState(currentUser?.maxDistanceKm ?? 40);
+  const [intent, setIntent] = useState<MatchIntent>(currentUser?.intent ?? 'relationship');
   const [hobbies, setHobbies] = useState(currentUser?.hobbies ?? '');
   const [passions, setPassions] = useState(currentUser?.passions ?? '');
   const [lookingFor, setLookingFor] = useState(currentUser?.lookingFor ?? '');
+  const [instagram, setInstagram] = useState(currentUser?.instagram ?? '');
+  const [telegram, setTelegram] = useState(currentUser?.telegram ?? '');
+  const [website, setWebsite] = useState(currentUser?.website ?? '');
   const [favoriteSong, setFavoriteSong] = useState(currentUser?.favoriteSong ?? '');
   const [favoriteMovie, setFavoriteMovie] = useState(currentUser?.favoriteMovie ?? '');
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   const age = useMemo(() => calculateAge(birthDate), [birthDate]);
+  const citySuggestions = useMemo(() => searchCities(city), [city]);
 
   if (!currentUser) {
     return <Navigate to="/" replace />;
@@ -117,18 +133,31 @@ export function ProfileSetupPage(): JSX.Element {
       }
     }
 
+    const resolvedCity = findCityByLabel(city) ?? searchCities(city)[0] ?? null;
+
     const error = updateProfile({
       firstName,
       lastName,
+      city: resolvedCity?.city ?? city,
+      cityLat: resolvedCity?.lat,
+      cityLng: resolvedCity?.lng,
       birthDate,
       gender,
       orientation,
       showMe,
       smokes,
       drinks,
+      bio,
+      ageRangeMin,
+      ageRangeMax,
+      maxDistanceKm,
+      intent,
       hobbies,
       passions,
       lookingFor,
+      instagram,
+      telegram,
+      website,
       favoriteSong,
       favoriteMovie
     });
@@ -158,6 +187,21 @@ export function ProfileSetupPage(): JSX.Element {
               </label>
 
               <label>
+                Citta *
+                <input
+                  list="profile-city-suggestions"
+                  value={city}
+                  onChange={(event) => setCity(event.target.value)}
+                  placeholder="Es. Reggio Emilia"
+                />
+                <datalist id="profile-city-suggestions">
+                  {citySuggestions.map((suggestion) => (
+                    <option key={suggestion.label} value={suggestion.label} />
+                  ))}
+                </datalist>
+              </label>
+
+              <label>
                 Data di nascita *
                 <input
                   type="date"
@@ -170,6 +214,11 @@ export function ProfileSetupPage(): JSX.Element {
               <label>
                 Eta
                 <input value={`${age} anni`} disabled />
+              </label>
+
+              <label>
+                Foto profilo
+                <input type="file" accept="image/*" onChange={onAvatarChange} />
               </label>
             </section>
 
@@ -211,8 +260,14 @@ export function ProfileSetupPage(): JSX.Element {
               </label>
 
               <label>
-                Foto profilo
-                <input type="file" accept="image/*" onChange={onAvatarChange} />
+                Intent
+                <select value={intent} onChange={(event) => setIntent(event.target.value as MatchIntent)}>
+                  {(Object.keys(intentLabels) as MatchIntent[]).map((option) => (
+                    <option key={option} value={option}>
+                      {intentLabels[option]}
+                    </option>
+                  ))}
+                </select>
               </label>
             </section>
 
@@ -236,6 +291,46 @@ export function ProfileSetupPage(): JSX.Element {
               </label>
             </section>
 
+            <section className="profile-setup-form__grid">
+              <label>
+                Eta minima preferita
+                <input
+                  type="number"
+                  min={18}
+                  max={80}
+                  value={ageRangeMin}
+                  onChange={(event) => setAgeRangeMin(Number(event.target.value))}
+                />
+              </label>
+
+              <label>
+                Eta massima preferita
+                <input
+                  type="number"
+                  min={18}
+                  max={80}
+                  value={ageRangeMax}
+                  onChange={(event) => setAgeRangeMax(Number(event.target.value))}
+                />
+              </label>
+
+              <label>
+                Distanza max (km)
+                <input
+                  type="number"
+                  min={1}
+                  max={300}
+                  value={maxDistanceKm}
+                  onChange={(event) => setMaxDistanceKm(Number(event.target.value))}
+                />
+              </label>
+
+              <label>
+                Bio *
+                <textarea value={bio} onChange={(event) => setBio(event.target.value)} rows={2} />
+              </label>
+            </section>
+
             <section className="profile-setup-form__stack">
               <label>
                 Hobby *
@@ -254,6 +349,21 @@ export function ProfileSetupPage(): JSX.Element {
                   onChange={(event) => setLookingFor(event.target.value)}
                   rows={2}
                 />
+              </label>
+
+              <label>
+                Instagram
+                <input value={instagram} onChange={(event) => setInstagram(event.target.value)} />
+              </label>
+
+              <label>
+                Telegram
+                <input value={telegram} onChange={(event) => setTelegram(event.target.value)} />
+              </label>
+
+              <label>
+                Sito / portfolio
+                <input value={website} onChange={(event) => setWebsite(event.target.value)} />
               </label>
 
               <label>

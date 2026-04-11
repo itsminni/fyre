@@ -3,15 +3,20 @@ import { useMemo } from 'react';
 import { useAppStore } from '../../hooks/useAppStore';
 import { getDisplayName } from '../../types/models';
 
-const tabs = [
-  { to: '/app/home', label: 'Home', icon: 'F' },
-  { to: '/app/messages', label: 'Messaggi', icon: 'M' },
-  { to: '/app/events', label: 'Eventi', icon: 'E' },
-  { to: '/app/account', label: 'Account', icon: 'A' }
-];
+interface MainTabItem {
+  to: string;
+  label: string;
+  icon: string;
+  badge?: number;
+}
 
 export function MainTabsLayout(): JSX.Element {
-  const { currentUser } = useAppStore();
+  const {
+    currentUser,
+    unreadNotificationsCount,
+    unreadThreadsCount,
+    persisted: { realtimeState }
+  } = useAppStore();
 
   const greeting = useMemo(() => {
     if (!currentUser) {
@@ -20,11 +25,42 @@ export function MainTabsLayout(): JSX.Element {
     return `Ciao, ${getDisplayName(currentUser).split(' ')[0]}`;
   }, [currentUser]);
 
+  const tabs = useMemo<MainTabItem[]>(
+    () => [
+      { to: '/app/home', label: 'Home', icon: 'F' },
+      {
+        to: '/app/messages',
+        label: 'Messaggi',
+        icon: 'M',
+        badge: unreadThreadsCount + unreadNotificationsCount
+      },
+      { to: '/app/events', label: 'Eventi', icon: 'E' },
+      { to: '/app/account', label: 'Account', icon: 'A' }
+    ],
+    [unreadNotificationsCount, unreadThreadsCount]
+  );
+
   return (
     <div className="app-shell">
       <header className="app-shell__header">
         <p className="app-shell__eyebrow">Fyre</p>
         <h1>{greeting}</h1>
+        <p className="app-shell__status">
+          <span
+            className={
+              realtimeState === 'connected'
+                ? 'app-shell__status-dot app-shell__status-dot--ok'
+                : realtimeState === 'connecting'
+                  ? 'app-shell__status-dot app-shell__status-dot--warn'
+                  : 'app-shell__status-dot'
+            }
+          />
+          {realtimeState === 'connected'
+            ? 'Realtime attivo'
+            : realtimeState === 'connecting'
+              ? 'Connessione realtime in corso'
+              : 'Realtime disconnesso'}
+        </p>
       </header>
 
       <main className="app-shell__content">
@@ -40,6 +76,9 @@ export function MainTabsLayout(): JSX.Element {
           >
             <span className="tab-bar__icon" aria-hidden>
               {tab.icon}
+              {tab.badge && tab.badge > 0 ? (
+                <span className="tab-bar__badge">{tab.badge > 99 ? '99+' : tab.badge}</span>
+              ) : null}
             </span>
             <span>{tab.label}</span>
           </NavLink>

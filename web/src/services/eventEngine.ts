@@ -1,18 +1,12 @@
 import {
   EventHistoryStatus,
+  MainEventConfig,
   MainEventSnapshot,
   MainEventState,
   User,
   UserGender,
   UserOrientation
 } from '../types/models';
-
-export interface MainEventConfig {
-  date: string;
-  title: string;
-  maxParticipants: number;
-  maxPerGender: number;
-}
 
 export interface EventFlags {
   isRegistered: boolean;

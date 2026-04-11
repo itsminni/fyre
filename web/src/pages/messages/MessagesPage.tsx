@@ -2,9 +2,16 @@ import { Link } from 'react-router-dom';
 import { ChatAvatar } from '../../components/messages/ChatAvatar';
 import { Button } from '../../components/ui/Button';
 import { useAppStore } from '../../hooks/useAppStore';
+import { formatLastSeen } from '../../context/AppContext';
 
 export function MessagesPage(): JSX.Element {
-  const { persisted, deleteThread } = useAppStore();
+  const {
+    persisted,
+    deleteThread,
+    markNotificationRead,
+    markAllNotificationsRead,
+    unreadNotificationsCount
+  } = useAppStore();
 
   return (
     <section className="messages-page fade-in-up">
@@ -12,6 +19,47 @@ export function MessagesPage(): JSX.Element {
         <p className="section-header__eyebrow">Messaggi</p>
         <h2>Chat recenti</h2>
       </header>
+
+      <article className="inbox-panel">
+        <div className="inbox-panel__header">
+          <div>
+            <h3>Notifiche</h3>
+            <p>{unreadNotificationsCount > 0 ? `${unreadNotificationsCount} non lette` : 'Tutto letto'}</p>
+          </div>
+          <Button variant="ghost" onClick={markAllNotificationsRead}>
+            Segna tutte lette
+          </Button>
+        </div>
+
+        {persisted.notifications.length === 0 ? (
+          <p className="text-muted">Nessuna notifica al momento.</p>
+        ) : (
+          <ul className="inbox-panel__list">
+            {persisted.notifications.slice(0, 6).map((notification) => (
+              <li
+                key={notification.id}
+                className={notification.readAt ? 'inbox-item' : 'inbox-item inbox-item--unread'}
+              >
+                <button
+                  className="inbox-item__button"
+                  onClick={() => markNotificationRead(notification.id)}
+                >
+                  <strong>{notification.title}</strong>
+                  <p>{notification.body}</p>
+                  <small>
+                    {new Intl.DateTimeFormat('it-IT', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    }).format(new Date(notification.createdAt))}
+                  </small>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </article>
 
       {persisted.threads.length === 0 ? (
         <div className="empty-panel">
@@ -34,7 +82,12 @@ export function MessagesPage(): JSX.Element {
 
                   <div className="thread-row__status">
                     <p>{lastMessage?.time ?? '--:--'}</p>
-                    {thread.isOnline && <span>Online</span>}
+                    {thread.isOnline ? (
+                      <span className="thread-status-online">Online</span>
+                    ) : (
+                      <span className="thread-status-lastseen">{formatLastSeen(thread.lastSeenAt)}</span>
+                    )}
+                    {thread.unreadCount > 0 && <strong>{thread.unreadCount} nuovi</strong>}
                   </div>
                 </Link>
 

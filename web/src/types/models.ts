@@ -1,4 +1,9 @@
 export type ThemeMode = 'system' | 'light' | 'dark';
+export type RealtimeConnectionState = 'connecting' | 'connected' | 'disconnected';
+export type ChatAttachmentType = 'image' | 'video' | 'audio' | 'file';
+export type ChatDeliveryState = 'sending' | 'sent' | 'delivered' | 'read';
+export type NotificationType = 'chat' | 'match' | 'event' | 'system';
+export type MatchIntent = 'relationship' | 'friendship' | 'casual' | 'networking';
 
 export type UserGender = 'male' | 'female' | 'nonBinary' | 'other';
 export type UserOrientation =
@@ -15,15 +20,26 @@ export interface User {
   password: string;
   firstName?: string;
   lastName?: string;
+  city?: string;
+  cityLat?: number;
+  cityLng?: number;
   birthDate?: string;
   gender?: UserGender;
   orientation?: UserOrientation;
   showMe: UserShowMe;
   smokes?: boolean;
   drinks?: boolean;
+  bio?: string;
+  ageRangeMin?: number;
+  ageRangeMax?: number;
+  maxDistanceKm?: number;
+  intent?: MatchIntent;
   hobbies?: string;
   passions?: string;
   lookingFor?: string;
+  instagram?: string;
+  telegram?: string;
+  website?: string;
   favoriteSong?: string;
   favoriteMovie?: string;
   profileImageData?: string;
@@ -34,8 +50,20 @@ export interface DiscoverProfile {
   name: string;
   age: number;
   gender: UserGender;
+  city?: string;
+  distanceKm?: number;
+  intent?: MatchIntent;
   bio: string;
   imageUrl?: string;
+}
+
+export interface ChatAttachment {
+  id: string;
+  type: ChatAttachmentType;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  dataUrl: string;
 }
 
 export interface ChatMessage {
@@ -43,6 +71,12 @@ export interface ChatMessage {
   text: string;
   isMe: boolean;
   time: string;
+  createdAt: string;
+  senderName?: string;
+  replyToMessageId?: string;
+  attachments?: ChatAttachment[];
+  readAt?: string;
+  deliveryState?: ChatDeliveryState;
 }
 
 export interface ChatThread {
@@ -50,7 +84,22 @@ export interface ChatThread {
   name: string;
   avatar: string;
   isOnline: boolean;
+  isTyping?: boolean;
+  unreadCount: number;
+  createdAt: string;
+  matchedAt?: string;
+  lastSeenAt?: string;
   messages: ChatMessage[];
+}
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  createdAt: string;
+  readAt?: string;
+  threadId?: string;
 }
 
 export interface EventParticipant {
@@ -75,6 +124,24 @@ export interface MainEventState {
   history: EventHistoryItem[];
 }
 
+export interface MainEventConfig {
+  date: string;
+  title: string;
+  maxParticipants: number;
+  maxPerGender: number;
+}
+
+export interface MainEventInfo {
+  venue: string;
+  address: string;
+  timeLabel: string;
+  contribution: string;
+  contact: string;
+  dressCode: string;
+  description: string;
+  rules: string[];
+}
+
 export interface MainEventSnapshot {
   date: string;
   title: string;
@@ -90,6 +157,8 @@ export interface MainEventSnapshot {
 export interface AppSettings {
   themeMode: ThemeMode;
   notificationsEnabled: boolean;
+  notificationsPollingEnabled: boolean;
+  browserPushEnabled: boolean;
   showAge: boolean;
   showDistance: boolean;
 }
@@ -97,6 +166,10 @@ export interface AppSettings {
 export interface PersistedAppState {
   users: User[];
   currentUserEmail: string | null;
+  realtimeState: RealtimeConnectionState;
+  notifications: AppNotification[];
+  mainEventConfig: MainEventConfig;
+  mainEventInfo: MainEventInfo;
   mainEventState: MainEventState;
   threads: ChatThread[];
   settings: AppSettings;
@@ -112,15 +185,26 @@ export interface LocalUserSummary {
 export interface ProfileUpdateInput {
   firstName: string;
   lastName: string;
+  city: string;
+  cityLat?: number;
+  cityLng?: number;
   birthDate: string;
   gender: UserGender;
   orientation: UserOrientation;
   showMe: UserShowMe;
   smokes: boolean;
   drinks: boolean;
+  bio: string;
+  ageRangeMin: number;
+  ageRangeMax: number;
+  maxDistanceKm: number;
+  intent: MatchIntent;
   hobbies: string;
   passions: string;
   lookingFor: string;
+  instagram: string;
+  telegram: string;
+  website: string;
   favoriteSong: string;
   favoriteMovie: string;
 }
