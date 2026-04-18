@@ -13,6 +13,7 @@ import { MessagesPage } from './pages/messages/MessagesPage';
 import { ChatDetailPage } from './pages/messages/ChatDetailPage';
 import { EventsPage } from './pages/events/EventsPage';
 import { EventDetailPage } from './pages/events/EventDetailPage';
+import { EventAdminPage } from './pages/events/EventAdminPage';
 import { AccountPage } from './pages/account/AccountPage';
 import { EventHistoryPage } from './pages/account/EventHistoryPage';
 
@@ -97,6 +98,7 @@ function AppRoutes(): JSX.Element {
             <Route path="messages/:threadId" element={<ChatDetailPage />} />
             <Route path="events" element={<EventsPage />} />
             <Route path="events/main" element={<EventDetailPage />} />
+            <Route path="events/admin" element={<EventAdminPage />} />
             <Route path="account" element={<AccountPage />} />
             <Route path="account/events" element={<EventHistoryPage />} />
           </Route>

@@ -579,6 +579,7 @@ textarea:focus {
 .chat-detail-page,
 .events-page,
 .event-detail-page,
+.event-admin-page,
 .account-page,
 .event-history-page {
   display: grid;
@@ -1187,7 +1188,14 @@ textarea:focus {
   margin-bottom: 8px;
 }
 
-.event-admin-lists ul {
+.event-admin-participant-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 170px auto;
+  gap: 10px;
+}
+
+.event-admin-lists ul,
+.admin-participant-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1204,6 +1212,34 @@ textarea:focus {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.admin-participant-row {
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.admin-participant-row__meta {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.admin-participant-row__meta p {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-participant-row__meta small {
+  color: var(--text-secondary);
 }
 
 .account-stack {
@@ -1480,6 +1516,14 @@ textarea:focus {
   }
 
   .local-user-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .event-admin-participant-form {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-participant-row {
     grid-template-columns: 1fr;
   }
 }

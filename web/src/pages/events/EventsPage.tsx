@@ -1,8 +1,9 @@
+import { Link } from 'react-router-dom';
 import { EventPreviewCard } from '../../components/events/EventPreviewCard';
 import { useAppStore } from '../../hooks/useAppStore';
 
 export function EventsPage(): JSX.Element {
-  const { mainEventFlags, mainEventSnapshot } = useAppStore();
+  const { mainEventFlags, mainEventSnapshot, isEventAdminEnabled } = useAppStore();
 
   const registrationBadge = mainEventFlags.isRegistered
     ? 'Confermato'
@@ -18,6 +19,12 @@ export function EventsPage(): JSX.Element {
       </header>
 
       <EventPreviewCard snapshot={mainEventSnapshot} registrationBadge={registrationBadge} />
+
+      {isEventAdminEnabled && (
+        <Link className="inline-link" to="/app/events/admin">
+          Apri console admin evento
+        </Link>
+      )}
     </section>
   );
 }
