@@ -15,6 +15,9 @@ import {
   ChatMessage,
   ChatThread,
   DiscoverProfile,
+  EventAdminDraftInput,
+  EventAdminMutableStatus,
+  EventAdminState,
   EventHistoryItem,
   LocalUserSummary,
   MainEventConfig,
@@ -47,6 +50,8 @@ import {
   willLoseMainEventRegistrations
 } from '../services/eventEngine';
 import { formatTime } from '../data/mockData';
+import { loadAppwriteConfiguration } from '../services/appwriteConfiguration';
+import { AppwriteService, AppwriteServiceError } from '../services/appwriteService';
 
 interface EventFeedback {
   message: string;
@@ -69,6 +74,11 @@ interface SwipeDecisionResult {
   threadId?: string;
 }
 
+interface EventAdminActionResult {
+  state: EventAdminState | null;
+  error: string | null;
+}
+
 interface AppContextValue {
   persisted: PersistedAppState;
   isBackendMode: boolean;
@@ -78,6 +88,7 @@ interface AppContextValue {
   mainEventConfig: MainEventConfig;
   mainEventInfo: MainEventInfo;
   isEventAdmin: boolean;
+  isEventAdminEnabled: boolean;
   mainEventSnapshot: MainEventSnapshot;
   mainEventFlags: {
     isRegistered: boolean;
@@ -130,7 +141,11 @@ interface AppContextValue {
   sendMessage(input: SendMessageInput): void;
   markThreadRead(threadId: string): void;
   deleteThread(threadId: string): void;
-  submitSwipeDecision(profileId: string, decision: SwipeDecision): SwipeDecisionResult;
+  submitSwipeDecision(profileId: string, decision: SwipeDecision): Promise<SwipeDecisionResult>;
+  fetchMainEventAdminState(eventId?: string): Promise<EventAdminActionResult>;
+  updateMainEventAsAdmin(eventId: string, draft: EventAdminDraftInput): Promise<EventAdminActionResult>;
+  addMainEventParticipantAsAdmin(eventId: string, lookup: string, status: EventAdminMutableStatus): Promise<EventAdminActionResult>;
+  removeMainEventParticipantAsAdmin(eventId: string, registrationId: string): Promise<EventAdminActionResult>;
   markNotificationRead(notificationId: string): void;
   markAllNotificationsRead(): void;
   requestBrowserNotificationsPermission(): Promise<NotificationPermission | 'unsupported'>;
@@ -155,6 +170,14 @@ const POLL_NOTIFICATION_LIBRARY = [
   'Nuovi profili compatibili disponibili nella Home.',
   'Hai una chat con messaggi non letti.'
 ];
+
+const EVENT_ADMIN_MESSAGE_BY_KEY: Record<string, string> = {
+  'events.admin.error.forbidden': 'Non hai i permessi admin per questo evento.',
+  'events.admin.error.invalidAction': 'Azione admin non valida.',
+  'events.admin.error.invalidParticipant': 'Dati partecipante non validi.',
+  'events.admin.error.userNotFound': 'Utente non trovato.',
+  'events.error.requestFailed': 'Operazione admin non riuscita. Riprova.'
+};
 
 const DEMO_USERS: User[] = [
   {
@@ -243,6 +266,42 @@ const DEMO_USERS: User[] = [
   }
 ];
 
+const appwriteConfiguration = loadAppwriteConfiguration();
+const appwriteService = appwriteConfiguration ? new AppwriteService(appwriteConfiguration) : null;
+const IS_BACKEND_MODE = appwriteService !== null;
+const IS_EVENT_ADMIN_ENABLED = IS_BACKEND_MODE && Boolean(appwriteConfiguration?.eventAdminFunctionId);
+
+function appwriteMessageKey(error: unknown): string | null {
+  if (!(error instanceof AppwriteServiceError)) {
+    return null;
+  }
+
+  const payload = error.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const maybeKey = (payload as Record<string, unknown>).messageKey;
+  return typeof maybeKey === 'string' && maybeKey.trim().length > 0 ? maybeKey.trim() : null;
+}
+
+function eventAdminErrorMessage(error: unknown): string {
+  const messageKey = appwriteMessageKey(error);
+  if (messageKey && EVENT_ADMIN_MESSAGE_BY_KEY[messageKey]) {
+    return EVENT_ADMIN_MESSAGE_BY_KEY[messageKey];
+  }
+
+  if (error instanceof AppwriteServiceError && error.statusCode === 403) {
+    return 'Non hai i permessi admin per questo evento.';
+  }
+
+  if (error instanceof AppwriteServiceError && error.statusCode === 404) {
+    return 'Evento non trovato o non accessibile.';
+  }
+
+  return 'Operazione admin non riuscita. Riprova.';
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -324,11 +383,35 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   const mainEventInfo = persisted.mainEventInfo;
 
   const hydrateMockDiscoverProfiles = useCallback(async (): Promise<void> => {
+    if (IS_BACKEND_MODE && appwriteService) {
+      try {
+        const profiles = await appwriteService.fetchDiscoverProfiles();
+        setDiscoverProfiles(profiles);
+        return;
+      } catch {
+        setDiscoverProfiles([]);
+        return;
+      }
+    }
+
     const profiles = await backendApi.fetchDiscoverProfiles();
     setDiscoverProfiles(profiles);
   }, []);
 
   const hydrateMockThreadsIfMissing = useCallback(async (): Promise<void> => {
+    if (IS_BACKEND_MODE && appwriteService) {
+      try {
+        const threads = await appwriteService.fetchThreads();
+        setPersisted((prev) => ({
+          ...prev,
+          threads
+        }));
+      } catch {
+        // Keep local state untouched when backend thread hydration fails.
+      }
+      return;
+    }
+
     if (persisted.threads.length > 0) {
       return;
     }
@@ -1168,13 +1251,60 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   }, []);
 
   const submitSwipeDecision = useCallback(
-    (profileId: string, decision: SwipeDecision): SwipeDecisionResult => {
+    async (profileId: string, decision: SwipeDecision): Promise<SwipeDecisionResult> => {
       const profile = discoverProfiles.find((candidate) => candidate.id === profileId);
       if (!profile) {
         return {
           matched: false,
           message: 'Profilo non disponibile.'
         };
+      }
+
+      if (IS_BACKEND_MODE && appwriteService) {
+        const backendDecision = decision === 'right' ? 'liked' : 'passed';
+
+        try {
+          const thread = await appwriteService.submitSwipe(profile.id, profile.name, backendDecision);
+
+          if (!thread) {
+            return {
+              matched: false,
+              message: decision === 'left'
+                ? `Hai saltato ${profile.name}.`
+                : `Like inviato a ${profile.name}. In attesa di risposta.`
+            };
+          }
+
+          const createdAt = nowIso();
+          const matchNotification: AppNotification = {
+            id: crypto.randomUUID(),
+            type: 'match',
+            title: `Nuovo match con ${profile.name}`,
+            body: 'La chat e stata creata automaticamente.',
+            createdAt,
+            threadId: thread.id
+          };
+
+          setPersisted((prev) => ({
+            ...prev,
+            threads: [
+              thread,
+              ...prev.threads.filter((existingThread) => existingThread.id !== thread.id)
+            ],
+            notifications: [matchNotification, ...prev.notifications].slice(0, 180)
+          }));
+
+          return {
+            matched: true,
+            threadId: thread.id,
+            message: `It s a match con ${profile.name}!`
+          };
+        } catch {
+          return {
+            matched: false,
+            message: 'Swipe non registrato. Riprova.'
+          };
+        }
       }
 
       if (decision === 'left') {
@@ -1252,6 +1382,132 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     },
     [discoverProfiles, persisted.threads]
   );
+
+  const fetchMainEventAdminState = useCallback(async (eventId?: string): Promise<EventAdminActionResult> => {
+    if (!IS_EVENT_ADMIN_ENABLED || !appwriteService) {
+      return {
+        state: null,
+        error: 'Funzione admin evento non configurata.'
+      };
+    }
+
+    try {
+      const state = await appwriteService.fetchEventAdminState(eventId);
+      return {
+        state,
+        error: null
+      };
+    } catch (error) {
+      return {
+        state: null,
+        error: eventAdminErrorMessage(error)
+      };
+    }
+  }, []);
+
+  const updateMainEventAsAdmin = useCallback(async (
+    eventId: string,
+    draft: EventAdminDraftInput
+  ): Promise<EventAdminActionResult> => {
+    if (!IS_EVENT_ADMIN_ENABLED || !appwriteService) {
+      return {
+        state: null,
+        error: 'Funzione admin evento non configurata.'
+      };
+    }
+
+    if (!eventId.trim()) {
+      return {
+        state: null,
+        error: 'Evento non valido.'
+      };
+    }
+
+    try {
+      const state = await appwriteService.updateMainEventAsAdmin(eventId, draft);
+      return {
+        state,
+        error: null
+      };
+    } catch (error) {
+      return {
+        state: null,
+        error: eventAdminErrorMessage(error)
+      };
+    }
+  }, []);
+
+  const addMainEventParticipantAsAdmin = useCallback(async (
+    eventId: string,
+    lookup: string,
+    status: EventAdminMutableStatus
+  ): Promise<EventAdminActionResult> => {
+    if (!IS_EVENT_ADMIN_ENABLED || !appwriteService) {
+      return {
+        state: null,
+        error: 'Funzione admin evento non configurata.'
+      };
+    }
+
+    if (!eventId.trim()) {
+      return {
+        state: null,
+        error: 'Evento non valido.'
+      };
+    }
+
+    if (!lookup.trim()) {
+      return {
+        state: null,
+        error: 'Inserisci email o user id del partecipante.'
+      };
+    }
+
+    try {
+      const state = await appwriteService.addMainEventParticipantAsAdmin(eventId, lookup, status);
+      return {
+        state,
+        error: null
+      };
+    } catch (error) {
+      return {
+        state: null,
+        error: eventAdminErrorMessage(error)
+      };
+    }
+  }, []);
+
+  const removeMainEventParticipantAsAdmin = useCallback(async (
+    eventId: string,
+    registrationId: string
+  ): Promise<EventAdminActionResult> => {
+    if (!IS_EVENT_ADMIN_ENABLED || !appwriteService) {
+      return {
+        state: null,
+        error: 'Funzione admin evento non configurata.'
+      };
+    }
+
+    if (!eventId.trim() || !registrationId.trim()) {
+      return {
+        state: null,
+        error: 'Partecipante non valido.'
+      };
+    }
+
+    try {
+      const state = await appwriteService.removeMainEventParticipantAsAdmin(eventId, registrationId);
+      return {
+        state,
+        error: null
+      };
+    } catch (error) {
+      return {
+        state: null,
+        error: eventAdminErrorMessage(error)
+      };
+    }
+  }, []);
 
   const markNotificationRead = useCallback((notificationId: string): void => {
     const readAt = nowIso();
@@ -1455,13 +1711,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   const contextValue = useMemo<AppContextValue>(
     () => ({
       persisted,
-      isBackendMode: false,
+      isBackendMode: IS_BACKEND_MODE,
       currentUser,
       localUsers,
       discoverProfiles,
       mainEventConfig,
       mainEventInfo,
       isEventAdmin,
+      isEventAdminEnabled: IS_EVENT_ADMIN_ENABLED,
       mainEventSnapshot,
       mainEventFlags,
       currentUserUpcomingEventHistory,
@@ -1490,6 +1747,10 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       markThreadRead,
       deleteThread,
       submitSwipeDecision,
+      fetchMainEventAdminState,
+      updateMainEventAsAdmin,
+      addMainEventParticipantAsAdmin,
+      removeMainEventParticipantAsAdmin,
       markNotificationRead,
       markAllNotificationsRead,
       requestBrowserNotificationsPermission,
@@ -1534,6 +1795,10 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       markThreadRead,
       deleteThread,
       submitSwipeDecision,
+      fetchMainEventAdminState,
+      updateMainEventAsAdmin,
+      addMainEventParticipantAsAdmin,
+      removeMainEventParticipantAsAdmin,
       markNotificationRead,
       markAllNotificationsRead,
       requestBrowserNotificationsPermission,

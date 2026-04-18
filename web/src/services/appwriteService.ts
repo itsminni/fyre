@@ -2,6 +2,10 @@ import {
   ChatMessage,
   ChatThread,
   DiscoverProfile,
+  EventAdminDraftInput,
+  EventAdminMutableStatus,
+  EventAdminParticipant,
+  EventAdminState,
   EventHistoryItem,
   EventHistoryStatus,
   MainEventSnapshot,
@@ -275,6 +279,24 @@ export class AppwriteService {
     };
   }
 
+  async createOrGetThread(otherUserId: string, otherUserName: string | null): Promise<ChatThread | null> {
+    const payload: Record<string, unknown> = {
+      otherUserId
+    };
+
+    if (otherUserName && otherUserName.trim().length > 0) {
+      payload.otherUserName = otherUserName.trim();
+    }
+
+    const response = await this.executeUserFunction(this.configuration.createOrGetThreadFunctionId, payload);
+    const threadId = this.stringValue(response.threadId);
+    if (!threadId) {
+      throw new AppwriteServiceError('Invalid create/get thread response', 500);
+    }
+
+    return this.fetchThread(threadId);
+  }
+
   async submitSwipe(otherUserId: string, otherUserName: string | null, decision: 'liked' | 'passed'): Promise<ChatThread | null> {
     const functionId = this.configuration.recordSwipeFunctionId;
     if (!functionId) {
@@ -293,11 +315,94 @@ export class AppwriteService {
     }
 
     const threadId = this.stringValue(response.threadId);
-    if (!threadId) {
-      return null;
+    if (threadId) {
+      const thread = await this.fetchThread(threadId);
+      if (thread) {
+        return thread;
+      }
     }
 
-    return this.fetchThread(threadId);
+    // Ensure the dedicated create/get-thread function is used in the web swipe flow too.
+    return this.createOrGetThread(otherUserId, otherUserName);
+  }
+
+  async fetchEventAdminState(eventId?: string): Promise<EventAdminState> {
+    const functionId = this.eventAdminFunctionId();
+    const payload: Record<string, unknown> = { action: 'fetch' };
+
+    if (eventId && eventId.trim().length > 0) {
+      payload.eventId = eventId.trim();
+    }
+
+    const response = await this.executeUserFunction(functionId, payload);
+    const state = this.makeEventAdminState(response);
+    if (!state) {
+      throw new AppwriteServiceError('Invalid event admin response', 500);
+    }
+
+    return state;
+  }
+
+  async updateMainEventAsAdmin(eventId: string, draft: EventAdminDraftInput): Promise<EventAdminState> {
+    const functionId = this.eventAdminFunctionId();
+    const payload: Record<string, unknown> = {
+      action: 'updateEvent',
+      eventId,
+      title: draft.title.trim(),
+      startsAt: draft.startsAt,
+      maxParticipants: Math.max(2, Math.trunc(draft.maxParticipants)),
+      maleLimit: Math.max(0, Math.trunc(draft.maleLimit)),
+      femaleLimit: Math.max(0, Math.trunc(draft.femaleLimit)),
+      adminUserIds: draft.adminUserIds.trim(),
+      adminEmails: draft.adminEmails.trim(),
+      registrationClosesAt: draft.registrationClosesAt,
+      cancellationClosesAt: draft.cancellationClosesAt
+    };
+
+    const response = await this.executeUserFunction(functionId, payload);
+    const state = this.makeEventAdminState(response);
+    if (!state) {
+      throw new AppwriteServiceError('Invalid event admin response', 500);
+    }
+
+    return state;
+  }
+
+  async addMainEventParticipantAsAdmin(
+    eventId: string,
+    userLookup: string,
+    status: EventAdminMutableStatus
+  ): Promise<EventAdminState> {
+    const functionId = this.eventAdminFunctionId();
+    const response = await this.executeUserFunction(functionId, {
+      action: 'addParticipant',
+      eventId,
+      userLookup: userLookup.trim(),
+      status
+    });
+
+    const state = this.makeEventAdminState(response);
+    if (!state) {
+      throw new AppwriteServiceError('Invalid event admin response', 500);
+    }
+
+    return state;
+  }
+
+  async removeMainEventParticipantAsAdmin(eventId: string, registrationId: string): Promise<EventAdminState> {
+    const functionId = this.eventAdminFunctionId();
+    const response = await this.executeUserFunction(functionId, {
+      action: 'removeParticipant',
+      eventId,
+      registrationId
+    });
+
+    const state = this.makeEventAdminState(response);
+    if (!state) {
+      throw new AppwriteServiceError('Invalid event admin response', 500);
+    }
+
+    return state;
   }
 
   async fetchMainEventState(user: User | null): Promise<EventRemoteState | null> {
@@ -601,6 +706,83 @@ export class AppwriteService {
     };
   }
 
+  private makeEventAdminState(payload: Record<string, unknown>): EventAdminState | null {
+    const isAdmin = this.booleanValue(payload.isAdmin);
+    if (isAdmin === false) {
+      return null;
+    }
+
+    const eventRaw = payload.event;
+    if (!eventRaw || typeof eventRaw !== 'object' || Array.isArray(eventRaw)) {
+      return null;
+    }
+
+    const event = eventRaw as Record<string, unknown>;
+    const eventId = this.stringValue(event.$id) ?? this.stringValue(event.eventId);
+    const startsAt = this.dateValue(event.startsAt);
+
+    if (!eventId || !startsAt) {
+      return null;
+    }
+
+    const participants = this.arrayOfDictionaries(payload.participants)
+      .map((row) => this.makeEventAdminParticipant(row))
+      .filter((participant): participant is EventAdminParticipant => participant !== null)
+      .sort((left, right) => {
+        const leftOrder = this.eventHistorySortOrder(left.status);
+        const rightOrder = this.eventHistorySortOrder(right.status);
+
+        if (leftOrder === rightOrder) {
+          const leftCreatedAt = this.dateValue(left.createdAt)?.getTime() ?? 0;
+          const rightCreatedAt = this.dateValue(right.createdAt)?.getTime() ?? 0;
+          return leftCreatedAt - rightCreatedAt;
+        }
+
+        return leftOrder - rightOrder;
+      });
+
+    return {
+      eventId,
+      title: this.stringValue(event.title) ?? 'Evento principale',
+      startsAt: startsAt.toISOString(),
+      maxParticipants: this.integerValue(event.maxParticipants) ?? 48,
+      maleLimit: this.integerValue(event.maleLimit) ?? 24,
+      femaleLimit: this.integerValue(event.femaleLimit) ?? 24,
+      registrationClosesAt: this.dateValue(event.registrationClosesAt)?.toISOString() ?? null,
+      cancellationClosesAt: this.dateValue(event.cancellationClosesAt)?.toISOString() ?? null,
+      adminUserIds: this.stringValue(event.adminUserIds) ?? '',
+      adminEmails: this.stringValue(event.adminEmails) ?? '',
+      participants
+    };
+  }
+
+  private makeEventAdminParticipant(row: Record<string, unknown>): EventAdminParticipant | null {
+    const registrationId = this.stringValue(row.registrationId) ?? this.stringValue(row.$id);
+    const userId = this.stringValue(row.userId);
+    const status = this.eventHistoryStatus(this.stringValue(row.status));
+
+    if (!registrationId || !userId || !status) {
+      return null;
+    }
+
+    return {
+      registrationId,
+      userId,
+      email: this.stringValue(row.email) ?? userId,
+      firstName: this.stringValue(row.firstName) ?? undefined,
+      lastName: this.stringValue(row.lastName) ?? undefined,
+      displayName: this.displayName(
+        this.stringValue(row.firstName),
+        this.stringValue(row.lastName),
+        this.stringValue(row.email),
+        this.stringValue(row.displayName) ?? userId
+      ),
+      gender: this.userGenderValue(this.stringValue(row.gender)) ?? undefined,
+      status,
+      createdAt: this.dateValue(row.createdAt)?.toISOString() ?? this.dateValue(row.$createdAt)?.toISOString() ?? undefined
+    };
+  }
+
   private async makeEventHistory(
     accountId: string | null,
     user: User | null,
@@ -694,6 +876,15 @@ export class AppwriteService {
     }
 
     return this.waitForExecution(functionId, executionId);
+  }
+
+  private eventAdminFunctionId(): string {
+    const functionId = this.configuration.eventAdminFunctionId;
+    if (!functionId) {
+      throw new AppwriteServiceError('Missing event admin function id', 400);
+    }
+
+    return functionId;
   }
 
   private async waitForExecution(functionId: string, executionId: string): Promise<Record<string, unknown>> {
@@ -1087,6 +1278,21 @@ export class AppwriteService {
         return value.toLowerCase() as EventHistoryStatus;
       default:
         return null;
+    }
+  }
+
+  private eventHistorySortOrder(status: EventHistoryStatus): number {
+    switch (status) {
+      case 'confirmed':
+        return 0;
+      case 'promoted':
+        return 1;
+      case 'waitlisted':
+        return 2;
+      case 'cancelled':
+        return 3;
+      default:
+        return 99;
     }
   }
 

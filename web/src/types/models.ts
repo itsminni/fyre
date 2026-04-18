@@ -163,6 +163,46 @@ export interface MainEventSnapshot {
   remainingFemaleSlots: number;
 }
 
+export type EventAdminMutableStatus = 'confirmed' | 'waitlisted' | 'promoted';
+
+export interface EventAdminParticipant {
+  registrationId: string;
+  userId: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  displayName: string;
+  gender?: UserGender;
+  status: EventHistoryStatus;
+  createdAt?: string;
+}
+
+export interface EventAdminState {
+  eventId: string;
+  title: string;
+  startsAt: string;
+  maxParticipants: number;
+  maleLimit: number;
+  femaleLimit: number;
+  registrationClosesAt: string | null;
+  cancellationClosesAt: string | null;
+  adminUserIds: string;
+  adminEmails: string;
+  participants: EventAdminParticipant[];
+}
+
+export interface EventAdminDraftInput {
+  title: string;
+  startsAt: string;
+  maxParticipants: number;
+  maleLimit: number;
+  femaleLimit: number;
+  registrationClosesAt: string | null;
+  cancellationClosesAt: string | null;
+  adminUserIds: string;
+  adminEmails: string;
+}
+
 export interface AppSettings {
   themeMode: ThemeMode;
   notificationsEnabled: boolean;

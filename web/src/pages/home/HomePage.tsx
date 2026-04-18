@@ -18,18 +18,26 @@ export function HomePage(): JSX.Element {
 
   const [index, setIndex] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [swipeFeedback, setSwipeFeedback] = useState<string | null>(null);
   const [lastMatch, setLastMatch] = useState<{ name: string; threadId: string } | null>(null);
   const pointerStart = useRef<number | null>(null);
 
   const activeProfile = filteredProfiles[index] ?? null;
 
-  function performDecision(decision: Decision): void {
+  async function performDecision(decision: Decision): Promise<void> {
     if (!activeProfile) {
       return;
     }
 
-    const result = submitSwipeDecision(activeProfile.id, decision);
+    if (isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    const result = await submitSwipeDecision(activeProfile.id, decision);
+    setIsSubmitting(false);
+
     setSwipeFeedback(result.message);
 
     if (result.matched && result.threadId) {
@@ -50,7 +58,7 @@ export function HomePage(): JSX.Element {
     if (!activeProfile) {
       return;
     }
-    performDecision(decision);
+    void performDecision(decision);
   }
 
   function onPointerDown(clientX: number): void {
@@ -66,7 +74,7 @@ export function HomePage(): JSX.Element {
 
   function onPointerUp(): void {
     if (Math.abs(dragOffset) > 120) {
-      performDecision(dragOffset > 0 ? 'right' : 'left');
+      void performDecision(dragOffset > 0 ? 'right' : 'left');
       return;
     }
     setDragOffset(0);
@@ -101,10 +109,12 @@ export function HomePage(): JSX.Element {
           </div>
 
           <div className="swipe-actions">
-            <Button variant="secondary" onClick={() => onDecision('left')}>
+            <Button variant="secondary" onClick={() => onDecision('left')} disabled={isSubmitting}>
               Salta
             </Button>
-            <Button onClick={() => onDecision('right')}>Fyre</Button>
+            <Button onClick={() => onDecision('right')} disabled={isSubmitting}>
+              {isSubmitting ? 'Attendi...' : 'Fyre'}
+            </Button>
           </div>
 
           {swipeFeedback && <p className="swipe-feedback">{swipeFeedback}</p>}
