@@ -2,6 +2,7 @@ const MAX_RESULTS = 40;
 const DEFAULT_MIN_AGE = 18;
 const DEFAULT_MAX_AGE = 35;
 const RECENT_PRESENCE_MS = 3 * 24 * 60 * 60 * 1000;
+const MAX_SHARED_INTERESTS = 4;
 
 export default async ({ req, res, error }) => {
   try {
@@ -9,13 +10,16 @@ export default async ({ req, res, error }) => {
     const body = parseBody(req);
     const currentUserId = resolveCurrentUserId(req, body);
 
-    const [currentProfile, profiles, swipes, matches] = await Promise.all([
+    const [currentProfile, profiles, swipes, matches, relationships] = await Promise.all([
       fetchProfile(config, currentUserId),
       listRows(config, config.profilesTableId, []),
       listRows(config, config.swipesTableId, [
         equal("fromUserId", [currentUserId])
       ]),
-      listRows(config, config.matchesTableId, [])
+      listRows(config, config.matchesTableId, []),
+      config.relationshipsTableId
+        ? listRows(config, config.relationshipsTableId, [])
+        : Promise.resolve([])
     ]);
 
     if (!currentProfile) {
@@ -24,7 +28,7 @@ export default async ({ req, res, error }) => {
     }
 
     const currentUserContext = makeUserContext(currentProfile);
-    const excludedUserIds = buildExcludedUserIds(currentUserId, swipes, matches);
+    const excludedUserIds = buildExcludedUserIds(currentUserId, swipes, matches, relationships);
 
     const discoverProfiles = profiles
       .map((row) => buildCandidateEntry(row, currentUserId, currentUserContext, excludedUserIds))
@@ -49,7 +53,15 @@ export default async ({ req, res, error }) => {
         return rhsPresence - lhsPresence;
       })
       .slice(0, MAX_RESULTS)
-      .map(({ row, distanceKm }) => projectDiscoverProfile(row, distanceKm));
+      .map(({ row, candidate, distanceKm, score }) => projectDiscoverProfile(
+        config,
+        row,
+        candidate,
+        currentUserContext,
+        distanceKm,
+        score,
+        relationshipStateForPair(currentUserId, asString(row.userId), relationships)
+      ));
 
     console.log(`RESULT_JSON:${JSON.stringify({ profiles: discoverProfiles })}`);
     return res.json({ profiles: discoverProfiles }, 200);
@@ -67,11 +79,13 @@ function getConfig(req) {
     databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
     profilesTableId: requiredEnv("APPWRITE_PROFILES_TABLE_ID"),
     swipesTableId: requiredEnv("APPWRITE_SWIPES_TABLE_ID"),
-    matchesTableId: requiredEnv("APPWRITE_MATCHES_TABLE_ID")
+    matchesTableId: requiredEnv("APPWRITE_MATCHES_TABLE_ID"),
+    relationshipsTableId: optionalEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
+    avatarsBucketId: optionalEnv("APPWRITE_AVATARS_BUCKET_ID")
   };
 }
 
-function buildExcludedUserIds(currentUserId, swipes, matches) {
+function buildExcludedUserIds(currentUserId, swipes, matches, relationships) {
   const excludedUserIds = new Set();
 
   for (const swipe of swipes) {
@@ -85,6 +99,18 @@ function buildExcludedUserIds(currentUserId, swipes, matches) {
       excludedUserIds.add(match.userBId);
     } else if (match.userBId === currentUserId && typeof match.userAId === "string") {
       excludedUserIds.add(match.userAId);
+    }
+  }
+
+  for (const relationship of relationships) {
+    const relatedUserId = otherUserIdFromRelationship(relationship, currentUserId);
+    if (!relatedUserId) {
+      continue;
+    }
+
+    const state = relationshipStateForUser(relationship, currentUserId);
+    if (state === "archived" || state === "blocked" || state === "liked" || state === "matched") {
+      excludedUserIds.add(relatedUserId);
     }
   }
 
@@ -139,52 +165,29 @@ function buildCandidateEntry(row, currentUserId, currentUser, excludedUserIds) {
 }
 
 function candidateScore(row, candidate, currentUser, distanceKm) {
-  let score = 0;
-
-  score += distanceScore(distanceKm);
-
-  if (currentUser.city && candidate.city && currentUser.city === candidate.city) {
-    score += 1;
-  }
-
-  if (currentUser.intent && candidate.intent && currentUser.intent === candidate.intent) {
-    score += 3;
-  }
-
   const sharedInterests = candidate.interests.filter((interest) => currentUser.interests.includes(interest)).length;
-  score += Math.min(sharedInterests, 3);
+  const interestsScore = Math.min(sharedInterests, MAX_SHARED_INTERESTS) * 14;
+  const distanceComponent = distanceScore(distanceKm);
+  const completenessComponent = profileCompletenessScore(row);
+  const activityBoost = isRecentlyActive(row.presenceUpdatedAt) ? 4 : 0;
+  const deterministicScore = interestsScore + distanceComponent + completenessComponent + activityBoost;
+  const randomnessBoost = deterministicScore * (0.05 + (Math.random() * 0.05));
 
-  if (typeof currentUser.smokes === "boolean" && typeof candidate.smokes === "boolean" && currentUser.smokes === candidate.smokes) {
-    score += 1;
-  }
-
-  if (typeof currentUser.drinks === "boolean" && typeof candidate.drinks === "boolean" && currentUser.drinks === candidate.drinks) {
-    score += 1;
-  }
-
-  if (isRecentlyActive(row.presenceUpdatedAt)) {
-    score += 1;
-  }
-
-  return score;
+  return Math.max(1, Math.round(deterministicScore + randomnessBoost));
 }
 
-function projectDiscoverProfile(row, distanceKm) {
+function projectDiscoverProfile(config, row, candidate, currentUser, distanceKm, score, relationshipState) {
+  const commonInterests = candidate.interests.filter((interest) => currentUser.interests.includes(interest));
+
   return {
-    userId: row.userId,
-    email: row.email ?? null,
-    firstName: row.firstName ?? null,
-    lastName: row.lastName ?? null,
-    birthDate: row.birthDate ?? null,
-    gender: normalizeGender(row.gender),
-    city: row.city ?? null,
-    intent: normalizeIntent(row.intent),
-    distanceKm: roundedDistance(distanceKm),
-    bio: firstNonEmpty([row.bio]),
-    interests: firstNonEmpty([row.interests]),
-    instagramTag: normalizeSocialTag(row.instagramTag),
-    spotifyTag: normalizeSocialTag(row.spotifyTag),
-    avatarFileId: row.avatarFileId ?? null
+    id: row.userId,
+    name: discoverName(row),
+    age: candidate.age,
+    photos: discoverPhotoURLs(config, row),
+    compatibilityScore: Math.min(99, Math.max(42, score)),
+    distance: roundedDistance(distanceKm),
+    commonInterests: commonInterests.slice(0, MAX_SHARED_INTERESTS),
+    relationshipState
   };
 }
 
@@ -365,6 +368,28 @@ function normalizeSocialTag(value) {
   return sanitized.slice(0, 64);
 }
 
+function profileCompletenessScore(row) {
+  let score = 0;
+
+  if (isProfileReady(row)) {
+    score += 8;
+  }
+
+  if (discoverPhotoFileIds(row).length > 0) {
+    score += 4;
+  }
+
+  if (interestTokens(row.interests).length > 0) {
+    score += 3;
+  }
+
+  if (asString(row.bio)) {
+    score += 3;
+  }
+
+  return score;
+}
+
 function numberValue(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -392,19 +417,22 @@ function distanceKmBetween(lhs, rhs) {
 
 function distanceScore(distanceKm) {
   if (!Number.isFinite(distanceKm)) {
-    return 0;
+    return 6;
   }
-  if (distanceKm <= 10) {
-    return 4;
+  if (distanceKm <= 5) {
+    return 24;
   }
-  if (distanceKm <= 25) {
-    return 3;
+  if (distanceKm <= 15) {
+    return 18;
   }
-  if (distanceKm <= 50) {
-    return 2;
+  if (distanceKm <= 35) {
+    return 12;
+  }
+  if (distanceKm <= 60) {
+    return 8;
   }
   if (distanceKm <= 100) {
-    return 1;
+    return 4;
   }
   return 0;
 }
@@ -454,6 +482,11 @@ function requiredEnv(name) {
     throw new Error(`Missing environment variable ${name}`);
   }
   return value;
+}
+
+function optionalEnv(name) {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function requiredHeader(req, name) {
@@ -580,6 +613,114 @@ function asNullableBool(value) {
   }
   if (stringValue === "false") {
     return false;
+  }
+  return null;
+}
+
+function discoverName(row) {
+  const firstName = asString(row.firstName) ?? "";
+  const lastName = asString(row.lastName) ?? "";
+  const fullName = `${firstName} ${lastName}`.trim();
+  if (fullName) {
+    return fullName;
+  }
+
+  const email = asString(row.email);
+  if (email) {
+    return email.split("@")[0];
+  }
+
+  return "Fyre";
+}
+
+function discoverPhotoFileIds(row) {
+  if (Array.isArray(row.photoFileIds)) {
+    return row.photoFileIds.map((value) => asString(value)).filter(Boolean);
+  }
+
+  const serialized = asString(row.photoFileIds);
+  if (serialized) {
+    return serialized
+      .split(/[,|\n]/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+
+  const avatarFileId = asString(row.avatarFileId);
+  return avatarFileId ? [avatarFileId] : [];
+}
+
+function discoverPhotoURLs(config, row) {
+  if (Array.isArray(row.photos)) {
+    const directUrls = row.photos.map((value) => asString(value)).filter(Boolean);
+    if (directUrls.length > 0) {
+      return directUrls;
+    }
+  }
+
+  if (!config.avatarsBucketId) {
+    return [];
+  }
+
+  return discoverPhotoFileIds(row)
+    .map((fileId) => buildStorageFileURL(config, fileId))
+    .filter(Boolean);
+}
+
+function buildStorageFileURL(config, fileId) {
+  if (!fileId || !config.avatarsBucketId) {
+    return null;
+  }
+
+  const url = new URL(`${config.endpoint}/storage/buckets/${config.avatarsBucketId}/files/${fileId}/view`);
+  url.searchParams.set("project", config.projectId);
+  return url.toString();
+}
+
+function relationshipStateForPair(currentUserId, otherUserId, relationships) {
+  if (!currentUserId || !otherUserId) {
+    return "none";
+  }
+
+  const pairKey = [currentUserId, otherUserId].sort().join(":");
+  const relationship = relationships.find((row) => asString(row.pairKey) === pairKey);
+  if (!relationship) {
+    return "none";
+  }
+
+  const currentState = relationshipStateForUser(relationship, currentUserId);
+  const otherState = relationshipStateForUser(relationship, otherUserId);
+  if (currentState === "blocked" || otherState === "blocked") {
+    return "blocked";
+  }
+  if (currentState === "archived") {
+    return "archived";
+  }
+  if (relationship.matchedAt || currentState === "matched" || otherState === "matched") {
+    return "matched";
+  }
+  if (currentState === "liked") {
+    return "liked";
+  }
+  return "none";
+}
+
+function relationshipStateForUser(relationship, userId) {
+  if (relationship.userAId === userId) {
+    return asString(relationship.userAState) ?? "none";
+  }
+  if (relationship.userBId === userId) {
+    return asString(relationship.userBState) ?? "none";
+  }
+  return "none";
+}
+
+function otherUserIdFromRelationship(relationship, currentUserId) {
+  if (relationship.userAId === currentUserId) {
+    return asString(relationship.userBId);
+  }
+  if (relationship.userBId === currentUserId) {
+    return asString(relationship.userAId);
   }
   return null;
 }
