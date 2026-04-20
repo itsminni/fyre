@@ -169,6 +169,11 @@
 "profile.gender.changeHint" = "To change gender, send an email to support@example.com.";
 "profile.photo.section" = "Profile photo";
 "profile.photo.action" = "Choose photo";
+"profile.photo.galleryTitle" = "Your photos";
+"profile.photo.galleryHint" = "The first photo is used as the main avatar.";
+"profile.photo.addAction" = "Add";
+"profile.photo.primaryBadge" = "Avatar";
+"profile.photo.remove" = "Remove photo";
 "profile.firstName" = "First name";
 "profile.lastName" = "Last name";
 "profile.city" = "City";

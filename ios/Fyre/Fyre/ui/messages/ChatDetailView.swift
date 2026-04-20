@@ -71,6 +71,18 @@ private struct ChatBottomAnchorReader: View {
     }
 }
 
+private struct VisualEffectBlurView: UIViewRepresentable {
+    let style: UIBlurEffect.Style
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        UIVisualEffectView(effect: UIBlurEffect(style: style))
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        uiView.effect = UIBlurEffect(style: style)
+    }
+}
+
 private struct LegacyHeaderButtonFrameModifier: ViewModifier {
     let isLegacy: Bool
 
@@ -105,27 +117,39 @@ private struct ComposerLayoutMetrics {
     let progress: CGFloat
 
     var sideSpacing: CGFloat {
-        4 + (progress * 10)
+        4 + (progress * 8)
     }
 
     var sideButtonScale: CGFloat {
-        1 + (progress * 0.03)
+        1 + (progress * 0.02)
+    }
+
+    var sideButtonSize: CGFloat {
+        40 + (progress * 2)
     }
 
     var fieldHorizontalPadding: CGFloat {
-        14 + (progress * 1.5)
+        13 + (progress * 1.25)
     }
 
     var fieldVerticalPadding: CGFloat {
-        10 + (progress * 2)
+        8 + (progress * 1.25)
     }
 
     var fieldCornerRadius: CGFloat {
-        22 + (progress * 2)
+        20 + (progress * 1.5)
     }
 
     var fieldMinHeight: CGFloat {
-        46 + (progress * 3)
+        42 + (progress * 2)
+    }
+
+    var inlineAccessorySize: CGFloat {
+        26
+    }
+
+    var sendButtonSize: CGFloat {
+        40 + (progress * 2)
     }
 }
 
@@ -415,12 +439,12 @@ struct ChatDetailView: View {
         Button {
             dismiss()
         } label: {
-            Image(systemName: "chevron.backward")
-                .font(.body.weight(.semibold))
-                .modifier(LegacyHeaderButtonFrameModifier(isLegacy: !usesModernChatChrome))
+            legacyHeaderControlLabel(
+                systemImage: "chevron.backward",
+                verticalOffset: 0
+            )
         }
         .buttonStyle(.plain)
-        .tint(.primary)
         .accessibilityLabel("Back")
     }
 
@@ -454,51 +478,78 @@ struct ChatDetailView: View {
             Button {
                 pendingRelationshipAction = PendingRelationshipAction(action: .archive)
             } label: {
-                HStack(spacing: 12) {
-                    Text(L10n.tr("messages.archive.action"))
-                        .foregroundStyle(.white)
-                    Spacer(minLength: 0)
-                    Image(systemName: "archivebox")
-                        .foregroundStyle(.white)
-                }
-                .symbolRenderingMode(.monochrome)
-                .contentShape(Rectangle())
+                relationshipMenuActionLabel(
+                    title: L10n.tr("messages.archive.action"),
+                    systemImage: "archivebox",
+                    textColor: .white,
+                    iconColor: .red
+                )
             }
 
-            Button(role: .destructive) {
+            Button {
                 pendingRelationshipAction = PendingRelationshipAction(action: .unmatch)
             } label: {
-                HStack(spacing: 12) {
-                    Text(L10n.tr("messages.unmatch.action"))
-                        .foregroundStyle(.white)
-                    Spacer(minLength: 0)
-                    Image(systemName: "heart.slash")
-                        .foregroundStyle(.white)
-                }
-                .symbolRenderingMode(.monochrome)
-                .contentShape(Rectangle())
+                relationshipMenuActionLabel(
+                    title: L10n.tr("messages.unmatch.action"),
+                    systemImage: "heart.slash",
+                    textColor: .red,
+                    iconColor: .red
+                )
             }
 
-            Button(role: .destructive) {
+            Button {
                 pendingRelationshipAction = PendingRelationshipAction(action: .block)
             } label: {
-                HStack(spacing: 12) {
-                    Text(L10n.tr("messages.block.action"))
-                        .foregroundStyle(.white)
-                    Spacer(minLength: 0)
-                    Image(systemName: "hand.raised")
-                        .foregroundStyle(.white)
-                }
-                .symbolRenderingMode(.monochrome)
-                .contentShape(Rectangle())
+                relationshipMenuActionLabel(
+                    title: L10n.tr("messages.block.action"),
+                    systemImage: "hand.raised",
+                    textColor: .red,
+                    iconColor: .red
+                )
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.body.weight(.semibold))
-                .modifier(LegacyHeaderButtonFrameModifier(isLegacy: !usesModernChatChrome))
+            legacyHeaderControlLabel(
+                systemImage: "ellipsis",
+                verticalOffset: usesIOS18LegacyChatChrome ? -0.5 : 0
+            )
         }
-        .tint(.primary)
         .accessibilityLabel("More options")
+    }
+
+    private func legacyHeaderControlLabel(
+        systemImage: String,
+        verticalOffset: CGFloat
+    ) -> some View {
+        Image(systemName: systemImage)
+            .font(legacyHeaderControlFont)
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(legacyHeaderActionTint)
+            .frame(
+                width: legacyHeaderControlGlyphSize,
+                height: legacyHeaderControlGlyphSize,
+                alignment: .center
+            )
+            .offset(y: verticalOffset)
+            .modifier(LegacyHeaderButtonFrameModifier(isLegacy: !usesModernChatChrome))
+    }
+
+    private func relationshipMenuActionLabel(
+        title: String,
+        systemImage: String,
+        textColor: Color,
+        iconColor: Color
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .foregroundStyle(textColor)
+
+            Spacer(minLength: 0)
+
+            Image(systemName: systemImage)
+                .foregroundStyle(iconColor)
+        }
+        .symbolRenderingMode(.monochrome)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -803,9 +854,9 @@ struct ChatDetailView: View {
     @ViewBuilder
     private var legacyChatHeaderOverlay: some View {
         chatHeaderContent
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
-            .padding(.bottom, 8)
+            .padding(.horizontal, usesIOS18LegacyChatChrome ? 12 : 10)
+            .padding(.top, usesIOS18LegacyChatChrome ? 5 : 4)
+            .padding(.bottom, 6)
             .background {
                 legacyChatHeaderBaseChrome
                     .ignoresSafeArea(.container, edges: .top)
@@ -816,9 +867,9 @@ struct ChatDetailView: View {
         ZStack {
             chatHeaderPrincipal
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 64)
+                .padding(.horizontal, usesModernChatChrome ? 64 : legacyHeaderPrincipalHorizontalPadding)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 0) {
                 chatHeaderBackButton
                 Spacer(minLength: 0)
                 chatHeaderTrailingMenu
@@ -839,20 +890,34 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private var legacyChatHeaderBaseChrome: some View {
-        Rectangle()
-            .fill(.ultraThinMaterial)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(colorScheme == .dark ? .white.opacity(0.10) : .black.opacity(0.08))
-                    .frame(height: 0.8)
-            }
+        if usesIOS18LegacyChatChrome {
+            legacyIOS18KeyboardChrome
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(legacyBarDividerColor)
+                        .frame(height: 0.8)
+                }
+        } else {
+            Rectangle()
+                .fill(legacyBarMaterial)
+                .overlay {
+                    legacyBarOverlayColor
+                        .opacity(legacyBarOverlayOpacity)
+                }
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(legacyBarDividerColor)
+                        .frame(height: 0.8)
+                }
+                .shadow(color: legacyBarShadowColor, radius: 10, y: 2)
+        }
     }
 
     @ViewBuilder
     private var modernComposerChromeOverlay: some View {
         composerOverlay
             .frame(maxWidth: .infinity, alignment: .bottom)
-            .padding(.bottom, max(6, windowSafeAreaBottomInset))
+            .padding(.bottom, modernComposerBottomInset)
             .background(alignment: .bottom) {
                 modernComposerBaseChrome
                     .ignoresSafeArea(.container, edges: .bottom)
@@ -863,7 +928,7 @@ struct ChatDetailView: View {
     private var legacyComposerChromeOverlay: some View {
         composerOverlay
             .frame(maxWidth: .infinity, alignment: .bottom)
-            .padding(.bottom, 10)
+            .padding(.bottom, usesIOS18LegacyChatChrome ? legacyKeyboardShieldHeight : 6)
             .background(alignment: .bottom) {
                 legacyComposerBaseChrome
                     .ignoresSafeArea(.container, edges: .bottom)
@@ -888,8 +953,8 @@ struct ChatDetailView: View {
             legacyComposerRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.horizontal, usesIOS18LegacyChatChrome ? 8 : 12)
+        .padding(.top, usesIOS18LegacyChatChrome ? legacyKeyboardSurfaceInset : 6)
     }
 
     @ViewBuilder
@@ -909,14 +974,27 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private var legacyComposerBaseChrome: some View {
-        Rectangle()
-            .fill(.ultraThinMaterial)
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(colorScheme == .dark ? .white.opacity(0.10) : .black.opacity(0.08))
-                    .frame(height: 0.8)
-            }
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.16 : 0.06), radius: 10, y: -1)
+        if usesIOS18LegacyChatChrome {
+            legacyIOS18KeyboardChrome
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(legacyBarDividerColor)
+                        .frame(height: 0.8)
+                }
+        } else {
+            Rectangle()
+                .fill(legacyBarMaterial)
+                .overlay {
+                    legacyBarOverlayColor
+                        .opacity(colorScheme == .dark ? 0.34 : 0.70)
+                }
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(legacyBarDividerColor)
+                        .frame(height: 0.8)
+                }
+                .shadow(color: legacyBarShadowColor.opacity(0.9), radius: 12, y: -1)
+        }
     }
 
     @ViewBuilder
@@ -941,22 +1019,45 @@ struct ChatDetailView: View {
     private func legacyComposerFieldChrome(cornerRadius: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
-        shape
-            .fill(legacyComposerInsetFill)
-            .overlay {
-                shape
-                    .stroke(legacyComposerInsetBorderColor, lineWidth: 0.8)
-            }
+        if usesIOS18LegacyChatChrome {
+            shape
+                .fill(.clear)
+                .background {
+                    legacyIOS18TextFieldChrome
+                        .clipShape(shape)
+                }
+                .overlay {
+                    shape
+                        .stroke(legacyComposerInsetBorderColor, lineWidth: 0.8)
+                }
+        } else {
+            shape
+                .fill(legacyComposerInsetFill)
+                .overlay {
+                    shape
+                        .stroke(legacyComposerInsetBorderColor, lineWidth: 0.8)
+                }
+        }
     }
 
     private var legacyComposerInsetFill: Color {
-        colorScheme == .dark
-            ? Color(uiColor: .secondarySystemBackground).opacity(0.88)
-            : Color(uiColor: .systemBackground).opacity(0.82)
+        if usesIOS18LegacyChatChrome {
+            return colorScheme == .dark
+                ? Color(uiColor: .tertiarySystemBackground).opacity(0.90)
+                : Color(uiColor: .systemBackground).opacity(0.86)
+        }
+
+        return colorScheme == .dark
+            ? Color(uiColor: .tertiarySystemBackground).opacity(0.94)
+            : Color(uiColor: .systemBackground).opacity(0.94)
     }
 
     private var legacyComposerInsetBorderColor: Color {
-        colorScheme == .dark ? .white.opacity(0.10) : .black.opacity(0.08)
+        if usesIOS18LegacyChatChrome {
+            return colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.05)
+        }
+
+        return colorScheme == .dark ? .white.opacity(0.10) : .black.opacity(0.06)
     }
 
     @ViewBuilder
@@ -975,23 +1076,36 @@ struct ChatDetailView: View {
     private func modernSideButtonChrome(isDisabled: Bool = false) -> some View {
         let shape = Circle()
 
-        shape
-            .fill(.regularMaterial)
-            .overlay {
-                if shouldUseDarkComposerChrome {
-                    shape
-                        .fill(Color.black.opacity(modernComposerContrastOverlayOpacity))
-                }
-            }
-            .overlay {
+        Group {
+            if #available(iOS 26.0, *) {
                 shape
-                    .stroke(
-                        colorScheme == .dark ? .white.opacity(isDisabled ? 0.10 : 0.18) : .black.opacity(isDisabled ? 0.07 : 0.12),
-                        lineWidth: 0.9
-                    )
+                    .fill(.clear)
+                    .glassEffect(in: shape)
+                    .overlay {
+                        if shouldUseDarkComposerChrome {
+                            shape
+                                .fill(Color.black.opacity(modernComposerContrastOverlayOpacity))
+                        }
+                    }
+            } else {
+                shape
+                    .fill(.regularMaterial)
+                    .overlay {
+                        if shouldUseDarkComposerChrome {
+                            shape
+                                .fill(Color.black.opacity(modernComposerContrastOverlayOpacity))
+                        }
+                    }
             }
-            .opacity(isDisabled ? 0.72 : 1)
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.24 : 0.14), radius: 8, y: 2)
+        }
+        .overlay {
+            shape
+                .stroke(
+                    colorScheme == .dark ? .white.opacity(isDisabled ? 0.08 : 0.12) : .black.opacity(isDisabled ? 0.05 : 0.08),
+                    lineWidth: 0.9
+                )
+        }
+        .opacity(isDisabled ? 0.72 : 1)
     }
 
     private var recordingComposerStatusView: some View {
@@ -1094,7 +1208,7 @@ struct ChatDetailView: View {
             } label: {
                 composerAttachmentButton()
                     .foregroundStyle(colorScheme == .dark ? .white.opacity(0.92) : .primary.opacity(0.84))
-                    .frame(width: 42, height: 42)
+                    .frame(width: metrics.sideButtonSize, height: metrics.sideButtonSize)
                     .background(modernSideButtonChrome())
             }
             .buttonStyle(.plain)
@@ -1123,7 +1237,7 @@ struct ChatDetailView: View {
                     Image(systemName: "mic.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(voiceRecorder.isRecording ? .red : composerSecondaryForegroundColor)
-                        .frame(width: 28, height: 28)
+                        .frame(width: metrics.inlineAccessorySize, height: metrics.inlineAccessorySize)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Microphone")
@@ -1137,13 +1251,13 @@ struct ChatDetailView: View {
             LiquidStretchSendButton(
                 isEnabled: canSendMessage,
                 action: sendMessage,
-                size: 44,
+                size: metrics.sendButtonSize,
                 gradientColors: sendButtonGradientColors,
                 allowsLiquidInteraction: true,
                 sharedStretchProgress: modernSendButtonSharedStretchProgress,
                 contrastBoost: isLightChatBackground
             )
-            .frame(width: 44, height: 44, alignment: .center)
+            .frame(width: metrics.sendButtonSize, height: metrics.sendButtonSize, alignment: .center)
             .frame(height: metrics.fieldMinHeight, alignment: .center)
         }
         .animation(.spring(response: 0.28, dampingFraction: 0.84), value: metrics.progress)
@@ -1151,17 +1265,17 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private var legacyComposerRow: some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: usesIOS18LegacyChatChrome ? 6 : 8) {
             Menu {
                 attachmentMenuActions
             } label: {
                 composerAttachmentButton()
-                    .frame(width: 42, height: 42)
-                    .background(legacySideButtonChrome())
+                    .foregroundStyle(legacyAttachmentButtonTint)
+                    .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
-            .tint(.primary)
-            .frame(width: 42, height: 42, alignment: .center)
+            .tint(legacyAttachmentButtonTint)
+            .frame(width: 34, height: 42, alignment: .center)
 
             HStack(alignment: .center, spacing: 8) {
                 if let pendingAttachment {
@@ -1172,6 +1286,7 @@ struct ChatDetailView: View {
                     recordingComposerStatusView
                 } else {
                     TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
+                        .foregroundStyle(.primary)
                         .focused($isInputFocused)
                         .textFieldStyle(.plain)
                         .submitLabel(.send)
@@ -1189,21 +1304,48 @@ struct ChatDetailView: View {
                 .accessibilityLabel("Microphone")
                 .disabled(isSending || (pendingAttachment != nil && !voiceRecorder.isRecording))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(legacyComposerFieldChrome(cornerRadius: 22))
-            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .padding(.horizontal, usesIOS18LegacyChatChrome ? 13 : 14)
+            .padding(.vertical, usesIOS18LegacyChatChrome ? 7 : 10)
+            .background(legacyComposerFieldChrome(cornerRadius: usesIOS18LegacyChatChrome ? 20 : 23))
+            .frame(maxWidth: .infinity, minHeight: usesIOS18LegacyChatChrome ? 42 : 46, alignment: .leading)
 
-            LiquidStretchSendButton(
-                isEnabled: canSendMessage,
-                action: sendMessage,
-                size: 44,
-                gradientColors: sendButtonGradientColors,
-                allowsLiquidInteraction: false,
-                sharedStretchProgress: 0
-            )
-            .frame(width: 44, height: 44, alignment: .center)
+            if usesIOS18LegacyChatChrome {
+                legacySendButton
+                    .frame(width: 40, height: 40, alignment: .center)
+            } else {
+                LiquidStretchSendButton(
+                    isEnabled: canSendMessage,
+                    action: sendMessage,
+                    size: 44,
+                    gradientColors: sendButtonGradientColors,
+                    allowsLiquidInteraction: false,
+                    sharedStretchProgress: 0
+                )
+                .frame(width: 44, height: 44, alignment: .center)
+            }
         }
+    }
+
+    private var legacySendButton: some View {
+        Button(action: sendMessage) {
+            Image(systemName: "paperplane.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: legacySendButtonColors,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSendMessage)
+        .opacity(canSendMessage ? 1 : 0.72)
     }
 
     private var outgoingBubbleStyle: ChatBubblePalette {
@@ -1257,8 +1399,202 @@ struct ChatDetailView: View {
         colorScheme == .dark && isLightChatBackground
     }
 
+    private var usesIOS18LegacyChatChrome: Bool {
+        guard !usesModernChatChrome else {
+            return false
+        }
+
+        return ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 18
+    }
+
+    private var legacyHeaderActionTint: Color {
+        if usesIOS18LegacyChatChrome {
+            return .white
+        }
+
+        return .primary
+    }
+
+    private var legacyHeaderControlFont: Font {
+        if usesIOS18LegacyChatChrome {
+            return .system(size: 18, weight: .semibold)
+        }
+
+        return .body.weight(.semibold)
+    }
+
+    private var legacyHeaderControlGlyphSize: CGFloat {
+        usesIOS18LegacyChatChrome ? 18 : 20
+    }
+
+    private var legacyHeaderPrincipalHorizontalPadding: CGFloat {
+        usesIOS18LegacyChatChrome ? 60 : 56
+    }
+
+    private var legacyKeyboardSurfaceInset: CGFloat {
+        guard usesIOS18LegacyChatChrome else {
+            return 0
+        }
+
+        return keyboardOverlap > 0 ? 12 : 8
+    }
+
+    private var legacyKeyboardShieldHeight: CGFloat {
+        guard usesIOS18LegacyChatChrome, keyboardOverlap > 0 else {
+            return 0
+        }
+
+        return legacyKeyboardSurfaceInset
+    }
+
+    private var legacyIOS18KeyboardTone: Color {
+        Color(
+            uiColor: colorScheme == .dark
+                ? .tertiarySystemBackground
+                : .secondarySystemGroupedBackground
+        )
+    }
+
+    private var legacyIOS18KeyboardHighlightTone: Color {
+        Color(
+            uiColor: colorScheme == .dark
+                ? .secondarySystemBackground
+                : .tertiarySystemGroupedBackground
+        )
+    }
+
+    private var legacyIOS18KeyboardShadowTone: Color {
+        Color(
+            uiColor: colorScheme == .dark
+                ? .systemGray4
+                : .systemGray5
+        )
+    }
+
+    private var legacyIOS18KeyboardBlurStyle: UIBlurEffect.Style {
+        colorScheme == .dark ? .systemChromeMaterialDark : .systemChromeMaterial
+    }
+
+    private var legacyIOS18KeyboardChrome: some View {
+        VisualEffectBlurView(style: legacyIOS18KeyboardBlurStyle)
+            .overlay {
+                LinearGradient(
+                    stops: [
+                        .init(
+                            color: legacyIOS18KeyboardHighlightTone.opacity(colorScheme == .dark ? 0.16 : 0.24),
+                            location: 0
+                        ),
+                        .init(
+                            color: legacyIOS18KeyboardTone.opacity(colorScheme == .dark ? 0.22 : 0.30),
+                            location: 0.26
+                        ),
+                        .init(
+                            color: legacyIOS18KeyboardTone.opacity(colorScheme == .dark ? 0.28 : 0.36),
+                            location: 0.72
+                        ),
+                        .init(
+                            color: legacyIOS18KeyboardShadowTone.opacity(colorScheme == .dark ? 0.34 : 0.42),
+                            location: 1
+                        )
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+    }
+
+    private var legacyIOS18TextFieldChrome: some View {
+        legacyIOS18KeyboardChrome
+            .overlay {
+                LinearGradient(
+                    stops: [
+                        .init(
+                            color: Color.white.opacity(colorScheme == .dark ? 0.03 : 0.06),
+                            location: 0
+                        ),
+                        .init(
+                            color: Color.black.opacity(colorScheme == .dark ? 0.16 : 0.22),
+                            location: 0.55
+                        ),
+                        .init(
+                            color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.28),
+                            location: 1
+                        )
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+    }
+
+    private var legacyAttachmentButtonTint: Color {
+        usesIOS18LegacyChatChrome ? .white : Color(uiColor: .systemBlue)
+    }
+
+    private var legacyBarMaterial: Material {
+        usesIOS18LegacyChatChrome ? .bar : .regularMaterial
+    }
+
+    private var legacyBarOverlayColor: Color {
+        if usesIOS18LegacyChatChrome {
+            return Color(
+                uiColor: colorScheme == .dark
+                    ? .secondarySystemBackground
+                    : .secondarySystemGroupedBackground
+            )
+        }
+
+        return Color(uiColor: colorScheme == .dark ? .black : .systemBackground)
+    }
+
+    private var legacyBarOverlayOpacity: CGFloat {
+        if usesIOS18LegacyChatChrome {
+            return colorScheme == .dark ? 0.84 : 0.92
+        }
+
+        return colorScheme == .dark ? 0.30 : 0.62
+    }
+
+    private var legacyBarDividerColor: Color {
+        if usesIOS18LegacyChatChrome {
+            return colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.05)
+        }
+
+        return colorScheme == .dark ? .white.opacity(0.10) : .black.opacity(0.06)
+    }
+
+    private var legacyBarShadowColor: Color {
+        if usesIOS18LegacyChatChrome {
+            return .clear
+        }
+
+        return .black.opacity(colorScheme == .dark ? 0.20 : 0.06)
+    }
+
     private var modernComposerContrastOverlayOpacity: CGFloat {
         0.32
+    }
+
+    private var modernComposerBottomInset: CGFloat {
+        if keyboardOverlap > 0 {
+            return 20
+        }
+
+        return max(6, windowSafeAreaBottomInset)
+    }
+
+    private var legacySendButtonFill: Color {
+        canSendMessage
+            ? Color(uiColor: .systemBlue)
+            : Color(uiColor: colorScheme == .dark ? .tertiarySystemFill : .quaternarySystemFill)
+    }
+
+    private var legacySendButtonColors: [Color] {
+        if canSendMessage, !sendButtonGradientColors.isEmpty {
+            return sendButtonGradientColors
+        }
+
+        return [legacySendButtonFill, legacySendButtonFill]
     }
 
     private var composerSecondaryForegroundColor: Color {

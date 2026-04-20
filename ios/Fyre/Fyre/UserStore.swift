@@ -106,7 +106,9 @@ struct User: Codable, Sendable {
     var instagramTag: String?
     var spotifyTag: String?
     var avatarFileId: String?
+    var photoFileIds: [String]?
     var profileImageData: Data?
+    var profilePhotoDataItems: [Data]?
 
     nonisolated var displayName: String {
         let first = firstName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -151,6 +153,36 @@ struct User: Codable, Sendable {
 
     nonisolated var normalizedSpotifyTag: String {
         Self.normalizedSocialTag(spotifyTag) ?? ""
+    }
+
+    nonisolated var resolvedPhotoFileIds: [String] {
+        let explicit = photoFileIds ?? []
+        if !explicit.isEmpty {
+            return explicit
+        }
+
+        guard let avatarFileId, !avatarFileId.isEmpty else {
+            return []
+        }
+
+        return [avatarFileId]
+    }
+
+    nonisolated var resolvedProfilePhotoDataItems: [Data] {
+        let explicit = profilePhotoDataItems?.filter { !$0.isEmpty } ?? []
+        if !explicit.isEmpty {
+            return explicit
+        }
+
+        guard let profileImageData, !profileImageData.isEmpty else {
+            return []
+        }
+
+        return [profileImageData]
+    }
+
+    nonisolated var primaryProfileImageData: Data? {
+        resolvedProfilePhotoDataItems.first ?? profileImageData
     }
 
     nonisolated var isProfileComplete: Bool {
@@ -208,6 +240,7 @@ struct User: Codable, Sendable {
         case instagramTag
         case spotifyTag
         case avatarFileId
+        case photoFileIds
     }
 
     init(from decoder: Decoder) throws {
@@ -235,7 +268,9 @@ struct User: Codable, Sendable {
         instagramTag = try c.decodeIfPresent(String.self, forKey: .instagramTag)
         spotifyTag = try c.decodeIfPresent(String.self, forKey: .spotifyTag)
         avatarFileId = try c.decodeIfPresent(String.self, forKey: .avatarFileId)
+        photoFileIds = try c.decodeIfPresent([String].self, forKey: .photoFileIds)
         profileImageData = nil
+        profilePhotoDataItems = nil
     }
 
     func encode(to encoder: Encoder) throws {
@@ -263,6 +298,7 @@ struct User: Codable, Sendable {
         try c.encodeIfPresent(instagramTag, forKey: .instagramTag)
         try c.encodeIfPresent(spotifyTag, forKey: .spotifyTag)
         try c.encodeIfPresent(avatarFileId, forKey: .avatarFileId)
+        try c.encodeIfPresent(photoFileIds, forKey: .photoFileIds)
     }
 }
 
@@ -743,11 +779,27 @@ final class UserStore: @unchecked Sendable {
 
     @MainActor
     func updateProfileImage(_ imageData: Data?) async -> String? {
+        let trailingImages = Array(currentUser?.resolvedProfilePhotoDataItems.dropFirst() ?? [])
+        let nextImages = ([imageData].compactMap { $0 }) + trailingImages
+        return await updateProfileImages(nextImages)
+    }
+
+    @MainActor
+    func updateProfileImages(_ imageDataItems: [Data]) async -> String? {
         guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
+        let sanitizedImages = imageDataItems
+            .filter { !$0.isEmpty }
+            .prefix(6)
+            .map { $0 }
 
         if Self.shouldUseAppwrite {
             if !user.isProfileComplete {
-                user.profileImageData = imageData
+                user.profilePhotoDataItems = sanitizedImages
+                user.profileImageData = sanitizedImages.first
+                if sanitizedImages.isEmpty {
+                    user.avatarFileId = nil
+                    user.photoFileIds = []
+                }
                 currentUser = user
                 return nil
             }
@@ -757,24 +809,27 @@ final class UserStore: @unchecked Sendable {
             }
 
             do {
-                let updatedUser = try await appwriteService.updateProfileImage(imageData, for: user)
+                let updatedUser = try await appwriteService.updateProfileImages(sanitizedImages, for: user)
                 currentUser = updatedUser
                 return nil
             } catch {
                 return profileErrorMessage(for: error)
             }
-        } else {
-            var users = UserStore.loadUsers()
-            guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
-                return L10n.tr("profile.error.noCurrentUser")
-            }
-
-            user.profileImageData = imageData
-            users[userIndex] = user
-            UserStore.saveUsers(users)
-            currentUser = user
-            return nil
         }
+
+        var users = UserStore.loadUsers()
+        guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+            return L10n.tr("profile.error.noCurrentUser")
+        }
+
+        user.profilePhotoDataItems = sanitizedImages
+        user.profileImageData = sanitizedImages.first
+        user.avatarFileId = nil
+        user.photoFileIds = []
+        users[userIndex] = user
+        UserStore.saveUsers(users)
+        currentUser = user
+        return nil
     }
 
     func willCurrentUserLoseMainEventRegistrations(

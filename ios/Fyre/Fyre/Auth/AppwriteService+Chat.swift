@@ -313,7 +313,7 @@ extension AppwriteService {
             otherUserId: otherUserId
         )
 
-        guard relationshipState.isVisibleInInbox else {
+        guard await relationshipState.isVisibleInInbox else {
             return nil
         }
         let currentUserReadAt = participantRows

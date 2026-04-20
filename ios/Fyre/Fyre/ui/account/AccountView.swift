@@ -110,6 +110,7 @@ struct AccountView: View {
     @State private var profileMessageIsError = false
     @State private var securityMessage: String?
     @State private var pickedPhotoItem: PhotosPickerItem?
+    @State private var pickedAdditionalPhotoItems: [PhotosPickerItem] = []
     @State private var pendingChatBackgroundPreview: PendingChatBackgroundPreview?
     @State private var chatBackgroundStyleSelection = ChatBackgroundStyle.defaultDark.rawValue
     @State private var chatBackgroundSettingsMessage: String?
@@ -123,6 +124,7 @@ struct AccountView: View {
     @State private var isLoggingOut = false
 
     private let supportEmail = "support@example.com"
+    private let maxProfilePhotoCount = 6
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -162,6 +164,10 @@ struct AccountView: View {
                         fillFromUser()
                     }
                 }
+            }
+            .task(id: pickedAdditionalPhotoItems) {
+                guard !pickedAdditionalPhotoItems.isEmpty else { return }
+                await handleAdditionalPhotoSelection()
             }
             .onChange(of: chatBackgroundStyleSelection) { _, newValue in
                 guard newValue != chatBackgroundStyle else { return }
@@ -412,6 +418,8 @@ struct AccountView: View {
                             cardDivider
                             ProfileReadOnlyRow(title: L10n.tr("profile.birthDate"), value: birthDateLabel)
                         }
+
+                        profilePhotoGalleryEditor
 
                         ProfilePickerField(
                             title: L10n.tr("profile.gender"),
@@ -846,7 +854,7 @@ struct AccountView: View {
 
     @ViewBuilder
     private func profileAvatar(size: CGFloat) -> some View {
-        if let data = store.currentUser?.profileImageData,
+        if let data = store.currentUser?.primaryProfileImageData,
            let uiImage = UIImage(data: data) {
             Image(uiImage: uiImage)
                 .resizable()
@@ -872,6 +880,102 @@ struct AccountView: View {
                     Circle()
                         .stroke(.white.opacity(0.08), lineWidth: 1)
                 }
+        }
+    }
+
+    private var currentProfilePhotoDataItems: [Data] {
+        store.currentUser?.resolvedProfilePhotoDataItems ?? []
+    }
+
+    private var profilePhotoGalleryEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.tr("profile.photo.galleryTitle"))
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(L10n.tr("profile.photo.galleryHint"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                PhotosPicker(
+                    selection: $pickedAdditionalPhotoItems,
+                    maxSelectionCount: maxProfilePhotoCount,
+                    matching: .images
+                ) {
+                    Label(L10n.tr("profile.photo.addAction"), systemImage: "plus.circle.fill")
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
+                .disabled(currentProfilePhotoDataItems.count >= maxProfilePhotoCount)
+                .opacity(currentProfilePhotoDataItems.count >= maxProfilePhotoCount ? 0.45 : 1)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(currentProfilePhotoDataItems.enumerated()), id: \.offset) { index, data in
+                        profilePhotoThumbnail(data: data, index: index)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func profilePhotoThumbnail(data: Data, index: Int) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(.white.opacity(0.05))
+                        .overlay {
+                            Image(systemName: "photo")
+                                .foregroundStyle(.secondary)
+                        }
+                }
+            }
+            .frame(width: 92, height: 118)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(alignment: .bottomLeading) {
+                if index == 0 {
+                    Text(L10n.tr("profile.photo.primaryBadge"))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(.orange.opacity(0.92), in: Capsule(style: .continuous))
+                        .padding(8)
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.10), lineWidth: 1)
+            }
+
+            Button {
+                removeProfilePhoto(at: index)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .background(.black.opacity(0.72), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(8)
+            .accessibilityLabel(L10n.tr("profile.photo.remove"))
         }
     }
 
@@ -952,6 +1056,54 @@ struct AccountView: View {
         drinks = store.currentUser?.drinks ?? false
         isHydratingProfileForm = false
         hasLoadedProfileForm = true
+    }
+
+    @MainActor
+    private func handleAdditionalPhotoSelection() async {
+        let remainingCapacity = max(0, maxProfilePhotoCount - currentProfilePhotoDataItems.count)
+        guard remainingCapacity > 0 else {
+            pickedAdditionalPhotoItems = []
+            return
+        }
+
+        var appendedImages: [Data] = []
+        for item in pickedAdditionalPhotoItems.prefix(remainingCapacity) {
+            if let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty {
+                appendedImages.append(data)
+            }
+        }
+
+        pickedAdditionalPhotoItems = []
+        guard !appendedImages.isEmpty else { return }
+
+        let result = await store.updateProfileImages(currentProfilePhotoDataItems + appendedImages)
+        if let result {
+            profileMessage = result
+            profileMessageIsError = true
+        } else {
+            profileMessage = nil
+            profileMessageIsError = false
+            fillFromUser()
+        }
+    }
+
+    private func removeProfilePhoto(at index: Int) {
+        guard currentProfilePhotoDataItems.indices.contains(index) else { return }
+
+        var updatedImages = currentProfilePhotoDataItems
+        updatedImages.remove(at: index)
+
+        Task { @MainActor in
+            let result = await store.updateProfileImages(updatedImages)
+            if let result {
+                profileMessage = result
+                profileMessageIsError = true
+            } else {
+                profileMessage = nil
+                profileMessageIsError = false
+                fillFromUser()
+            }
+        }
     }
 
     private var editableProfileDraft: EditableProfileDraft {

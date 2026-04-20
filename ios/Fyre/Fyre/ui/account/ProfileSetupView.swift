@@ -164,7 +164,7 @@ struct ProfileSetupView: View {
 
     @ViewBuilder
     private var profileAvatar: some View {
-        if let data = store.currentUser?.profileImageData,
+        if let data = store.currentUser?.primaryProfileImageData,
            let uiImage = UIImage(data: data) {
             Image(uiImage: uiImage)
                 .resizable()

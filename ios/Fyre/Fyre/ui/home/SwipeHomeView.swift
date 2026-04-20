@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-private struct SwipeProfile: Identifiable {
+private struct SwipeProfile: Identifiable, Equatable {
     let id: String
     let name: String
     let age: Int
@@ -108,7 +108,7 @@ struct SwipeHomeView: View {
                     )
                     .allowsHitTesting(isTopCard && !isAnimatingDecision && !isSubmittingSwipe)
                     .gesture(dragGesture)
-                    .animation(.spring(response: 0.36, dampingFraction: 0.84), value: profiles)
+                    .animation(.spring(response: 0.36, dampingFraction: 0.84), value: profiles.map(\.id))
                     .animation(.spring(response: 0.32, dampingFraction: 0.86), value: dragOffset)
                     .zIndex(Double(visibleProfiles.count - index))
             }

@@ -143,54 +143,56 @@ actor AppwriteService {
         var updatedUser = user
         updatedUser.appwriteUserId = accountId
 
-        var uploadedFileId: String?
-        if let imageData = updatedUser.profileImageData,
-           !imageData.isEmpty,
-           updatedUser.avatarFileId?.isEmpty != false {
-            let fileId = makeRandomIdentifier()
-            try await uploadAvatar(data: imageData, fileId: fileId)
-            updatedUser.avatarFileId = fileId
-            uploadedFileId = fileId
+        var uploadedFileIds: [String] = []
+        if !updatedUser.resolvedProfilePhotoDataItems.isEmpty,
+           updatedUser.resolvedPhotoFileIds.isEmpty {
+            uploadedFileIds = try await uploadProfilePhotos(updatedUser.resolvedProfilePhotoDataItems)
+            updatedUser.photoFileIds = uploadedFileIds
+            updatedUser.avatarFileId = uploadedFileIds.first
+            updatedUser.profileImageData = updatedUser.resolvedProfilePhotoDataItems.first
         }
 
         do {
             return try await ensureProfileRow(for: updatedUser)
         } catch {
-            if let uploadedFileId {
-                try? await deleteAvatar(fileId: uploadedFileId)
+            for fileId in uploadedFileIds {
+                try? await deleteAvatar(fileId: fileId)
             }
             throw error
         }
     }
 
     func updateProfileImage(_ imageData: Data?, for user: User) async throws -> User {
-        let accountId = try await resolvedRequiredAccountId(from: user)
-        let previousFileId = user.avatarFileId
+        let trailingImages = Array(user.resolvedProfilePhotoDataItems.dropFirst())
+        let nextImages = ([imageData].compactMap { $0 }) + trailingImages
+        return try await updateProfileImages(nextImages, for: user)
+    }
 
-        var nextFileId: String?
-        if let imageData, !imageData.isEmpty {
-            nextFileId = makeRandomIdentifier()
-            if let nextFileId {
-                try await uploadAvatar(data: imageData, fileId: nextFileId)
-            }
-        }
+    func updateProfileImages(_ imageDataItems: [Data], for user: User) async throws -> User {
+        let accountId = try await resolvedRequiredAccountId(from: user)
+        let previousFileIds = user.resolvedPhotoFileIds
+        let sanitizedImages = imageDataItems.filter { !$0.isEmpty }
+        let nextFileIds = try await uploadProfilePhotos(sanitizedImages)
 
         var updatedUser = user
         updatedUser.appwriteUserId = accountId
-        updatedUser.avatarFileId = nextFileId
-        updatedUser.profileImageData = imageData
+        updatedUser.avatarFileId = nextFileIds.first
+        updatedUser.photoFileIds = nextFileIds
+        updatedUser.profileImageData = sanitizedImages.first
+        updatedUser.profilePhotoDataItems = sanitizedImages
 
         do {
             updatedUser = try await updateProfile(for: updatedUser)
         } catch {
-            if let nextFileId {
-                try? await deleteAvatar(fileId: nextFileId)
+            for fileId in nextFileIds {
+                try? await deleteAvatar(fileId: fileId)
             }
             throw error
         }
 
-        if let previousFileId, previousFileId != nextFileId {
-            try? await deleteAvatar(fileId: previousFileId)
+        let obsoleteFileIds = Set(previousFileIds).subtracting(Set(nextFileIds))
+        for fileId in obsoleteFileIds {
+            try? await deleteAvatar(fileId: fileId)
         }
 
         return updatedUser
@@ -474,7 +476,16 @@ actor AppwriteService {
         let accountId = stringValue(forKey: "$id", in: account) ?? ""
         let email = stringValue(forKey: "email", in: account) ?? ""
         let profileRow = try await fetchProfileRow(id: accountId)
-        let avatarData = try await fetchAvatarData(fileId: stringValue(forKey: "avatarFileId", in: profileRow))
+        let photoFileIds = discoverPhotoFileIds(from: profileRow ?? [:])
+        let photoDataItems = try await fetchProfilePhotoDataItems(fileIds: photoFileIds)
+        let avatarData: Data?
+        if let firstPhotoData = photoDataItems.first {
+            avatarData = firstPhotoData
+        } else {
+            avatarData = try await fetchAvatarData(
+                fileId: stringValue(forKey: "avatarFileId", in: profileRow)
+            )
+        }
 
         var user = User(email: email, password: "")
         user.appwriteUserId = accountId
@@ -497,8 +508,10 @@ actor AppwriteService {
         user.interests = stringValue(forKey: "interests", in: profileRow)
         user.instagramTag = socialTagValue(forKey: "instagramTag", in: profileRow)
         user.spotifyTag = socialTagValue(forKey: "spotifyTag", in: profileRow)
-        user.avatarFileId = stringValue(forKey: "avatarFileId", in: profileRow)
+        user.avatarFileId = stringValue(forKey: "avatarFileId", in: profileRow) ?? photoFileIds.first
+        user.photoFileIds = photoFileIds
         user.profileImageData = avatarData
+        user.profilePhotoDataItems = photoDataItems.isEmpty ? nil : photoDataItems
         return user
     }
 
@@ -570,6 +583,18 @@ actor AppwriteService {
             where error.statusCode == 401 || error.statusCode == 403 || error.statusCode == 404 {
             return nil
         }
+    }
+
+    private func fetchProfilePhotoDataItems(fileIds: [String]) async throws -> [Data] {
+        var dataItems: [Data] = []
+
+        for fileId in fileIds {
+            if let data = try await fetchAvatarData(fileId: fileId) {
+                dataItems.append(data)
+            }
+        }
+
+        return dataItems
     }
 
     private func fetchUpcomingEventRows() async throws -> [[String: Any]] {
@@ -1056,6 +1081,29 @@ actor AppwriteService {
         }
     }
 
+    private func uploadProfilePhotos(_ photoDataItems: [Data]) async throws -> [String] {
+        guard !photoDataItems.isEmpty else {
+            return []
+        }
+
+        var uploadedFileIds: [String] = []
+
+        do {
+            for data in photoDataItems {
+                let fileId = makeRandomIdentifier()
+                try await uploadAvatar(data: data, fileId: fileId)
+                uploadedFileIds.append(fileId)
+            }
+
+            return uploadedFileIds
+        } catch {
+            for fileId in uploadedFileIds {
+                try? await deleteAvatar(fileId: fileId)
+            }
+            throw error
+        }
+    }
+
     private func deleteAvatar(fileId: String) async throws {
         _ = try await sendRequest(
             method: "DELETE",
@@ -1194,7 +1242,8 @@ actor AppwriteService {
             "instagramTag": nullOrString(user.normalizedInstagramTag),
             "spotifyTag": nullOrString(user.normalizedSpotifyTag),
             "profileReady": user.isProfileComplete,
-            "avatarFileId": nullOrString(user.avatarFileId)
+            "avatarFileId": nullOrString(user.avatarFileId),
+            "photoFileIds": user.resolvedPhotoFileIds
         ]
     }
 

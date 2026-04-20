@@ -135,19 +135,34 @@ struct MessagesView: View {
                                 Button {
                                     pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .archive)
                                 } label: {
-                                    Label(L10n.tr("messages.archive.action"), systemImage: "archivebox")
+                                    relationshipActionLabel(
+                                        title: L10n.tr("messages.archive.action"),
+                                        systemImage: "archivebox",
+                                        textColor: .primary,
+                                        iconColor: .red
+                                    )
                                 }
 
-                                Button(role: .destructive) {
+                                Button {
                                     pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .unmatch)
                                 } label: {
-                                    Label(L10n.tr("messages.unmatch.action"), systemImage: "heart.slash")
+                                    relationshipActionLabel(
+                                        title: L10n.tr("messages.unmatch.action"),
+                                        systemImage: "heart.slash",
+                                        textColor: .red,
+                                        iconColor: .red
+                                    )
                                 }
 
-                                Button(role: .destructive) {
+                                Button {
                                     pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .block)
                                 } label: {
-                                    Label(L10n.tr("messages.block.action"), systemImage: "hand.raised")
+                                    relationshipActionLabel(
+                                        title: L10n.tr("messages.block.action"),
+                                        systemImage: "hand.raised",
+                                        textColor: .red,
+                                        iconColor: .red
+                                    )
                                 }
                             }
                             .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -157,6 +172,21 @@ struct MessagesView: View {
                                     Label(L10n.tr("messages.archive.action"), systemImage: "archivebox")
                                 }
                                 .tint(.orange)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .unmatch)
+                                } label: {
+                                    Label(L10n.tr("messages.unmatch.action"), systemImage: "heart.slash")
+                                }
+                                .tint(.pink)
+
+                                Button {
+                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .block)
+                                } label: {
+                                    Label(L10n.tr("messages.block.action"), systemImage: "hand.raised")
+                                }
+                                .tint(.red)
                             }
                             .listRowSeparator(index < threads.count - 1 ? .visible : .hidden)
                             .listRowSeparatorTint(separatorTint)
@@ -325,6 +355,25 @@ struct MessagesView: View {
         case .block:
             return L10n.tr("messages.block.action")
         }
+    }
+
+    private func relationshipActionLabel(
+        title: String,
+        systemImage: String,
+        textColor: Color,
+        iconColor: Color
+    ) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .foregroundStyle(textColor)
+
+            Spacer(minLength: 0)
+
+            Image(systemName: systemImage)
+                .foregroundStyle(iconColor)
+        }
+        .symbolRenderingMode(.monochrome)
+        .contentShape(Rectangle())
     }
 }
 
