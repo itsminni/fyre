@@ -38,6 +38,7 @@
 "home.empty.description" = "You have seen all available profiles for now.";
 "home.skip.accessibility" = "Skip";
 "home.swipe.error" = "Unable to update the swipe right now. Please try again.";
+"home.commonInterests.empty" = "Fresh energy, no shared tags yet.";
 
 "tab.home" = "Home";
 "tab.messages" = "Messages";
@@ -51,6 +52,15 @@
 "messages.sent" = "Sent";
 "messages.read" = "Read";
 "messages.openChat.hint" = "Tap to open chat";
+"messages.archive.action" = "Archive";
+"messages.archive.confirmTitle" = "Archive chat?";
+"messages.archive.confirmMessage" = "Hide the conversation with %@ from your active inbox? You can keep the history on the server.";
+"messages.unmatch.action" = "Unmatch";
+"messages.unmatch.confirmTitle" = "Remove match?";
+"messages.unmatch.confirmMessage" = "Remove your relationship with %@ and hide this thread?";
+"messages.block.action" = "Block";
+"messages.block.confirmTitle" = "Block user?";
+"messages.block.confirmMessage" = "Block %@ and prevent any further interaction?";
 "messages.delete.action" = "Delete";
 "messages.delete.confirmTitle" = "Delete chat?";
 "messages.delete.confirmMessage" = "Remove the chat with %@ from your app? It will not be deleted for the other user.";

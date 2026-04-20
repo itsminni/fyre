@@ -41,7 +41,7 @@ final class AppServices {
 private struct UnavailableBackendAPI: BackendAPI {
     let reason: String
 
-    func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
+    func fetchDiscoverProfiles() async throws -> [DiscoverProfileDTO] {
         throw APIError.configuration(reason)
     }
 
@@ -71,6 +71,12 @@ private struct UnavailableBackendAPI: BackendAPI {
         _ = otherUserId
         _ = otherUserName
         _ = decision
+        throw APIError.configuration(reason)
+    }
+
+    func updateRelationship(threadId: String, action: RelationshipActionDTO) async throws {
+        _ = threadId
+        _ = action
         throw APIError.configuration(reason)
     }
 

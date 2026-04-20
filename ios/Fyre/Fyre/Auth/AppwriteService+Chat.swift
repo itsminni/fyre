@@ -169,6 +169,20 @@ extension AppwriteService {
         return thread
     }
 
+    func updateRelationship(threadId: String, action: RelationshipActionDTO) async throws {
+        guard let functionId = configuration.manageRelationshipFunctionId else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID")
+        }
+
+        _ = try await executeUserFunction(
+            functionId: functionId,
+            body: [
+                "threadId": threadId,
+                "action": action.rawValue
+            ]
+        )
+    }
+
     func markCurrentUserPresence(isOnline: Bool) async {
         guard let accountId = try? await fetchCurrentAccountId(required: false),
               let profileRow = try? await fetchProfileRow(id: accountId),
@@ -294,6 +308,14 @@ extension AppwriteService {
 
         let participantUserIds = participantRows.compactMap { stringValue(forKey: "userId", in: $0) }
         let otherUserId = participantUserIds.first(where: { $0 != resolvedCurrentAccountId })
+        let relationshipState = try await fetchRelationshipState(
+            currentAccountId: resolvedCurrentAccountId,
+            otherUserId: otherUserId
+        )
+
+        guard relationshipState.isVisibleInInbox else {
+            return nil
+        }
         let currentUserReadAt = participantRows
             .first(where: { stringValue(forKey: "userId", in: $0) == resolvedCurrentAccountId })
             .flatMap { dateValue(forKey: "lastReadAt", in: $0) }
@@ -342,12 +364,99 @@ extension AppwriteService {
             currentUserReadAt: currentUserReadAt,
             otherParticipantReadAt: otherParticipantReadAt,
             participantUserIds: participantUserIds,
+            relationshipState: relationshipState,
             messages: sortedMessages
         )
     }
 }
 
 private extension AppwriteService {
+    func fetchRelationshipState(currentAccountId: String, otherUserId: String?) async throws -> RelationshipStateDTO {
+        guard let otherUserId, !otherUserId.isEmpty else {
+            return .matched
+        }
+
+        guard let relationshipRow = try await fetchRelationshipRow(
+            currentAccountId: currentAccountId,
+            otherUserId: otherUserId
+        ) else {
+            if try await hasLegacyMatch(currentAccountId: currentAccountId, otherUserId: otherUserId) {
+                return .matched
+            }
+            return configuration.relationshipsTableId == nil ? .matched : .none
+        }
+
+        let isCurrentUserA = stringValue(forKey: "userAId", in: relationshipRow) == currentAccountId
+        let currentState = stringValue(
+            forKey: isCurrentUserA ? "userAState" : "userBState",
+            in: relationshipRow
+        )
+        let otherState = stringValue(
+            forKey: isCurrentUserA ? "userBState" : "userAState",
+            in: relationshipRow
+        )
+
+        if currentState == RelationshipStateDTO.blocked.rawValue || otherState == RelationshipStateDTO.blocked.rawValue {
+            return .blocked
+        }
+
+        if currentState == RelationshipStateDTO.archived.rawValue {
+            return .archived
+        }
+
+        if dateValue(forKey: "matchedAt", in: relationshipRow) != nil
+            || currentState == RelationshipStateDTO.matched.rawValue
+            || otherState == RelationshipStateDTO.matched.rawValue {
+            return .matched
+        }
+
+        if currentState == RelationshipStateDTO.liked.rawValue {
+            return .liked
+        }
+
+        return .none
+    }
+
+    func fetchRelationshipRow(currentAccountId: String, otherUserId: String) async throws -> [String: Any]? {
+        guard let relationshipsTableId = configuration.relationshipsTableId else {
+            return nil
+        }
+
+        let pairKey = [currentAccountId, otherUserId]
+            .sorted()
+            .joined(separator: ":")
+
+        let rows = try await listRows(
+            tableId: relationshipsTableId,
+            queries: [
+                AppwriteQuery.equal("pairKey", values: [pairKey]),
+                AppwriteQuery.limit(1)
+            ]
+        )
+
+        return rows.first
+    }
+
+    func hasLegacyMatch(currentAccountId: String, otherUserId: String) async throws -> Bool {
+        guard let matchesTableId = configuration.matchesTableId else {
+            return false
+        }
+
+        let pairKey = [currentAccountId, otherUserId]
+            .sorted()
+            .joined(separator: ":")
+
+        let rows = try await listRows(
+            tableId: matchesTableId,
+            queries: [
+                AppwriteQuery.equal("matchKey", values: [pairKey]),
+                AppwriteQuery.limit(1)
+            ]
+        )
+
+        return !rows.isEmpty
+    }
+
     func threadAvatarURLString(from profileRow: [String: Any]?) -> String {
         guard let fileId = stringValue(forKey: "avatarFileId", in: profileRow), !fileId.isEmpty else {
             return ""
@@ -551,6 +660,17 @@ private extension AppwriteService {
             height: intValue(forKey: "attachmentHeight", in: row),
             duration: intValue(forKey: "attachmentDuration", in: row)
         )
+    }
+}
+
+private extension RelationshipStateDTO {
+    var isVisibleInInbox: Bool {
+        switch self {
+        case .liked, .matched:
+            return true
+        case .none, .archived, .blocked:
+            return false
+        }
     }
 }
 

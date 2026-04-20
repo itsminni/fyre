@@ -14,7 +14,7 @@ struct AppwriteBackendAPI: BackendAPI {
         service = AppwriteService(configuration: configuration)
     }
 
-    func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
+    func fetchDiscoverProfiles() async throws -> [DiscoverProfileDTO] {
         // When Appwrite is selected, discover should only show real backend profiles.
         try await service.fetchDiscoverProfiles()
     }
@@ -38,6 +38,10 @@ struct AppwriteBackendAPI: BackendAPI {
 
     func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
         try await service.submitSwipe(otherUserId: otherUserId, otherUserName: otherUserName, decision: decision)
+    }
+
+    func updateRelationship(threadId: String, action: RelationshipActionDTO) async throws {
+        try await service.updateRelationship(threadId: threadId, action: action)
     }
 
     func markCurrentUserPresence(isOnline: Bool) async {

@@ -71,6 +71,7 @@ struct ChatThread: Identifiable, Hashable {
     let currentUserReadAt: Date?
     let otherParticipantReadAt: Date?
     let participantUserIds: [String]
+    let relationshipState: RelationshipStateDTO
     let messages: [ChatMessage]
 
     var lastMessage: String {
@@ -97,11 +98,17 @@ struct ChatThread: Identifiable, Hashable {
 }
 
 struct MessagesView: View {
+    private struct PendingRelationshipAction: Identifiable {
+        let id = UUID()
+        let thread: ChatThread
+        let action: RelationshipActionDTO
+    }
+
     @Environment(AppServices.self) private var services
     @Environment(\.colorScheme) private var colorScheme
     // Local UI state for the list of threads
     @State private var threads: [ChatThread] = []
-    @State private var threadPendingDeletion: ChatThread?
+    @State private var pendingRelationshipAction: PendingRelationshipAction?
     @State private var reloadToken = UUID()
     @State private var realtimeSubscription: AppwriteRealtimeSubscription?
     @State private var realtimeReloadTask: Task<Void, Never>?
@@ -125,18 +132,31 @@ struct MessagesView: View {
                                 .accessibilityHint(L10n.tr("messages.openChat.hint"))
                             }
                             .contextMenu {
-                                Button(role: .destructive) {
-                                    threadPendingDeletion = thread
+                                Button {
+                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .archive)
                                 } label: {
-                                    Label(L10n.tr("messages.delete.action"), systemImage: "trash")
+                                    Label(L10n.tr("messages.archive.action"), systemImage: "archivebox")
+                                }
+
+                                Button(role: .destructive) {
+                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .unmatch)
+                                } label: {
+                                    Label(L10n.tr("messages.unmatch.action"), systemImage: "heart.slash")
+                                }
+
+                                Button(role: .destructive) {
+                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .block)
+                                } label: {
+                                    Label(L10n.tr("messages.block.action"), systemImage: "hand.raised")
                                 }
                             }
                             .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    threadPendingDeletion = thread
+                                Button {
+                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .archive)
                                 } label: {
-                                    Label(L10n.tr("messages.delete.action"), systemImage: "trash")
+                                    Label(L10n.tr("messages.archive.action"), systemImage: "archivebox")
                                 }
+                                .tint(.orange)
                             }
                             .listRowSeparator(index < threads.count - 1 ? .visible : .hidden)
                             .listRowSeparatorTint(separatorTint)
@@ -147,12 +167,12 @@ struct MessagesView: View {
             }
             .navigationTitle(L10n.tr("messages.navigationTitle"))
             .navigationBarTitleDisplayMode(.large)
-            .alert(item: $threadPendingDeletion) { thread in
+            .alert(item: $pendingRelationshipAction) { pending in
                 Alert(
-                    title: Text(L10n.tr("messages.delete.confirmTitle")),
-                    message: Text(String(format: L10n.tr("messages.delete.confirmMessage"), thread.name)),
-                    primaryButton: .destructive(Text(L10n.tr("messages.delete.action"))) {
-                        deleteThread(thread)
+                    title: Text(confirmTitle(for: pending.action)),
+                    message: Text(String(format: confirmMessage(for: pending.action), pending.thread.name)),
+                    primaryButton: .destructive(Text(confirmButtonTitle(for: pending.action))) {
+                        applyRelationshipAction(pending)
                     },
                     secondaryButton: .cancel(Text(L10n.tr("common.cancel")))
                 )
@@ -204,6 +224,7 @@ struct MessagesView: View {
                     currentUserReadAt: dto.currentUserReadAt,
                     otherParticipantReadAt: dto.otherParticipantReadAt,
                     participantUserIds: dto.participantUserIds,
+                    relationshipState: dto.relationshipState,
                     messages: dto.messages.map(ChatMessage.init(dto:))
                 )
             }
@@ -214,8 +235,28 @@ struct MessagesView: View {
         }
     }
 
-    private func deleteThread(_ thread: ChatThread) {
-        threads.removeAll { $0.id == thread.id }
+    private func applyRelationshipAction(_ pending: PendingRelationshipAction) {
+        threads.removeAll { $0.id == pending.thread.id }
+
+        Task {
+            do {
+                try await services.backend.updateRelationship(
+                    threadId: pending.thread.remoteId,
+                    action: pending.action
+                )
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .fyreThreadRemoved, object: pending.thread.remoteId)
+                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                }
+            } catch {
+                await MainActor.run {
+#if DEBUG
+                    debugPrint("Relationship update failed for \(pending.thread.remoteId): \(error.localizedDescription)")
+#endif
+                    reloadToken = UUID()
+                }
+            }
+        }
     }
 
     private var separatorTint: Color {
@@ -250,6 +291,39 @@ struct MessagesView: View {
             try? await Task.sleep(nanoseconds: 100_000_000)
             guard !Task.isCancelled else { return }
             await loadThreads()
+        }
+    }
+
+    private func confirmTitle(for action: RelationshipActionDTO) -> String {
+        switch action {
+        case .archive:
+            return L10n.tr("messages.archive.confirmTitle")
+        case .unmatch:
+            return L10n.tr("messages.unmatch.confirmTitle")
+        case .block:
+            return L10n.tr("messages.block.confirmTitle")
+        }
+    }
+
+    private func confirmMessage(for action: RelationshipActionDTO) -> String {
+        switch action {
+        case .archive:
+            return L10n.tr("messages.archive.confirmMessage")
+        case .unmatch:
+            return L10n.tr("messages.unmatch.confirmMessage")
+        case .block:
+            return L10n.tr("messages.block.confirmMessage")
+        }
+    }
+
+    private func confirmButtonTitle(for action: RelationshipActionDTO) -> String {
+        switch action {
+        case .archive:
+            return L10n.tr("messages.archive.action")
+        case .unmatch:
+            return L10n.tr("messages.unmatch.action")
+        case .block:
+            return L10n.tr("messages.block.action")
         }
     }
 }

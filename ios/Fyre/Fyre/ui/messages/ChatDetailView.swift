@@ -130,6 +130,11 @@ private struct ComposerLayoutMetrics {
 }
 
 struct ChatDetailView: View {
+    private struct PendingRelationshipAction: Identifiable {
+        let id = UUID()
+        let action: RelationshipActionDTO
+    }
+
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -149,6 +154,7 @@ struct ChatDetailView: View {
     @State private var threadAvatar: String
     @State private var threadIsOnline: Bool
     @State private var otherParticipantReadAt: Date?
+    @State private var relationshipState: RelationshipStateDTO
     @State private var messages: [ChatMessage]
     @State private var draft = ""
     @State private var pendingAttachment: PendingChatAttachment?
@@ -170,7 +176,7 @@ struct ChatDetailView: View {
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var bottomAnchorMinY: CGFloat = 0
     @State private var initialScrollTicket = UUID()
-    @State private var isDeleteChatConfirmationPresented = false
+    @State private var pendingRelationshipAction: PendingRelationshipAction?
     @State private var messageReadInfoMessage: ChatMessage?
     @State private var keyboardOverlap: CGFloat = 0
     @FocusState private var isInputFocused: Bool
@@ -183,6 +189,7 @@ struct ChatDetailView: View {
         _threadAvatar = State(initialValue: thread.avatar)
         _threadIsOnline = State(initialValue: thread.isOnline)
         _otherParticipantReadAt = State(initialValue: thread.otherParticipantReadAt)
+        _relationshipState = State(initialValue: thread.relationshipState)
         _messages = State(initialValue: thread.messages)
     }
 
@@ -332,16 +339,15 @@ struct ChatDetailView: View {
                 readAt: readTimestamp(for: message)
             )
         }
-        .alert(
-            L10n.tr("messages.delete.confirmTitle"),
-            isPresented: $isDeleteChatConfirmationPresented
-        ) {
-            Button(L10n.tr("messages.delete.action"), role: .destructive) {
-                deleteCurrentThread()
-            }
-            Button(L10n.tr("common.cancel"), role: .cancel) {}
-        } message: {
-            Text(String(format: L10n.tr("messages.delete.confirmMessage"), threadName))
+        .alert(item: $pendingRelationshipAction) { pending in
+            Alert(
+                title: Text(confirmTitle(for: pending.action)),
+                message: Text(String(format: confirmMessage(for: pending.action), threadName)),
+                primaryButton: .destructive(Text(confirmButtonTitle(for: pending.action))) {
+                    applyRelationshipAction(pending.action)
+                },
+                secondaryButton: .cancel(Text(L10n.tr("common.cancel")))
+            )
         }
     }
 
@@ -446,13 +452,41 @@ struct ChatDetailView: View {
     private var chatHeaderTrailingMenu: some View {
         Menu {
             Button {
-                isDeleteChatConfirmationPresented = true
+                pendingRelationshipAction = PendingRelationshipAction(action: .archive)
             } label: {
                 HStack(spacing: 12) {
-                    Text(L10n.tr("messages.delete.action"))
+                    Text(L10n.tr("messages.archive.action"))
                         .foregroundStyle(.white)
                     Spacer(minLength: 0)
-                    Image(systemName: "trash")
+                    Image(systemName: "archivebox")
+                        .foregroundStyle(.white)
+                }
+                .symbolRenderingMode(.monochrome)
+                .contentShape(Rectangle())
+            }
+
+            Button(role: .destructive) {
+                pendingRelationshipAction = PendingRelationshipAction(action: .unmatch)
+            } label: {
+                HStack(spacing: 12) {
+                    Text(L10n.tr("messages.unmatch.action"))
+                        .foregroundStyle(.white)
+                    Spacer(minLength: 0)
+                    Image(systemName: "heart.slash")
+                        .foregroundStyle(.white)
+                }
+                .symbolRenderingMode(.monochrome)
+                .contentShape(Rectangle())
+            }
+
+            Button(role: .destructive) {
+                pendingRelationshipAction = PendingRelationshipAction(action: .block)
+            } label: {
+                HStack(spacing: 12) {
+                    Text(L10n.tr("messages.block.action"))
+                        .foregroundStyle(.white)
+                    Spacer(minLength: 0)
+                    Image(systemName: "hand.raised")
                         .foregroundStyle(.white)
                 }
                 .symbolRenderingMode(.monochrome)
@@ -520,7 +554,7 @@ struct ChatDetailView: View {
 
     private func sendMessage() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || pendingAttachment != nil else { return }
+        guard canInteractWithThread, !text.isEmpty || pendingAttachment != nil else { return }
         audioPlayback.stop()
         let replyTarget = replyingToMessage
         let optimisticMessageID = UUID()
@@ -672,7 +706,10 @@ struct ChatDetailView: View {
     }
 
     private var canSendMessage: Bool {
-        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pendingAttachment != nil) && !isSending && !voiceRecorder.isRecording
+        canInteractWithThread
+            && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pendingAttachment != nil)
+            && !isSending
+            && !voiceRecorder.isRecording
     }
 
     private var usesModernChatChrome: Bool {
@@ -1685,10 +1722,37 @@ struct ChatDetailView: View {
         }
     }
 
-    private func deleteCurrentThread() {
-        NotificationCenter.default.post(name: .fyreThreadRemoved, object: thread.remoteId)
-        NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
-        dismiss()
+    private var canInteractWithThread: Bool {
+        switch relationshipState {
+        case .liked, .matched:
+            return true
+        case .none, .archived, .blocked:
+            return false
+        }
+    }
+
+    private func applyRelationshipAction(_ action: RelationshipActionDTO) {
+        Task {
+            do {
+                try await services.backend.updateRelationship(
+                    threadId: thread.remoteId,
+                    action: action
+                )
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .fyreThreadRemoved, object: thread.remoteId)
+                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+#if DEBUG
+                    sendErrorMessage = error.localizedDescription
+#else
+                    sendErrorMessage = L10n.tr("chat.error.sendFailed")
+#endif
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -1960,6 +2024,11 @@ struct ChatDetailView: View {
     private func reloadThread() async {
         do {
             guard let dto = try await services.backend.fetchThread(threadId: thread.remoteId) else {
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .fyreThreadRemoved, object: thread.remoteId)
+                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                    dismiss()
+                }
                 return
             }
 
@@ -1978,6 +2047,7 @@ struct ChatDetailView: View {
                 }
                 threadIsOnline = dto.isOnline
                 otherParticipantReadAt = dto.otherParticipantReadAt
+                relationshipState = dto.relationshipState
             }
             await services.backend.markThreadRead(threadId: thread.remoteId)
         } catch {
@@ -2102,6 +2172,39 @@ struct ChatDetailView: View {
     private func markThreadAsRead() {
         Task {
             await services.backend.markThreadRead(threadId: thread.remoteId)
+        }
+    }
+
+    private func confirmTitle(for action: RelationshipActionDTO) -> String {
+        switch action {
+        case .archive:
+            return L10n.tr("messages.archive.confirmTitle")
+        case .unmatch:
+            return L10n.tr("messages.unmatch.confirmTitle")
+        case .block:
+            return L10n.tr("messages.block.confirmTitle")
+        }
+    }
+
+    private func confirmMessage(for action: RelationshipActionDTO) -> String {
+        switch action {
+        case .archive:
+            return L10n.tr("messages.archive.confirmMessage")
+        case .unmatch:
+            return L10n.tr("messages.unmatch.confirmMessage")
+        case .block:
+            return L10n.tr("messages.block.confirmMessage")
+        }
+    }
+
+    private func confirmButtonTitle(for action: RelationshipActionDTO) -> String {
+        switch action {
+        case .archive:
+            return L10n.tr("messages.archive.action")
+        case .unmatch:
+            return L10n.tr("messages.unmatch.action")
+        case .block:
+            return L10n.tr("messages.block.action")
         }
     }
 

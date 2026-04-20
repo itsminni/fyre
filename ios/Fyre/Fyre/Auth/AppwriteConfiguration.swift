@@ -13,12 +13,14 @@ struct AppwriteConfiguration: Sendable {
     let messagesTableId: String
     let swipesTableId: String?
     let matchesTableId: String?
+    let relationshipsTableId: String?
     let registerForEventFunctionId: String
     let cancelEventRegistrationFunctionId: String
     let eventAdminFunctionId: String?
     let createOrGetThreadFunctionId: String
     let sendMessageFunctionId: String
     let recordSwipeFunctionId: String?
+    let manageRelationshipFunctionId: String?
     let discoverProfilesFunctionId: String?
     let createOrGetThreadFunctionDomain: URL?
     let sendMessageFunctionDomain: URL?
@@ -52,12 +54,14 @@ struct AppwriteConfiguration: Sendable {
         let messagesTableId = try stringValue(forKey: "APPWRITE_MESSAGES_TABLE_ID", in: dictionary)
         let swipesTableId = optionalStringValue(forKey: "APPWRITE_SWIPES_TABLE_ID", in: dictionary)
         let matchesTableId = optionalStringValue(forKey: "APPWRITE_MATCHES_TABLE_ID", in: dictionary)
+        let relationshipsTableId = optionalStringValue(forKey: "APPWRITE_RELATIONSHIPS_TABLE_ID", in: dictionary)
         let registerForEventFunctionId = try stringValue(forKey: "APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID", in: dictionary)
         let cancelEventRegistrationFunctionId = try stringValue(forKey: "APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID", in: dictionary)
         let eventAdminFunctionId = optionalStringValue(forKey: "APPWRITE_EVENT_ADMIN_FUNCTION_ID", in: dictionary)
         let createOrGetThreadFunctionId = try stringValue(forKey: "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID", in: dictionary)
         let sendMessageFunctionId = try stringValue(forKey: "APPWRITE_SEND_MESSAGE_FUNCTION_ID", in: dictionary)
         let recordSwipeFunctionId = optionalStringValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_ID", in: dictionary)
+        let manageRelationshipFunctionId = optionalStringValue(forKey: "APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID", in: dictionary)
         let discoverProfilesFunctionId = optionalStringValue(forKey: "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID", in: dictionary)
         let createOrGetThreadFunctionDomain = try optionalURLValue(forKey: "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_DOMAIN", in: dictionary)
         let sendMessageFunctionDomain = try optionalURLValue(forKey: "APPWRITE_SEND_MESSAGE_FUNCTION_DOMAIN", in: dictionary)
@@ -83,12 +87,14 @@ struct AppwriteConfiguration: Sendable {
             messagesTableId: messagesTableId,
             swipesTableId: swipesTableId,
             matchesTableId: matchesTableId,
+            relationshipsTableId: relationshipsTableId,
             registerForEventFunctionId: registerForEventFunctionId,
             cancelEventRegistrationFunctionId: cancelEventRegistrationFunctionId,
             eventAdminFunctionId: eventAdminFunctionId,
             createOrGetThreadFunctionId: createOrGetThreadFunctionId,
             sendMessageFunctionId: sendMessageFunctionId,
             recordSwipeFunctionId: recordSwipeFunctionId,
+            manageRelationshipFunctionId: manageRelationshipFunctionId,
             discoverProfilesFunctionId: discoverProfilesFunctionId,
             createOrGetThreadFunctionDomain: createOrGetThreadFunctionDomain,
             sendMessageFunctionDomain: sendMessageFunctionDomain,

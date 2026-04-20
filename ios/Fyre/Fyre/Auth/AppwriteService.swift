@@ -368,7 +368,7 @@ actor AppwriteService {
         return state
     }
 
-    func fetchDiscoverProfiles() async throws -> [ProfileDTO] {
+    func fetchDiscoverProfiles() async throws -> [DiscoverProfileDTO] {
         // Prefer the server-side projection when available so discover can stay privacy-safe.
         if let functionId = configuration.discoverProfilesFunctionId {
             let response = try await executeUserFunction(functionId: functionId, body: [:])
@@ -380,19 +380,22 @@ actor AppwriteService {
 
         let currentAccountId = try await fetchCurrentAccountId(required: false)
         let excludedUserIds = try await excludedDiscoverUserIds(currentAccountId: currentAccountId)
+        let currentInterests = try await fetchProfileRow(id: currentAccountId ?? "")
+            .map(interestListValue(for:))
+            ?? []
         let rows = try await listRows(
             tableId: configuration.profilesTableId,
             queries: []
         )
 
-        let mappedProfiles: [ProfileDTO] = rows.compactMap { (row: [String: Any]) -> ProfileDTO? in
+        let mappedProfiles: [DiscoverProfileDTO] = rows.compactMap { (row: [String: Any]) -> DiscoverProfileDTO? in
             guard let userId = stringValue(forKey: "userId", in: row),
                   userId != currentAccountId,
                   !excludedUserIds.contains(userId),
                   let _ = genderValue(for: stringValue(forKey: "gender", in: row)) else {
                 return nil
             }
-            return makeDiscoverProfileDTO(from: row)
+            return makeFallbackDiscoverProfileDTO(from: row, currentUserInterests: currentInterests)
         }
         return mappedProfiles
     }
@@ -1195,9 +1198,27 @@ actor AppwriteService {
         ]
     }
 
-    private func makeDiscoverProfileDTO(from row: [String: Any]) -> ProfileDTO? {
-        guard let userId = stringValue(forKey: "userId", in: row),
-              let gender = genderValue(for: stringValue(forKey: "gender", in: row)) else {
+    private func makeDiscoverProfileDTO(from row: [String: Any]) -> DiscoverProfileDTO? {
+        guard let userId = stringValue(forKey: "id", in: row)
+            ?? stringValue(forKey: "userId", in: row)
+        else {
+            return nil
+        }
+
+        return DiscoverProfileDTO(
+            id: userId,
+            name: stringValue(forKey: "name", in: row) ?? ThreadNaming.placeholderTitle,
+            age: intValue(forKey: "age", in: row) ?? 18,
+            photos: discoverPhotoURLs(from: row),
+            compatibilityScore: min(max(intValue(forKey: "compatibilityScore", in: row) ?? 0, 0), 100),
+            distance: intValue(forKey: "distance", in: row) ?? intValue(forKey: "distanceKm", in: row),
+            commonInterests: discoverCommonInterests(from: row),
+            relationshipState: relationshipStateValue(for: stringValue(forKey: "relationshipState", in: row))
+        )
+    }
+
+    private func makeFallbackDiscoverProfileDTO(from row: [String: Any], currentUserInterests: [String]) -> DiscoverProfileDTO? {
+        guard let userId = stringValue(forKey: "userId", in: row) else {
             return nil
         }
 
@@ -1206,22 +1227,19 @@ actor AppwriteService {
         let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
         let email = stringValue(forKey: "email", in: row) ?? ""
         let name = fullName.isEmpty ? (ThreadNaming.discoverFallbackName(email: email) ?? ThreadNaming.placeholderTitle) : fullName
-        let age = ageValue(from: dateValue(forKey: "birthDate", in: row))
+        let interests = interestListValue(for: row)
+        let commonInterests = interests.filter { currentUserInterests.contains($0) }
+        let fallbackScore = min(100, max(48 + (commonInterests.count * 8), 48))
 
-        return ProfileDTO(
-            id: stableUUID(from: userId),
-            remoteUserId: userId,
+        return DiscoverProfileDTO(
+            id: userId,
             name: name,
-            age: age,
-            gender: gender,
-            bio: discoverBio(from: row),
-            city: stringValue(forKey: "city", in: row),
-            distanceKm: intValue(forKey: "distanceKm", in: row),
-            intent: intentValue(for: stringValue(forKey: "intent", in: row)),
-            interests: interestListValue(for: row),
-            instagramTag: socialTagValue(forKey: "instagramTag", in: row),
-            spotifyTag: socialTagValue(forKey: "spotifyTag", in: row),
-            avatarURL: avatarURL(fileId: stringValue(forKey: "avatarFileId", in: row))
+            age: ageValue(from: dateValue(forKey: "birthDate", in: row)),
+            photos: discoverPhotoURLs(from: row),
+            compatibilityScore: fallbackScore,
+            distance: intValue(forKey: "distanceKm", in: row),
+            commonInterests: Array(commonInterests.prefix(4)),
+            relationshipState: .none
         )
     }
 
@@ -1308,6 +1326,53 @@ actor AppwriteService {
         }
 
         return "Say hi and start the conversation."
+    }
+
+    private func discoverPhotoURLs(from row: [String: Any]) -> [URL] {
+        let directURLs = stringArrayValue(forKey: "photos", in: row).compactMap(URL.init(string:))
+        if !directURLs.isEmpty {
+            return directURLs
+        }
+
+        let fileIds = discoverPhotoFileIds(from: row)
+        let urls = fileIds.compactMap(avatarURL(fileId:))
+        if !urls.isEmpty {
+            return urls
+        }
+
+        if let avatarURL = avatarURL(fileId: stringValue(forKey: "avatarFileId", in: row)) {
+            return [avatarURL]
+        }
+
+        return []
+    }
+
+    private func discoverPhotoFileIds(from row: [String: Any]) -> [String] {
+        let directArray = stringArrayValue(forKey: "photoFileIds", in: row)
+        if !directArray.isEmpty {
+            return directArray
+        }
+
+        if let rawValue = stringValue(forKey: "photoFileIds", in: row) {
+            return rawValue
+                .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == "|" })
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        if let avatarFileId = stringValue(forKey: "avatarFileId", in: row), !avatarFileId.isEmpty {
+            return [avatarFileId]
+        }
+
+        return []
+    }
+
+    private func discoverCommonInterests(from row: [String: Any]) -> [String] {
+        let directArray = stringArrayValue(forKey: "commonInterests", in: row)
+        if !directArray.isEmpty {
+            return directArray
+        }
+        return interestListValue(for: stringValue(forKey: "commonInterests", in: row))
     }
 
     private func interestListValue(for row: [String: Any]) -> [String] {
@@ -1404,6 +1469,21 @@ actor AppwriteService {
         }
     }
 
+    private func relationshipStateValue(for rawValue: String?) -> RelationshipStateDTO {
+        switch rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "liked":
+            return .liked
+        case "matched":
+            return .matched
+        case "archived":
+            return .archived
+        case "blocked":
+            return .blocked
+        default:
+            return .none
+        }
+    }
+
     private func stringValue(for value: UserGender?) -> String? {
         switch value {
         case .male:
@@ -1473,6 +1553,23 @@ actor AppwriteService {
             .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == "|" })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private func stringArrayValue(forKey key: String, in dictionary: [String: Any]?) -> [String] {
+        if let values = dictionary?[key] as? [String] {
+            return values
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        if let values = dictionary?[key] as? [Any] {
+            return values
+                .compactMap { $0 as? String }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        return []
     }
 
     private func normalizedSocialTag(_ rawValue: String?) -> String? {
