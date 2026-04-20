@@ -17,6 +17,14 @@ export default async ({ req, res, error }) => {
     }
 
     const now = new Date().toISOString();
+    const existingRelationship = config.relationshipsTableId
+      ? await findRelationshipRow(config, currentUserId, otherUserId)
+      : null;
+
+    if (relationshipBlocksInteraction(existingRelationship, currentUserId, otherUserId)) {
+      return res.json({ message: "Interaction unavailable" }, 403);
+    }
+
     const swipeKey = `${currentUserId}:${otherUserId}`;
     const existingSwipe = await findSingleRow(config, config.swipesTableId, [
       equal("swipeKey", [swipeKey]),
@@ -37,8 +45,19 @@ export default async ({ req, res, error }) => {
       await createRow(config, config.swipesTableId, uniqueId(), swipePayload, swipePermissions(currentUserId));
     }
 
+    if (config.relationshipsTableId) {
+      await upsertRelationshipForSwipe(
+        config,
+        existingRelationship,
+        currentUserId,
+        otherUserId,
+        decision,
+        now
+      );
+    }
+
     if (decision !== "liked") {
-      return res.json({ matched: false }, 200);
+      return res.json({ matched: false, relationshipState: "none" }, 200);
     }
 
     // A match exists only when the opposite swipe was already a like.
@@ -49,7 +68,7 @@ export default async ({ req, res, error }) => {
     ]);
 
     if (!reverseSwipe?.$id) {
-      return res.json({ matched: false }, 200);
+      return res.json({ matched: false, relationshipState: "liked" }, 200);
     }
 
     const userIds = [currentUserId, otherUserId].sort();
@@ -61,15 +80,22 @@ export default async ({ req, res, error }) => {
     ]);
 
     if (existingMatch?.threadId) {
+      if (config.relationshipsTableId) {
+        await upsertMatchedRelationship(config, currentUserId, otherUserId, existingMatch.threadId, now);
+      }
       await maybeRefreshThreadSubject(config, existingMatch.threadId, currentUserId, otherUserName, permissions);
       return res.json({
         matched: true,
         matchId: existingMatch.$id,
-        threadId: existingMatch.threadId
+        threadId: existingMatch.threadId,
+        relationshipState: "matched"
       }, 200);
     }
 
     const threadId = await createThreadWithParticipants(config, currentUserId, otherUserId, otherUserName);
+    if (config.relationshipsTableId) {
+      await upsertMatchedRelationship(config, currentUserId, otherUserId, threadId, now);
+    }
 
     if (existingMatch?.$id) {
       await updateRow(config, config.matchesTableId, existingMatch.$id, {
@@ -80,7 +106,7 @@ export default async ({ req, res, error }) => {
         createdAt: existingMatch.createdAt ?? now,
         matchedAt: now
       }, permissions);
-      return res.json({ matched: true, matchId: existingMatch.$id, threadId }, 200);
+      return res.json({ matched: true, matchId: existingMatch.$id, threadId, relationshipState: "matched" }, 200);
     }
 
     const matchId = stableMatchRowId(userIds);
@@ -93,7 +119,7 @@ export default async ({ req, res, error }) => {
       matchedAt: now
     }, permissions);
 
-    return res.json({ matched: true, matchId, threadId }, 200);
+    return res.json({ matched: true, matchId, threadId, relationshipState: "matched" }, 200);
   } catch (err) {
     error(String(err?.stack ?? err));
     return res.json({ message: "Unable to record swipe" }, 500);
@@ -109,7 +135,8 @@ function getConfig(req) {
     swipesTableId: requiredEnv("APPWRITE_SWIPES_TABLE_ID"),
     matchesTableId: requiredEnv("APPWRITE_MATCHES_TABLE_ID"),
     threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
-    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID")
+    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
+    relationshipsTableId: optionalEnv("APPWRITE_RELATIONSHIPS_TABLE_ID")
   };
 }
 
@@ -135,6 +162,11 @@ function requiredEnv(name) {
     throw new Error(`Missing environment variable ${name}`);
   }
   return value;
+}
+
+function optionalEnv(name) {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function requiredHeader(req, name) {
@@ -286,6 +318,79 @@ async function createOrReuseMatchRow(config, matchId, data, permissions) {
   return matchId;
 }
 
+async function upsertRelationshipForSwipe(config, existingRelationship, currentUserId, otherUserId, decision, now) {
+  if (!config.relationshipsTableId) {
+    return null;
+  }
+
+  const userIds = [currentUserId, otherUserId].sort();
+  const isCurrentUserA = userIds[0] === currentUserId;
+  const currentStateKey = isCurrentUserA ? "userAState" : "userBState";
+  const otherStateKey = isCurrentUserA ? "userBState" : "userAState";
+  const nextCurrentState = decision === "liked" ? "liked" : "none";
+  const payload = {
+    pairKey: userIds.join(":"),
+    userAId: userIds[0],
+    userBId: userIds[1],
+    userAState: isCurrentUserA ? nextCurrentState : (asString(existingRelationship?.userAState) ?? "none"),
+    userBState: isCurrentUserA ? (asString(existingRelationship?.userBState) ?? "none") : nextCurrentState,
+    threadId: existingRelationship?.threadId ?? null,
+    matchedAt: existingRelationship?.matchedAt ?? null,
+    createdAt: existingRelationship?.createdAt ?? now,
+    updatedAt: now
+  };
+
+  // Respect an existing block from either side instead of silently downgrading it with new swipes.
+  if (asString(existingRelationship?.[currentStateKey]) === "blocked" || asString(existingRelationship?.[otherStateKey]) === "blocked") {
+    payload[currentStateKey] = asString(existingRelationship?.[currentStateKey]) ?? "none";
+    payload[otherStateKey] = asString(existingRelationship?.[otherStateKey]) ?? "none";
+  }
+
+  return upsertRelationshipRow(config, existingRelationship, payload, participantPermissions(userIds));
+}
+
+async function upsertMatchedRelationship(config, currentUserId, otherUserId, threadId, now) {
+  if (!config.relationshipsTableId) {
+    return null;
+  }
+
+  const existingRelationship = await findRelationshipRow(config, currentUserId, otherUserId);
+  const userIds = [currentUserId, otherUserId].sort();
+  const payload = {
+    pairKey: userIds.join(":"),
+    userAId: userIds[0],
+    userBId: userIds[1],
+    userAState: "matched",
+    userBState: "matched",
+    threadId,
+    matchedAt: existingRelationship?.matchedAt ?? now,
+    createdAt: existingRelationship?.createdAt ?? now,
+    updatedAt: now
+  };
+
+  return upsertRelationshipRow(config, existingRelationship, payload, participantPermissions(userIds));
+}
+
+async function upsertRelationshipRow(config, existingRelationship, payload, permissions) {
+  const relationshipId = existingRelationship?.$id ?? stableRelationshipRowId([payload.userAId, payload.userBId]);
+
+  if (existingRelationship?.$id) {
+    await updateRow(config, config.relationshipsTableId, relationshipId, payload, permissions);
+    return relationshipId;
+  }
+
+  try {
+    await createRow(config, config.relationshipsTableId, relationshipId, payload, permissions);
+  } catch (err) {
+    if (!isAlreadyExistsError(err)) {
+      throw new Error(`Failed creating row in ${config.relationshipsTableId}: ${err?.message ?? err}`);
+    }
+    await updateRow(config, config.relationshipsTableId, relationshipId, payload, permissions);
+  }
+
+  return relationshipId;
+}
+
 async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions) {
   const subject = asString(otherUserName);
   if (!subject) {
@@ -327,6 +432,37 @@ async function getRowIfExists(config, tableId, rowId) {
     }
     throw err;
   }
+}
+
+async function findRelationshipRow(config, currentUserId, otherUserId) {
+  if (!config.relationshipsTableId) {
+    return null;
+  }
+
+  const pairKey = [currentUserId, otherUserId].sort().join(":");
+  return findSingleRow(config, config.relationshipsTableId, [
+    equal("pairKey", [pairKey]),
+    limit(1)
+  ]);
+}
+
+function relationshipBlocksInteraction(relationship, currentUserId, otherUserId) {
+  if (!relationship) {
+    return false;
+  }
+
+  return relationshipStateForUser(relationship, currentUserId) === "blocked"
+    || relationshipStateForUser(relationship, otherUserId) === "blocked";
+}
+
+function relationshipStateForUser(relationship, userId) {
+  if (relationship.userAId === userId) {
+    return asString(relationship.userAState) ?? "none";
+  }
+  if (relationship.userBId === userId) {
+    return asString(relationship.userBState) ?? "none";
+  }
+  return "none";
 }
 
 async function findExistingThreadIdByParticipants(config, firstUserId, secondUserId) {
@@ -462,6 +598,10 @@ function stableParticipantRowId(threadId, userId) {
 
 function stableMatchRowId(userIds) {
   return stableRowId("mt", userIds.join(":"));
+}
+
+function stableRelationshipRowId(userIds) {
+  return stableRowId("rl", userIds.join(":"));
 }
 
 function stableRowId(prefix, seed) {

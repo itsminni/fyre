@@ -30,6 +30,24 @@ export default async ({ req, res, error }) => {
       return res.json({ message: "Forbidden" }, 403);
     }
 
+    if (config.relationshipsTableId) {
+      const otherUserId = participantIds.find((userId) => userId !== currentUserId);
+      const relationship = otherUserId
+        ? await findRelationshipRow(config, currentUserId, otherUserId)
+        : null;
+
+      if (!relationship) {
+        const hasLegacyMatch = otherUserId
+          ? await findLegacyMatch(config, currentUserId, otherUserId)
+          : false;
+        if (!hasLegacyMatch) {
+          return res.json({ message: "Conversation unavailable" }, 403);
+        }
+      } else if (!relationshipAllowsMessaging(relationship, currentUserId, otherUserId)) {
+        return res.json({ message: "Conversation unavailable" }, 403);
+      }
+    }
+
     if (attachmentFileId) {
       if (!config.chatAttachmentsBucketId) {
         throw new Error("Missing environment variable APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID");
@@ -134,7 +152,9 @@ function getConfig(req) {
     threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
     threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
     messagesTableId: requiredEnv("APPWRITE_MESSAGES_TABLE_ID"),
-    chatAttachmentsBucketId: optionalEnv("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID")
+    chatAttachmentsBucketId: optionalEnv("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID"),
+    relationshipsTableId: optionalEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
+    matchesTableId: optionalEnv("APPWRITE_MATCHES_TABLE_ID")
   };
 }
 
@@ -216,6 +236,52 @@ async function createRow(config, tableId, rowId, data, permissions) {
     data,
     permissions
   });
+}
+
+async function findRelationshipRow(config, currentUserId, otherUserId) {
+  if (!config.relationshipsTableId || !otherUserId) {
+    return null;
+  }
+
+  const pairKey = [currentUserId, otherUserId].sort().join(":");
+  const rows = await listRows(config, config.relationshipsTableId, [
+    equal("pairKey", [pairKey]),
+    limit(1)
+  ]);
+  return rows[0] ?? null;
+}
+
+async function findLegacyMatch(config, currentUserId, otherUserId) {
+  if (!config.matchesTableId || !otherUserId) {
+    return null;
+  }
+
+  const rows = await listRows(config, config.matchesTableId, [
+    equal("matchKey", [[currentUserId, otherUserId].sort().join(":")]),
+    limit(1)
+  ]);
+  return rows[0] ?? null;
+}
+
+function relationshipAllowsMessaging(relationship, currentUserId, otherUserId) {
+  const currentState = relationshipStateForUser(relationship, currentUserId);
+  const otherState = relationshipStateForUser(relationship, otherUserId);
+
+  if (currentState === "blocked" || otherState === "blocked") {
+    return false;
+  }
+
+  return currentState === "matched" || otherState === "matched" || Boolean(relationship.matchedAt);
+}
+
+function relationshipStateForUser(relationship, userId) {
+  if (relationship.userAId === userId) {
+    return asString(relationship.userAState) ?? "none";
+  }
+  if (relationship.userBId === userId) {
+    return asString(relationship.userBState) ?? "none";
+  }
+  return "none";
 }
 
 async function getRow(config, tableId, rowId) {

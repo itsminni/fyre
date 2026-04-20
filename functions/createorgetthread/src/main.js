@@ -15,6 +15,18 @@ export default async ({ req, res, error }) => {
       return res.json({ message: "Invalid participant" }, 400);
     }
 
+    if (config.relationshipsTableId) {
+      const relationship = await findRelationshipRow(config, currentUserId, otherUserId);
+      if (!relationship) {
+        const hasLegacyMatch = await findLegacyMatch(config, currentUserId, otherUserId);
+        if (!hasLegacyMatch) {
+          return res.json({ message: "Relationship unavailable" }, 403);
+        }
+      } else if (!relationshipAllowsThread(relationship, currentUserId, otherUserId)) {
+        return res.json({ message: "Relationship unavailable" }, 403);
+      }
+    }
+
     const existingThreadId = await findExistingThreadIdByParticipants(config, currentUserId, otherUserId);
     if (existingThreadId) {
       await maybeRefreshThreadSubject(
@@ -50,7 +62,9 @@ function getConfig(req) {
     apiKey: resolveApiKey(req),
     databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
     threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
-    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID")
+    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
+    relationshipsTableId: optionalEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
+    matchesTableId: optionalEnv("APPWRITE_MATCHES_TABLE_ID")
   };
 }
 
@@ -76,6 +90,11 @@ function requiredEnv(name) {
     throw new Error(`Missing environment variable ${name}`);
   }
   return value;
+}
+
+function optionalEnv(name) {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function requiredHeader(req, name) {
@@ -239,6 +258,49 @@ async function ensureThreadParticipant(config, threadId, userId, permissions) {
 async function findSingleRow(config, tableId, queries) {
   const rows = await listRows(config, tableId, queries);
   return rows[0] ?? null;
+}
+
+async function findRelationshipRow(config, currentUserId, otherUserId) {
+  if (!config.relationshipsTableId) {
+    return null;
+  }
+
+  return findSingleRow(config, config.relationshipsTableId, [
+    equal("pairKey", [[currentUserId, otherUserId].sort().join(":")]),
+    limit(1)
+  ]);
+}
+
+async function findLegacyMatch(config, currentUserId, otherUserId) {
+  if (!config.matchesTableId) {
+    return null;
+  }
+
+  return findSingleRow(config, config.matchesTableId, [
+    equal("matchKey", [[currentUserId, otherUserId].sort().join(":")]),
+    limit(1)
+  ]);
+}
+
+function relationshipAllowsThread(relationship, currentUserId, otherUserId) {
+  const currentState = relationshipStateForUser(relationship, currentUserId);
+  const otherState = relationshipStateForUser(relationship, otherUserId);
+
+  if (currentState === "blocked" || otherState === "blocked") {
+    return false;
+  }
+
+  return currentState === "matched" || otherState === "matched" || Boolean(relationship.matchedAt);
+}
+
+function relationshipStateForUser(relationship, userId) {
+  if (relationship.userAId === userId) {
+    return asString(relationship.userAState) ?? "none";
+  }
+  if (relationship.userBId === userId) {
+    return asString(relationship.userBState) ?? "none";
+  }
+  return "none";
 }
 
 async function getRowIfExists(config, tableId, rowId) {
