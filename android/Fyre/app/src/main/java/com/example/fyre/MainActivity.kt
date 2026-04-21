@@ -9,6 +9,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.fyre.data.repository.UserRepository
 import com.example.fyre.ui.auth.AuthViewModel
 import com.example.fyre.ui.auth.AuthViewModelFactory
+import com.example.fyre.ui.navigation.AppSessionViewModel
 import com.example.fyre.ui.navigation.NavGraph
 import com.example.fyre.ui.theme.FyreTheme
 
@@ -43,11 +44,13 @@ class MainActivity : ComponentActivity() {
                 val authViewModel: AuthViewModel = viewModel(
                     factory = AuthViewModelFactory(userRepository)
                 )
+                val sessionViewModel: AppSessionViewModel = viewModel()
 
                 // Grafo di navigazione — definisce le schermate e le transizioni
                 NavGraph(
                     navController = navController,
-                    authViewModel = authViewModel
+                    authViewModel = authViewModel,
+                    sessionViewModel = sessionViewModel
                 )
             }
         }

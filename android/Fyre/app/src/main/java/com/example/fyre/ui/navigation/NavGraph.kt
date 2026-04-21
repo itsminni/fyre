@@ -1,13 +1,18 @@
 package com.example.fyre.ui.navigation
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navigation
 import com.example.fyre.ui.auth.AuthViewModel
 import com.example.fyre.ui.auth.LoginScreen
 import com.example.fyre.ui.auth.RegisterScreen
-import com.example.fyre.ui.home.HomeScreen
+import com.example.fyre.ui.profile.ProfileCompletionScreen
 import com.example.fyre.ui.welcome.WelcomeScreen
 
 /**
@@ -23,89 +28,107 @@ import com.example.fyre.ui.welcome.WelcomeScreen
 @Composable
 fun NavGraph(
     navController: NavHostController,
-    authViewModel: AuthViewModel
+    authViewModel: AuthViewModel,
+    sessionViewModel: AppSessionViewModel
 ) {
+    val sessionState by sessionViewModel.sessionState.collectAsState()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    // Root navigation guidata dallo stato logico locale/mock della sessione.
+    LaunchedEffect(sessionState, currentRoute) {
+        when (sessionState) {
+            AppSessionState.Unauthenticated -> {
+                if (currentRoute != AuthRoute.Welcome && currentRoute != AuthRoute.Login && currentRoute != AuthRoute.Register) {
+                    navController.navigate(RootRoute.Auth) {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                    }
+                }
+            }
+
+            AppSessionState.AuthenticatedProfileIncomplete -> {
+                if (currentRoute != RootRoute.ProfileCompletion) {
+                    navController.navigate(RootRoute.ProfileCompletion) {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                    }
+                }
+            }
+
+            AppSessionState.AuthenticatedProfileComplete -> {
+                if (currentRoute != RootRoute.AuthenticatedShell) {
+                    navController.navigate(RootRoute.AuthenticatedShell) {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                    }
+                }
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
-        startDestination = Screen.Welcome.route // La schermata iniziale è il benvenuto
+        startDestination = RootRoute.Auth
     ) {
-        // ============================================================
-        // Schermata di Benvenuto
-        // ============================================================
-        composable(route = Screen.Welcome.route) {
-            WelcomeScreen(
-                onNavigateToLogin = {
-                    // Naviga al login
-                    navController.navigate(Screen.Login.route)
-                },
-                onNavigateToRegister = {
-                    // Naviga alla registrazione
-                    authViewModel.clearFields()
-                    navController.navigate(Screen.Register.route)
-                }
-            )
-        }
-
-        // ============================================================
-        // Schermata di Login
-        // ============================================================
-        composable(route = Screen.Login.route) {
-            LoginScreen(
-                viewModel = authViewModel,
-                onNavigateBack = {
-                    // Torna alla schermata di benvenuto
-                    navController.popBackStack()
-                },
-                onNavigateToRegister = {
-                    // Pulisce i campi quando si va alla registrazione
-                    authViewModel.clearFields()
-                    navController.navigate(Screen.Register.route)
-                },
-                onLoginSuccess = {
-                    // Naviga alla Home e rimuove tutto il back stack auth
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.Welcome.route) { inclusive = true }
+        navigation(
+            startDestination = AuthRoute.Welcome,
+            route = RootRoute.Auth
+        ) {
+            composable(route = AuthRoute.Welcome) {
+                WelcomeScreen(
+                    onNavigateToLogin = { navController.navigate(AuthRoute.Login) },
+                    onNavigateToRegister = {
+                        authViewModel.clearFields()
+                        navController.navigate(AuthRoute.Register)
                     }
-                }
-            )
-        }
+                )
+            }
 
-        // ============================================================
-        // Schermata di Registrazione
-        // ============================================================
-        composable(route = Screen.Register.route) {
-            RegisterScreen(
-                viewModel = authViewModel,
-                onNavigateBack = {
-                    // Torna alla schermata precedente
-                    navController.popBackStack()
-                },
-                onNavigateToLogin = {
-                    // Pulisce i campi quando si torna al login
-                    authViewModel.clearFields()
-                    navController.popBackStack()
-                },
-                onRegisterSuccess = {
-                    // Naviga alla Home e rimuove tutto il back stack auth
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.Welcome.route) { inclusive = true }
+            composable(route = AuthRoute.Login) {
+                LoginScreen(
+                    viewModel = authViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToRegister = {
+                        authViewModel.clearFields()
+                        navController.navigate(AuthRoute.Register)
+                    },
+                    onLoginSuccess = {
+                        authViewModel.resetState()
+                        sessionViewModel.onAuthenticated()
                     }
-                }
-            )
+                )
+            }
+
+            composable(route = AuthRoute.Register) {
+                RegisterScreen(
+                    viewModel = authViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToLogin = {
+                        authViewModel.clearFields()
+                        navController.popBackStack()
+                    },
+                    onRegisterSuccess = {
+                        authViewModel.resetState()
+                        sessionViewModel.onAuthenticated()
+                    }
+                )
+            }
         }
 
-        // ============================================================
-        // Schermata Home (dopo il login)
-        // ============================================================
-        composable(route = Screen.Home.route) {
-            HomeScreen(
-                viewModel = authViewModel,
+        composable(route = RootRoute.ProfileCompletion) {
+            ProfileCompletionScreen(
+                onCompleteProfile = { sessionViewModel.completeProfile() },
                 onLogout = {
-                    // Effettua il logout e torna alla schermata di benvenuto
                     authViewModel.logout()
-                    navController.navigate(Screen.Welcome.route) {
-                        popUpTo(Screen.Home.route) { inclusive = true }
-                    }
+                    sessionViewModel.logout()
+                }
+            )
+        }
+
+        composable(route = RootRoute.AuthenticatedShell) {
+            AuthenticatedShell(
+                authViewModel = authViewModel,
+                onLogout = {
+                    authViewModel.logout()
+                    sessionViewModel.logout()
                 }
             )
         }
