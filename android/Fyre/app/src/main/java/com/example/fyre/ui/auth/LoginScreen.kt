@@ -61,6 +61,10 @@ fun LoginScreen(
     // Raccoglie lo stato dal ViewModel
     val email by viewModel.email.collectAsState()
     val password by viewModel.password.collectAsState()
+    val emailError by viewModel.emailError.collectAsState()
+    val passwordError by viewModel.passwordError.collectAsState()
+    val globalError by viewModel.globalError.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
     val authState by viewModel.authState.collectAsState()
 
     // Naviga automaticamente alla Home se il login ha successo
@@ -138,6 +142,8 @@ fun LoginScreen(
                         onValueChange = { viewModel.updateEmail(it) },
                         label = "Email",
                         placeholder = "mario.rossi@email.com",
+                        isError = emailError != null,
+                        supportingText = emailError,
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Email,
@@ -152,6 +158,8 @@ fun LoginScreen(
                         value = password,
                         onValueChange = { viewModel.updatePassword(it) },
                         label = "Password",
+                        isError = passwordError != null,
+                        supportingText = passwordError,
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Lock,
@@ -163,13 +171,13 @@ fun LoginScreen(
 
                     // --- Messaggio di errore ---
                     AnimatedVisibility(
-                        visible = authState is AuthState.Error,
+                        visible = globalError != null,
                         enter = fadeIn(),
                         exit = fadeOut()
                     ) {
-                        if (authState is AuthState.Error) {
+                        if (globalError != null) {
                             Text(
-                                text = (authState as AuthState.Error).message,
+                                text = globalError ?: "",
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodyMedium,
                                 textAlign = TextAlign.Center,
@@ -182,8 +190,9 @@ fun LoginScreen(
 
                     // --- Bottone Login ---
                     FyreButton(
-                        text = "Accedi",
-                        onClick = { viewModel.login() }
+                        text = if (isLoading) "Accesso..." else "Accedi",
+                        onClick = { viewModel.login() },
+                        isLoading = isLoading
                     )
                 }
             }

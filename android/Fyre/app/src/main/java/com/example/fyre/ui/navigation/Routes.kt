@@ -12,6 +12,7 @@ object AuthRoute {
     const val Welcome = "auth_welcome"
     const val Login = "auth_login"
     const val Register = "auth_register"
+    const val TermsPrivacy = "auth_terms_privacy"
 }
 
 /** Route interne alla shell autenticata con bottom navigation. */

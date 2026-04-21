@@ -19,6 +19,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -47,11 +48,13 @@ import com.example.fyre.ui.theme.FyreGradientStart
  *
  * @param onNavigateToLogin Callback per navigare alla schermata di login
  * @param onNavigateToRegister Callback per navigare alla schermata di registrazione
+ * @param onNavigateToTerms Callback per navigare a termini e privacy
  */
 @Composable
 fun WelcomeScreen(
     onNavigateToLogin: () -> Unit,
-    onNavigateToRegister: () -> Unit
+    onNavigateToRegister: () -> Unit,
+    onNavigateToTerms: () -> Unit
 ) {
     // ============================================================
     // Animazioni di entrata
@@ -218,6 +221,13 @@ fun WelcomeScreen(
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold
                     )
+                }
+
+                TextButton(
+                    onClick = onNavigateToTerms,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Leggi Termini e Privacy")
                 }
             }
         }

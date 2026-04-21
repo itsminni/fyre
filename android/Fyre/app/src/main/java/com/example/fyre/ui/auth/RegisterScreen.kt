@@ -4,9 +4,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +52,7 @@ import com.example.fyre.ui.components.FyreTextField
  * @param viewModel ViewModel condiviso per l'autenticazione
  * @param onNavigateBack Callback per tornare alla schermata precedente
  * @param onNavigateToLogin Callback per tornare al login
+ * @param onNavigateToTerms Callback per aprire termini/privacy
  * @param onRegisterSuccess Callback eseguita dopo una registrazione riuscita
  */
 @Composable
@@ -56,6 +60,7 @@ fun RegisterScreen(
     viewModel: AuthViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToLogin: () -> Unit,
+    onNavigateToTerms: () -> Unit,
     onRegisterSuccess: () -> Unit
 ) {
     // Raccoglie lo stato dal ViewModel
@@ -63,11 +68,15 @@ fun RegisterScreen(
     val email by viewModel.email.collectAsState()
     val password by viewModel.password.collectAsState()
     val confirmPassword by viewModel.confirmPassword.collectAsState()
+    val termsAccepted by viewModel.termsAccepted.collectAsState()
+    val displayNameError by viewModel.displayNameError.collectAsState()
+    val emailError by viewModel.emailError.collectAsState()
+    val passwordError by viewModel.passwordError.collectAsState()
+    val confirmPasswordError by viewModel.confirmPasswordError.collectAsState()
+    val termsError by viewModel.termsError.collectAsState()
+    val globalError by viewModel.globalError.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
     val authState by viewModel.authState.collectAsState()
-
-    // Calcola in tempo reale se la password rispetta i requisiti
-    val passwordError = if (password.isNotEmpty()) viewModel.validatePassword(password) else null
-    val passwordsMatch = confirmPassword.isEmpty() || password == confirmPassword
 
     // Naviga automaticamente alla Home se la registrazione ha successo
     LaunchedEffect(authState) {
@@ -132,6 +141,8 @@ fun RegisterScreen(
                         onValueChange = { viewModel.updateDisplayName(it) },
                         label = "Nome",
                         placeholder = "Mario Rossi",
+                        isError = displayNameError != null,
+                        supportingText = displayNameError,
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Person,
@@ -147,6 +158,8 @@ fun RegisterScreen(
                         onValueChange = { viewModel.updateEmail(it) },
                         label = "Email",
                         placeholder = "mario.rossi@email.com",
+                        isError = emailError != null,
+                        supportingText = emailError,
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Email,
@@ -170,7 +183,7 @@ fun RegisterScreen(
                         },
                         isError = passwordError != null,
                         supportingText = passwordError
-                            ?: if (password.isNotEmpty()) "✓ Password valida" else "Min. 8 caratteri, 1 maiuscola, 1 numero"
+                            ?: if (password.isNotEmpty()) "Min. 8 caratteri, 1 maiuscola, 1 numero" else null
                     )
 
                     // --- Campo Conferma Password ---
@@ -185,19 +198,49 @@ fun RegisterScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
-                        isError = !passwordsMatch,
-                        supportingText = if (!passwordsMatch) "Le password non corrispondono" else null
+                        isError = confirmPasswordError != null,
+                        supportingText = confirmPasswordError
                     )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = termsAccepted,
+                            onCheckedChange = { viewModel.setTermsAccepted(it) }
+                        )
+                        Text(
+                            text = "Accetto Termini e Privacy",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.clickable { viewModel.setTermsAccepted(!termsAccepted) }
+                        )
+                    }
+
+                    TextButton(
+                        onClick = onNavigateToTerms,
+                        modifier = Modifier.align(Alignment.Start)
+                    ) {
+                        Text("Leggi Termini e Privacy")
+                    }
+
+                    if (termsError != null) {
+                        Text(
+                            text = termsError ?: "",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
 
                     // --- Messaggio di errore dal server/repository ---
                     AnimatedVisibility(
-                        visible = authState is AuthState.Error,
+                        visible = globalError != null,
                         enter = fadeIn(),
                         exit = fadeOut()
                     ) {
-                        if (authState is AuthState.Error) {
+                        if (globalError != null) {
                             Text(
-                                text = (authState as AuthState.Error).message,
+                                text = globalError ?: "",
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodyMedium,
                                 textAlign = TextAlign.Center,
@@ -210,8 +253,9 @@ fun RegisterScreen(
 
                     // --- Bottone Registrazione ---
                     FyreButton(
-                        text = "Registrati",
-                        onClick = { viewModel.register() }
+                        text = if (isLoading) "Registrazione..." else "Registrati",
+                        onClick = { viewModel.register() },
+                        isLoading = isLoading
                     )
                 }
             }

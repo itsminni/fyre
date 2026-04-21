@@ -16,7 +16,7 @@ import java.io.File
  *
  * @property context Il contesto dell'applicazione, necessario per accedere ai file interni
  */
-class UserRepository(private val context: Context) {
+class UserRepository(private val context: Context) : AuthRepository {
 
     // Nome del file JSON dove vengono salvati gli utenti
     companion object {
@@ -63,7 +63,7 @@ class UserRepository(private val context: Context) {
      * @param email L'email da cercare (case-insensitive)
      * @return L'utente trovato, oppure null se non esiste
      */
-    fun findUserByEmail(email: String): User? {
+    override fun findUserByEmail(email: String): User? {
         return getUsers().find { it.email.equals(email, ignoreCase = true) }
     }
 
@@ -80,7 +80,13 @@ class UserRepository(private val context: Context) {
      * @param displayName Nome visualizzato
      * @return Result.success con l'utente creato, oppure Result.failure con l'errore
      */
-    fun registerUser(email: String, password: String, displayName: String): Result<User> {
+    override fun registerUser(
+        email: String,
+        password: String,
+        displayName: String,
+        termsAcceptedAt: Long?,
+        privacyAcceptedAt: Long?
+    ): Result<User> {
         // Controlla se l'email è già registrata
         if (findUserByEmail(email) != null) {
             return Result.failure(Exception("Esiste già un account con questa email"))
@@ -91,7 +97,9 @@ class UserRepository(private val context: Context) {
             email = email.lowercase().trim(),
             passwordHash = PasswordUtils.hashPassword(password),
             displayName = displayName.trim(),
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            termsAcceptedAt = termsAcceptedAt,
+            privacyAcceptedAt = privacyAcceptedAt
         )
 
         // Aggiunge l'utente alla lista esistente e salva
@@ -102,6 +110,16 @@ class UserRepository(private val context: Context) {
         return Result.success(newUser)
     }
 
+    fun registerUser(email: String, password: String, displayName: String): Result<User> {
+        return registerUser(
+            email = email,
+            password = password,
+            displayName = displayName,
+            termsAcceptedAt = null,
+            privacyAcceptedAt = null
+        )
+    }
+
     /**
      * Autentica un utente con email e password.
      *
@@ -109,7 +127,7 @@ class UserRepository(private val context: Context) {
      * @param password Password in chiaro
      * @return Result.success con l'utente autenticato, oppure Result.failure con l'errore
      */
-    fun authenticateUser(email: String, password: String): Result<User> {
+    override fun authenticateUser(email: String, password: String): Result<User> {
         val user = findUserByEmail(email)
             ?: return Result.failure(Exception("Nessun account trovato con questa email"))
 

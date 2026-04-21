@@ -14,7 +14,9 @@ data class User(
     val email: String,
     val passwordHash: String,
     val displayName: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val termsAcceptedAt: Long? = null,
+    val privacyAcceptedAt: Long? = null
 )
 
 /**

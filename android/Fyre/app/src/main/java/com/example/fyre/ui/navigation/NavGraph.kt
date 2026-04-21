@@ -12,6 +12,7 @@ import androidx.navigation.navigation
 import com.example.fyre.ui.auth.AuthViewModel
 import com.example.fyre.ui.auth.LoginScreen
 import com.example.fyre.ui.auth.RegisterScreen
+import com.example.fyre.ui.auth.TermsPrivacyScreen
 import com.example.fyre.ui.profile.ProfileCompletionScreen
 import com.example.fyre.ui.welcome.WelcomeScreen
 
@@ -39,7 +40,11 @@ fun NavGraph(
     LaunchedEffect(sessionState, currentRoute) {
         when (sessionState) {
             AppSessionState.Unauthenticated -> {
-                if (currentRoute != AuthRoute.Welcome && currentRoute != AuthRoute.Login && currentRoute != AuthRoute.Register) {
+                if (currentRoute != AuthRoute.Welcome &&
+                    currentRoute != AuthRoute.Login &&
+                    currentRoute != AuthRoute.Register &&
+                    currentRoute != AuthRoute.TermsPrivacy
+                ) {
                     navController.navigate(RootRoute.Auth) {
                         popUpTo(navController.graph.id) { inclusive = true }
                     }
@@ -78,7 +83,8 @@ fun NavGraph(
                     onNavigateToRegister = {
                         authViewModel.clearFields()
                         navController.navigate(AuthRoute.Register)
-                    }
+                    },
+                    onNavigateToTerms = { navController.navigate(AuthRoute.TermsPrivacy) }
                 )
             }
 
@@ -105,10 +111,21 @@ fun NavGraph(
                         authViewModel.clearFields()
                         navController.popBackStack()
                     },
+                    onNavigateToTerms = { navController.navigate(AuthRoute.TermsPrivacy) },
                     onRegisterSuccess = {
                         authViewModel.resetState()
                         sessionViewModel.onAuthenticated()
                     }
+                )
+            }
+
+            composable(route = AuthRoute.TermsPrivacy) {
+                TermsPrivacyScreen(
+                    onAccept = {
+                        authViewModel.setTermsAccepted(true)
+                        navController.popBackStack()
+                    },
+                    onDecline = { navController.popBackStack() }
                 )
             }
         }
