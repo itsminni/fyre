@@ -17,14 +17,14 @@
 "auth.signup.privacy.navigationTitle" = "Termini e Privacy";
 "auth.signup.privacy.title" = "Informativa su Termini e Privacy";
 "auth.signup.privacy.body" = "Trattiamo i dati forniti dall'utente solo e soltanto per consentire l'uso dei servizi e delle relative funzioni dell'app. I dati non sono condivisi con nessun altro.";
-"auth.haveAccount.prompt" = "Hai gia un account?";
+"auth.haveAccount.prompt" = "Hai già un account?";
 "auth.noAccount.prompt" = "Non hai un account?";
 "auth.icloudPassword.action" = "Usa password iCloud";
 "auth.icloudPassword.noCredential" = "Nessuna credenziale iCloud disponibile.";
 "auth.icloudPassword.error" = "Accesso iCloud non riuscito. Riprova.";
 "auth.logout.action" = "Disconnettiti";
 
-"error.signup.emailInUse" = "Esiste gia un account con questa email.";
+"error.signup.emailInUse" = "Esiste già un account con questa email.";
 "error.auth.invalidEmail" = "Inserisci un indirizzo email valido.";
 "error.auth.configurationMissing" = "La configurazione Appwrite manca in questa build. Controlla Config.plist nel bundle dell'app.";
 "error.auth.invalidPasswordLength" = "La password deve avere almeno 8 caratteri.";
@@ -38,6 +38,7 @@
 "home.empty.description" = "Hai visto tutti i profili disponibili per ora.";
 "home.skip.accessibility" = "Salta";
 "home.swipe.error" = "Impossibile aggiornare lo swipe adesso. Riprova.";
+"home.swipe.pendingMatch" = "Like inviato. La chat si apre quando il like e reciproco.";
 "home.commonInterests.empty" = "Nuova energia, ancora nessun interesse in comune.";
 
 "tab.home" = "Home";
@@ -204,7 +205,7 @@
 "profile.setup.title" = "Completa il profilo";
 "profile.section.security" = "Sicurezza";
 "profile.section.information" = "Informazioni";
-"profile.section.informationHint" = "Solo alcuni dati restano bloccati dopo il setup. Se devi modificare quelli non modificabili, invia una mail al supporto a support@example.com.";
+"profile.section.informationHint" = "Solo alcuni dati restano bloccati dopo il setup. Se devi modificarli, invia una mail al supporto a support@example.com.";
 "profile.section.required" = "Obbligatorio";
 "profile.section.discovery" = "Scoperta";
 "profile.section.discoveryHint" = "Questi campi cambiano chi vedi e quanto i profili risultano rilevanti.";
@@ -227,15 +228,15 @@
 "profile.eventsRemoval.warning.title" = "L'iscrizione all'evento verra rimossa";
 "profile.eventsRemoval.warning.message" = "Se cambi genere o orientamento verrai rimosso dagli eventi a cui sei iscritto o in waiting list. Vuoi continuare?";
 "profile.eventsRemoval.warning.confirm" = "Salva e rimuovi";
-"profile.error.emptyName" = "Il nome non puo essere vuoto.";
-"profile.error.emptyFirstName" = "Il nome non puo essere vuoto.";
-"profile.error.emptyLastName" = "Il cognome non puo essere vuoto.";
-"profile.error.emptyCity" = "La citta non puo essere vuota.";
-"profile.error.emptyBio" = "La bio non puo essere vuota.";
+"profile.error.emptyName" = "Il nome non può essere vuoto.";
+"profile.error.emptyFirstName" = "Il nome non può essere vuoto.";
+"profile.error.emptyLastName" = "Il cognome non può essere vuoto.";
+"profile.error.emptyCity" = "La citta non può essere vuota.";
+"profile.error.emptyBio" = "La bio non può essere vuota.";
 "profile.error.preferredGendersRequired" = "Seleziona almeno una preferenza di genere.";
 "profile.error.completeRequiredFields" = "Compila tutti i campi obbligatori.";
 "profile.error.invalidAge" = "Devi avere almeno 18 anni.";
-"profile.error.orientationRequired" = "L'orientamento e obbligatorio.";
+"profile.error.orientationRequired" = "L'orientamento è obbligatorio.";
 "profile.error.cityLookupFailed" = "Non riesco a trovare questa città. Prova un formato più chiaro, per esempio \"Roma, Italia\".";
 "profile.error.noCurrentUser" = "Effettua di nuovo l'accesso.";
 "profile.error.saveFailed" = "Impossibile salvare il profilo adesso. Riprova.";
@@ -299,8 +300,8 @@
 "events.error.cancellationClosed" = "Disdetta non piu disponibile (mancano meno di 48h).";
 "events.error.capacityFull" = "Capienza evento raggiunta.";
 "events.error.balance" = "Al momento non ci sono posti disponibili per il tuo genere. Attendi che si liberi uno slot.";
-"events.error.alreadyRegistered" = "Sei gia iscritto a questo evento.";
-"events.error.alreadyWaitlisted" = "Sei gia in waiting list.";
+"events.error.alreadyRegistered" = "Sei già iscritto a questo evento.";
+"events.error.alreadyWaitlisted" = "Sei già in waiting list.";
 "events.error.notRegistered" = "Non risulti iscritto a questo evento.";
 "events.error.requestFailed" = "Impossibile aggiornare l'evento adesso. Riprova.";
 "events.status.confirmed" = "Stato: Confermato";

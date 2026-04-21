@@ -165,9 +165,14 @@ struct AccountView: View {
                     }
                 }
             }
-            .task(id: pickedAdditionalPhotoItems) {
-                guard !pickedAdditionalPhotoItems.isEmpty else { return }
-                await handleAdditionalPhotoSelection()
+            .onChange(of: pickedAdditionalPhotoItems) { _, newItems in
+                guard !newItems.isEmpty else { return }
+                let selectedItems = newItems
+                pickedAdditionalPhotoItems = []
+
+                Task { @MainActor in
+                    await handleAdditionalPhotoSelection(selectedItems)
+                }
             }
             .onChange(of: chatBackgroundStyleSelection) { _, newValue in
                 guard newValue != chatBackgroundStyle else { return }
@@ -1059,21 +1064,17 @@ struct AccountView: View {
     }
 
     @MainActor
-    private func handleAdditionalPhotoSelection() async {
+    private func handleAdditionalPhotoSelection(_ items: [PhotosPickerItem]) async {
         let remainingCapacity = max(0, maxProfilePhotoCount - currentProfilePhotoDataItems.count)
-        guard remainingCapacity > 0 else {
-            pickedAdditionalPhotoItems = []
-            return
-        }
+        guard remainingCapacity > 0 else { return }
 
         var appendedImages: [Data] = []
-        for item in pickedAdditionalPhotoItems.prefix(remainingCapacity) {
+        for item in items.prefix(remainingCapacity) {
             if let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty {
                 appendedImages.append(data)
             }
         }
 
-        pickedAdditionalPhotoItems = []
         guard !appendedImages.isEmpty else { return }
 
         let result = await store.updateProfileImages(currentProfilePhotoDataItems + appendedImages)
