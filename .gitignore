@@ -13,3 +13,6 @@ web/vite.config.d.ts
 web/.env
 web/.env.*
 !web/.env.example
+
+.idea/
+android/Fyre/.idea/

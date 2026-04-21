@@ -56,6 +56,8 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     // Gson per serializzazione/deserializzazione JSON degli utenti
     implementation(libs.google.gson)
+    // DataStore Preferences per la sessione locale
+    implementation(libs.androidx.datastore.preferences)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
