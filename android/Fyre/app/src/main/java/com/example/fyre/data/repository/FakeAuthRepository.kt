@@ -2,6 +2,7 @@ package com.example.fyre.data.repository
 
 import com.example.fyre.data.model.PasswordUtils
 import com.example.fyre.data.model.User
+import com.example.fyre.data.model.UserProfile
 
 /**
  * Implementazione fake in-memory utile per preview, test rapidi o prototipi UI.
@@ -44,6 +45,17 @@ class FakeAuthRepository : AuthRepository {
         } else {
             Result.failure(IllegalStateException("Password non corretta"))
         }
+    }
+
+    override fun updateUserProfile(email: String, profile: UserProfile): Result<User> {
+        val index = users.indexOfFirst { it.email.equals(email.trim(), ignoreCase = true) }
+        if (index == -1) {
+            return Result.failure(IllegalStateException("Utente non trovato"))
+        }
+
+        val updated = users[index].copy(profile = profile)
+        users[index] = updated
+        return Result.success(updated)
     }
 }
 

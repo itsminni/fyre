@@ -3,6 +3,8 @@ package com.example.fyre.ui.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.example.fyre.data.model.User
+import com.example.fyre.data.model.UserProfile
+import com.example.fyre.data.model.hasCompleteProfile
 import com.example.fyre.data.repository.AuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +85,30 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     private val _termsError = MutableStateFlow<String?>(null)
     val termsError: StateFlow<String?> = _termsError.asStateFlow()
 
+    private val _profileFirstName = MutableStateFlow("")
+    val profileFirstName: StateFlow<String> = _profileFirstName.asStateFlow()
+
+    private val _profileLastName = MutableStateFlow("")
+    val profileLastName: StateFlow<String> = _profileLastName.asStateFlow()
+
+    private val _profileUsername = MutableStateFlow("")
+    val profileUsername: StateFlow<String> = _profileUsername.asStateFlow()
+
+    private val _profileCity = MutableStateFlow("")
+    val profileCity: StateFlow<String> = _profileCity.asStateFlow()
+
+    private val _profileBirthDate = MutableStateFlow("")
+    val profileBirthDate: StateFlow<String> = _profileBirthDate.asStateFlow()
+
+    private val _profileBio = MutableStateFlow("")
+    val profileBio: StateFlow<String> = _profileBio.asStateFlow()
+
+    private val _profileAvatarUri = MutableStateFlow<String?>(null)
+    val profileAvatarUri: StateFlow<String?> = _profileAvatarUri.asStateFlow()
+
+    private val _profileError = MutableStateFlow<String?>(null)
+    val profileError: StateFlow<String?> = _profileError.asStateFlow()
+
     // --- Utente attualmente loggato ---
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
@@ -124,6 +150,51 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _termsAccepted.value = value
         _termsError.value = null
         _globalError.value = null
+    }
+
+    fun updateProfileFirstName(value: String) {
+        _profileFirstName.value = value
+        _profileError.value = null
+    }
+
+    fun updateProfileLastName(value: String) {
+        _profileLastName.value = value
+        _profileError.value = null
+    }
+
+    fun updateProfileUsername(value: String) {
+        _profileUsername.value = value
+        _profileError.value = null
+    }
+
+    fun updateProfileCity(value: String) {
+        _profileCity.value = value
+        _profileError.value = null
+    }
+
+    fun updateProfileBirthDate(value: String) {
+        _profileBirthDate.value = value
+        _profileError.value = null
+    }
+
+    fun updateProfileBio(value: String) {
+        _profileBio.value = value
+    }
+
+    fun updateProfileAvatarUri(value: String?) {
+        _profileAvatarUri.value = value
+        _profileError.value = null
+    }
+
+    fun hydrateProfileDraftFromCurrentUser() {
+        val profile = _currentUser.value?.profile ?: return
+        _profileFirstName.value = profile.firstName
+        _profileLastName.value = profile.lastName
+        _profileUsername.value = profile.username
+        _profileCity.value = profile.city
+        _profileBirthDate.value = profile.birthDate
+        _profileBio.value = profile.bio
+        _profileAvatarUri.value = profile.avatarUri
     }
 
     // ============================================================
@@ -256,6 +327,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _termsAccepted.value = false
         _globalError.value = null
         clearValidationErrors()
+        clearProfileDraft()
         _isLoading.value = false
     }
 
@@ -279,7 +351,49 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _authState.value = AuthState.Idle
         _globalError.value = null
         clearValidationErrors()
+        clearProfileDraft()
         _isLoading.value = false
+    }
+
+    fun hasCompletedProfile(): Boolean = _currentUser.value?.hasCompleteProfile() == true
+
+    fun saveProfileSetup(): Boolean {
+        if (_isLoading.value) return false
+        _profileError.value = validateProfileDraft()
+        if (_profileError.value != null) {
+            return false
+        }
+
+        val current = _currentUser.value ?: run {
+            _profileError.value = "Sessione utente non disponibile"
+            return false
+        }
+
+        _isLoading.value = true
+        val profile = UserProfile(
+            firstName = _profileFirstName.value.trim(),
+            lastName = _profileLastName.value.trim(),
+            username = _profileUsername.value.trim(),
+            city = _profileCity.value.trim(),
+            birthDate = _profileBirthDate.value.trim(),
+            bio = _profileBio.value.trim(),
+            avatarUri = _profileAvatarUri.value
+        )
+
+        val result = repository.updateUserProfile(current.email, profile)
+        _isLoading.value = false
+
+        return result.fold(
+            onSuccess = { updatedUser ->
+                _currentUser.value = updatedUser
+                _profileError.value = null
+                true
+            },
+            onFailure = { throwable ->
+                _profileError.value = throwable.message ?: "Errore salvataggio profilo"
+                false
+            }
+        )
     }
 
     // ============================================================
@@ -322,6 +436,27 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _passwordError.value = null
         _confirmPasswordError.value = null
         _termsError.value = null
+    }
+
+    private fun clearProfileDraft() {
+        _profileFirstName.value = ""
+        _profileLastName.value = ""
+        _profileUsername.value = ""
+        _profileCity.value = ""
+        _profileBirthDate.value = ""
+        _profileBio.value = ""
+        _profileAvatarUri.value = null
+        _profileError.value = null
+    }
+
+    private fun validateProfileDraft(): String? {
+        if (_profileFirstName.value.isBlank()) return "Inserisci il nome"
+        if (_profileLastName.value.isBlank()) return "Inserisci il cognome"
+        if (_profileUsername.value.trim().length < 3) return "Username minimo 3 caratteri"
+        if (_profileCity.value.isBlank()) return "Inserisci la citta"
+        if (_profileBirthDate.value.isBlank()) return "Inserisci la data di nascita"
+        if (_profileAvatarUri.value.isNullOrBlank()) return "Seleziona un avatar"
+        return null
     }
 }
 

@@ -1,7 +1,9 @@
 package com.example.fyre.ui.auth
 
+import com.example.fyre.data.model.hasCompleteProfile
 import com.example.fyre.data.repository.FakeAuthRepository
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -42,6 +44,34 @@ class AuthViewModelTest {
         val user = (state as AuthState.Success).user
         assertNotNull(user.termsAcceptedAt)
         assertNotNull(user.privacyAcceptedAt)
+    }
+
+    @Test
+    fun save_profile_setup_requires_avatar_and_marks_profile_complete() {
+        val viewModel = AuthViewModel(FakeAuthRepository())
+
+        viewModel.updateDisplayName("Mario Rossi")
+        viewModel.updateEmail("mario@example.com")
+        viewModel.updatePassword("Password1")
+        viewModel.updateConfirmPassword("Password1")
+        viewModel.setTermsAccepted(true)
+        viewModel.register()
+
+        viewModel.updateProfileFirstName("Mario")
+        viewModel.updateProfileLastName("Rossi")
+        viewModel.updateProfileUsername("mariorossi")
+        viewModel.updateProfileCity("Milano")
+        viewModel.updateProfileBirthDate("01/01/2000")
+
+        assertFalse(viewModel.saveProfileSetup())
+        assertEquals("Seleziona un avatar", viewModel.profileError.value)
+
+        viewModel.updateProfileAvatarUri("content://avatar/mock.png")
+
+        assertTrue(viewModel.saveProfileSetup())
+        assertTrue(viewModel.hasCompletedProfile())
+        assertTrue(viewModel.currentUser.value?.hasCompleteProfile() == true)
+        assertTrue(viewModel.profileError.value == null)
     }
 }
 

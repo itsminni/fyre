@@ -16,8 +16,30 @@ data class User(
     val displayName: String,
     val createdAt: Long = System.currentTimeMillis(),
     val termsAcceptedAt: Long? = null,
-    val privacyAcceptedAt: Long? = null
+    val privacyAcceptedAt: Long? = null,
+    val profile: UserProfile? = null
 )
+
+data class UserProfile(
+    val firstName: String = "",
+    val lastName: String = "",
+    val username: String = "",
+    val city: String = "",
+    val birthDate: String = "",
+    val bio: String = "",
+    val avatarUri: String? = null
+) {
+    fun isComplete(): Boolean {
+        return firstName.isNotBlank() &&
+            lastName.isNotBlank() &&
+            username.isNotBlank() &&
+            city.isNotBlank() &&
+            birthDate.isNotBlank() &&
+            !avatarUri.isNullOrBlank()
+    }
+}
+
+fun User.hasCompleteProfile(): Boolean = profile?.isComplete() == true
 
 /**
  * Oggetto di utilità per operazioni relative alla sicurezza degli utenti.

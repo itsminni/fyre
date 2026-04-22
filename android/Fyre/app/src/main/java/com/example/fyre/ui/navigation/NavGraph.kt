@@ -9,6 +9,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navigation
+import com.example.fyre.data.model.hasCompleteProfile
 import com.example.fyre.ui.auth.AuthViewModel
 import com.example.fyre.ui.auth.LoginScreen
 import com.example.fyre.ui.auth.RegisterScreen
@@ -98,7 +99,9 @@ fun NavGraph(
                     },
                     onLoginSuccess = {
                         authViewModel.resetState()
-                        sessionViewModel.onAuthenticated()
+                        sessionViewModel.onAuthenticated(
+                            isProfileComplete = authViewModel.currentUser.value?.hasCompleteProfile() == true
+                        )
                     }
                 )
             }
@@ -114,7 +117,9 @@ fun NavGraph(
                     onNavigateToTerms = { navController.navigate(AuthRoute.TermsPrivacy) },
                     onRegisterSuccess = {
                         authViewModel.resetState()
-                        sessionViewModel.onAuthenticated()
+                        sessionViewModel.onAuthenticated(
+                            isProfileComplete = authViewModel.currentUser.value?.hasCompleteProfile() == true
+                        )
                     }
                 )
             }
@@ -132,6 +137,7 @@ fun NavGraph(
 
         composable(route = RootRoute.ProfileCompletion) {
             ProfileCompletionScreen(
+                viewModel = authViewModel,
                 onCompleteProfile = { sessionViewModel.completeProfile() },
                 onLogout = {
                     authViewModel.logout()

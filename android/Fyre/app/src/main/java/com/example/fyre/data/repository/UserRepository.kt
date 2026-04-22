@@ -3,6 +3,7 @@ package com.example.fyre.data.repository
 import android.content.Context
 import com.example.fyre.data.model.PasswordUtils
 import com.example.fyre.data.model.User
+import com.example.fyre.data.model.UserProfile
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.io.File
@@ -137,6 +138,21 @@ class UserRepository(private val context: Context) : AuthRepository {
         } else {
             Result.failure(Exception("Password non corretta"))
         }
+    }
+
+    override fun updateUserProfile(email: String, profile: UserProfile): Result<User> {
+        val normalizedEmail = email.trim().lowercase()
+        val users = getUsers().toMutableList()
+        val index = users.indexOfFirst { it.email.equals(normalizedEmail, ignoreCase = true) }
+
+        if (index == -1) {
+            return Result.failure(Exception("Utente non trovato"))
+        }
+
+        val updatedUser = users[index].copy(profile = profile)
+        users[index] = updatedUser
+        saveUsers(users)
+        return Result.success(updatedUser)
     }
 
     // ============================================================

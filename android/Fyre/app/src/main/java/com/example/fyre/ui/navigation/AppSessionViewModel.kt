@@ -15,8 +15,12 @@ class AppSessionViewModel : ViewModel() {
     private val _sessionState = MutableStateFlow<AppSessionState>(AppSessionState.Unauthenticated)
     val sessionState: StateFlow<AppSessionState> = _sessionState.asStateFlow()
 
-    fun onAuthenticated() {
-        _sessionState.value = AppSessionState.AuthenticatedProfileIncomplete
+    fun onAuthenticated(isProfileComplete: Boolean) {
+        _sessionState.value = if (isProfileComplete) {
+            AppSessionState.AuthenticatedProfileComplete
+        } else {
+            AppSessionState.AuthenticatedProfileIncomplete
+        }
     }
 
     fun completeProfile() {
