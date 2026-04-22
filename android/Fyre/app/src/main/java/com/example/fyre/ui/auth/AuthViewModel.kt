@@ -357,6 +357,18 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
     fun hasCompletedProfile(): Boolean = _currentUser.value?.hasCompleteProfile() == true
 
+    /**
+     * Ripristina una sessione locale tramite email salvata su storage.
+     * @return true se il profilo viene trovato e caricato, false altrimenti.
+     */
+    fun restoreSession(email: String): Boolean {
+        val user = repository.findUserByEmail(email.trim()) ?: return false
+        _currentUser.value = user
+        _authState.value = AuthState.Idle
+        _globalError.value = null
+        return true
+    }
+
     fun saveProfileSetup(): Boolean {
         if (_isLoading.value) return false
         _profileError.value = validateProfileDraft()

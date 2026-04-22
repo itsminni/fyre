@@ -6,12 +6,16 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.runtime.LaunchedEffect
+import com.example.fyre.data.local.SessionDataStore
 import com.example.fyre.data.repository.UserRepository
 import com.example.fyre.ui.auth.AuthViewModel
 import com.example.fyre.ui.auth.AuthViewModelFactory
 import com.example.fyre.ui.navigation.AppSessionViewModel
 import com.example.fyre.ui.navigation.NavGraph
 import com.example.fyre.ui.theme.FyreTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Activity principale dell'app Fyre.
@@ -33,6 +37,7 @@ class MainActivity : ComponentActivity() {
         // Inizializza il repository con il contesto dell'applicazione
         // (applicationContext vive per tutta la durata dell'app, evita memory leak)
         val userRepository = UserRepository(applicationContext)
+        val sessionDataStore = SessionDataStore(applicationContext)
 
         setContent {
             FyreTheme {
@@ -46,11 +51,40 @@ class MainActivity : ComponentActivity() {
                 )
                 val sessionViewModel: AppSessionViewModel = viewModel()
 
+                LaunchedEffect(Unit) {
+                    val savedEmail = sessionDataStore.currentUserEmail.first()
+                    val restored = if (savedEmail.isNullOrBlank()) {
+                        false
+                    } else {
+                        authViewModel.restoreSession(savedEmail)
+                    }
+
+                    if (restored) {
+                        sessionViewModel.bootstrap(
+                            isAuthenticated = true,
+                            isProfileComplete = authViewModel.hasCompletedProfile()
+                        )
+                    } else {
+                        sessionDataStore.setCurrentUserEmail(null)
+                        sessionViewModel.bootstrap(
+                            isAuthenticated = false,
+                            isProfileComplete = false
+                        )
+                    }
+
+                    launch {
+                        authViewModel.currentUser.collect { user ->
+                            sessionDataStore.setCurrentUserEmail(user?.email)
+                        }
+                    }
+                }
+
                 // Grafo di navigazione — definisce le schermate e le transizioni
                 NavGraph(
                     navController = navController,
                     authViewModel = authViewModel,
-                    sessionViewModel = sessionViewModel
+                    sessionViewModel = sessionViewModel,
+                    sessionDataStore = sessionDataStore
                 )
             }
         }

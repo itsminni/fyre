@@ -20,7 +20,11 @@ object MainRoute {
     const val Home = "main_home"
     const val Discover = "main_discover"
     const val Messages = "main_messages"
+    const val ThreadIdArg = "threadId"
+    const val MessagesThread = "main_messages/{threadId}"
     const val Events = "main_events"
     const val Account = "main_account"
+
+    fun messagesThread(threadId: String): String = "main_messages/$threadId"
 }
 

@@ -15,10 +15,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.padding
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.fyre.account.presentation.AccountScreen
 import com.example.fyre.discover.presentation.DiscoverScreen
 import com.example.fyre.events.presentation.EventsScreen
@@ -51,8 +53,13 @@ fun AuthenticatedShell(
 
             NavigationBar {
                 tabs.forEach { tab ->
+                    val isSelected = if (tab.route == MainRoute.Messages) {
+                        currentRoute == MainRoute.Messages || currentRoute == MainRoute.MessagesThread
+                    } else {
+                        currentRoute == tab.route
+                    }
                     NavigationBarItem(
-                        selected = currentRoute == tab.route,
+                        selected = isSelected,
                         onClick = {
                             navController.navigate(tab.route) {
                                 popUpTo(navController.graph.startDestinationId) { saveState = true }
@@ -72,12 +79,32 @@ fun AuthenticatedShell(
             startDestination = MainRoute.Home,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(MainRoute.Home) { DiscoverScreen() }
+            composable(MainRoute.Home) {
+                DiscoverScreen(
+                    onOpenThread = { threadId ->
+                        navController.navigate(MainRoute.messagesThread(threadId))
+                    }
+                )
+            }
             // Manteniamo la route legacy per compatibilita con eventuali deep link interni.
-            composable(MainRoute.Discover) { DiscoverScreen() }
+            composable(MainRoute.Discover) {
+                DiscoverScreen(
+                    onOpenThread = { threadId ->
+                        navController.navigate(MainRoute.messagesThread(threadId))
+                    }
+                )
+            }
             composable(MainRoute.Messages) { MessagesScreen() }
+            composable(
+                route = MainRoute.MessagesThread,
+                arguments = listOf(navArgument(MainRoute.ThreadIdArg) { type = NavType.StringType })
+            ) { backStackEntry ->
+                MessagesScreen(
+                    openThreadId = backStackEntry.arguments?.getString(MainRoute.ThreadIdArg)
+                )
+            }
             composable(MainRoute.Events) { EventsScreen() }
-            composable(MainRoute.Account) { AccountScreen() }
+            composable(MainRoute.Account) { AccountScreen(onLogout = onLogout) }
         }
     }
 }

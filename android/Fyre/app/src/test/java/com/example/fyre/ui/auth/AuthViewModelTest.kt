@@ -11,6 +11,25 @@ import org.junit.Test
 class AuthViewModelTest {
 
     @Test
+    fun restore_session_loads_user_from_saved_email() {
+        val repository = FakeAuthRepository()
+        val registerVm = AuthViewModel(repository)
+
+        registerVm.updateDisplayName("Mario Rossi")
+        registerVm.updateEmail("mario@example.com")
+        registerVm.updatePassword("Password1")
+        registerVm.updateConfirmPassword("Password1")
+        registerVm.setTermsAccepted(true)
+        registerVm.register()
+
+        val restoredVm = AuthViewModel(repository)
+        val restored = restoredVm.restoreSession("mario@example.com")
+
+        assertTrue(restored)
+        assertEquals("mario@example.com", restoredVm.currentUser.value?.email)
+    }
+
+    @Test
     fun register_without_terms_sets_terms_error() {
         val viewModel = AuthViewModel(FakeAuthRepository())
 

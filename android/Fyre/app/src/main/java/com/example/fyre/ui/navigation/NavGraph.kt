@@ -4,6 +4,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import com.example.fyre.data.local.SessionDataStore
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.NavHost
@@ -16,6 +23,7 @@ import com.example.fyre.ui.auth.RegisterScreen
 import com.example.fyre.ui.auth.TermsPrivacyScreen
 import com.example.fyre.ui.profile.ProfileCompletionScreen
 import com.example.fyre.ui.welcome.WelcomeScreen
+import kotlinx.coroutines.launch
 
 /**
  * Grafo di navigazione dell'app Fyre.
@@ -31,15 +39,25 @@ import com.example.fyre.ui.welcome.WelcomeScreen
 fun NavGraph(
     navController: NavHostController,
     authViewModel: AuthViewModel,
-    sessionViewModel: AppSessionViewModel
+    sessionViewModel: AppSessionViewModel,
+    sessionDataStore: SessionDataStore
 ) {
     val sessionState by sessionViewModel.sessionState.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val scope = rememberCoroutineScope()
+
+    if (sessionState == AppSessionState.Loading) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(text = "Caricamento sessione...")
+        }
+        return
+    }
 
     // Root navigation guidata dallo stato logico locale/mock della sessione.
     LaunchedEffect(sessionState, currentRoute) {
         when (sessionState) {
+            AppSessionState.Loading -> Unit
             AppSessionState.Unauthenticated -> {
                 if (currentRoute != AuthRoute.Welcome &&
                     currentRoute != AuthRoute.Login &&
@@ -99,6 +117,9 @@ fun NavGraph(
                     },
                     onLoginSuccess = {
                         authViewModel.resetState()
+                        scope.launch {
+                            sessionDataStore.setCurrentUserEmail(authViewModel.currentUser.value?.email)
+                        }
                         sessionViewModel.onAuthenticated(
                             isProfileComplete = authViewModel.currentUser.value?.hasCompleteProfile() == true
                         )
@@ -117,6 +138,9 @@ fun NavGraph(
                     onNavigateToTerms = { navController.navigate(AuthRoute.TermsPrivacy) },
                     onRegisterSuccess = {
                         authViewModel.resetState()
+                        scope.launch {
+                            sessionDataStore.setCurrentUserEmail(authViewModel.currentUser.value?.email)
+                        }
                         sessionViewModel.onAuthenticated(
                             isProfileComplete = authViewModel.currentUser.value?.hasCompleteProfile() == true
                         )
@@ -141,6 +165,7 @@ fun NavGraph(
                 onCompleteProfile = { sessionViewModel.completeProfile() },
                 onLogout = {
                     authViewModel.logout()
+                    scope.launch { sessionDataStore.setCurrentUserEmail(null) }
                     sessionViewModel.logout()
                 }
             )
@@ -151,6 +176,7 @@ fun NavGraph(
                 authViewModel = authViewModel,
                 onLogout = {
                     authViewModel.logout()
+                    scope.launch { sessionDataStore.setCurrentUserEmail(null) }
                     sessionViewModel.logout()
                 }
             )
