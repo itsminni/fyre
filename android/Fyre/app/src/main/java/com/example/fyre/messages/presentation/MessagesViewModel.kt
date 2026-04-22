@@ -2,6 +2,7 @@ package com.example.fyre.messages.presentation
 
 import androidx.lifecycle.ViewModel
 import com.example.fyre.messages.data.MockMessagesRepository
+import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.ChatMessage
 import com.example.fyre.messages.model.MessageThread
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,6 +24,9 @@ class MessagesViewModel : ViewModel() {
     private val _draft = MutableStateFlow("")
     val draft: StateFlow<String> = _draft.asStateFlow()
 
+    private val _replyToMessageId = MutableStateFlow<String?>(null)
+    val replyToMessageId: StateFlow<String?> = _replyToMessageId.asStateFlow()
+
     init {
         refreshThreads()
     }
@@ -30,6 +34,7 @@ class MessagesViewModel : ViewModel() {
     fun showInbox() {
         _selectedThreadId.value = null
         _messages.value = emptyList()
+        _replyToMessageId.value = null
         refreshThreads()
     }
 
@@ -45,13 +50,58 @@ class MessagesViewModel : ViewModel() {
         _draft.value = value
     }
 
+    fun setReplyToMessage(messageId: String?) {
+        _replyToMessageId.value = messageId
+    }
+
     fun sendCurrentMessage() {
         val threadId = _selectedThreadId.value ?: return
         val message = _draft.value.trim()
         if (message.isEmpty()) return
 
-        repository.sendMessage(threadId, message)
+        repository.sendTextMessage(
+            threadId = threadId,
+            text = message,
+            replyToMessageId = _replyToMessageId.value
+        )
         _draft.value = ""
+        _replyToMessageId.value = null
+        _messages.value = repository.getMessages(threadId)
+        refreshThreads()
+    }
+
+    fun sendMockAttachment(type: AttachmentType) {
+        val threadId = _selectedThreadId.value ?: return
+        val timestamp = System.currentTimeMillis()
+
+        val (name, uri, mime) = when (type) {
+            AttachmentType.Image -> Triple("img_$timestamp.jpg", "local://image/$timestamp", "image/jpeg")
+            AttachmentType.Video -> Triple("video_$timestamp.mp4", "local://video/$timestamp", "video/mp4")
+            AttachmentType.File -> Triple("doc_$timestamp.pdf", "local://file/$timestamp", "application/pdf")
+        }
+
+        repository.sendAttachmentMessage(
+            threadId = threadId,
+            type = type,
+            displayName = name,
+            localUri = uri,
+            mimeType = mime,
+            replyToMessageId = _replyToMessageId.value
+        )
+        _replyToMessageId.value = null
+        _messages.value = repository.getMessages(threadId)
+        refreshThreads()
+    }
+
+    fun sendVoiceMessage(localPath: String, durationSec: Int) {
+        val threadId = _selectedThreadId.value ?: return
+        repository.sendVoiceMessage(
+            threadId = threadId,
+            localPath = localPath,
+            durationSec = durationSec,
+            replyToMessageId = _replyToMessageId.value
+        )
+        _replyToMessageId.value = null
         _messages.value = repository.getMessages(threadId)
         refreshThreads()
     }

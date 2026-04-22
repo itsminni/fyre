@@ -6,6 +6,8 @@ data class MessageThread(
     val displayName: String,
     val lastMessage: String,
     val lastTimestamp: Long,
-    val unreadCount: Int
+    val unreadCount: Int,
+    val backendThreadId: String? = null,
+    val participantsBackendIds: List<String> = emptyList()
 )
 

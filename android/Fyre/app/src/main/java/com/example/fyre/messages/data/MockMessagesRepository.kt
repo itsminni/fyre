@@ -1,8 +1,11 @@
 package com.example.fyre.messages.data
 
 import com.example.fyre.messages.model.ChatMessage
+import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.MessageAuthor
+import com.example.fyre.messages.model.MessageAttachment
 import com.example.fyre.messages.model.MessageThread
+import com.example.fyre.messages.model.VoiceNote
 
 /**
  * Repository locale in-memory per inbox/chat.
@@ -93,6 +96,14 @@ object MockMessagesRepository {
     }
 
     fun sendMessage(threadId: String, text: String): ChatMessage {
+        return sendTextMessage(threadId = threadId, text = text)
+    }
+
+    fun sendTextMessage(
+        threadId: String,
+        text: String,
+        replyToMessageId: String? = null
+    ): ChatMessage {
         ensureThread(threadId)
         val timestamp = System.currentTimeMillis()
         val message = ChatMessage(
@@ -101,12 +112,75 @@ object MockMessagesRepository {
             author = MessageAuthor.Me,
             text = text,
             timestamp = timestamp,
-            isRead = true
+            isRead = true,
+            replyToMessageId = replyToMessageId
         )
 
         val list = messagesByThread.getOrPut(threadId) { mutableListOf() }
         list.add(message)
         updateThreadPreview(threadId, text, message.timestamp)
+        return message
+    }
+
+    fun sendAttachmentMessage(
+        threadId: String,
+        type: AttachmentType,
+        displayName: String,
+        localUri: String,
+        mimeType: String,
+        replyToMessageId: String? = null
+    ): ChatMessage {
+        ensureThread(threadId)
+        val timestamp = System.currentTimeMillis()
+        val attachment = MessageAttachment(
+            id = "a_$timestamp",
+            type = type,
+            displayName = displayName,
+            localUri = localUri,
+            mimeType = mimeType
+        )
+        val message = ChatMessage(
+            id = "m_$timestamp",
+            threadId = threadId,
+            author = MessageAuthor.Me,
+            text = "",
+            timestamp = timestamp,
+            isRead = true,
+            replyToMessageId = replyToMessageId,
+            attachments = listOf(attachment)
+        )
+
+        val list = messagesByThread.getOrPut(threadId) { mutableListOf() }
+        list.add(message)
+        updateThreadPreview(threadId, previewForAttachment(type), timestamp)
+        return message
+    }
+
+    fun sendVoiceMessage(
+        threadId: String,
+        localPath: String,
+        durationSec: Int,
+        replyToMessageId: String? = null
+    ): ChatMessage {
+        ensureThread(threadId)
+        val timestamp = System.currentTimeMillis()
+        val message = ChatMessage(
+            id = "m_$timestamp",
+            threadId = threadId,
+            author = MessageAuthor.Me,
+            text = "",
+            timestamp = timestamp,
+            isRead = true,
+            replyToMessageId = replyToMessageId,
+            voiceNote = VoiceNote(
+                localPath = localPath,
+                durationSec = durationSec
+            )
+        )
+
+        val list = messagesByThread.getOrPut(threadId) { mutableListOf() }
+        list.add(message)
+        updateThreadPreview(threadId, "Messaggio vocale (${durationSec}s)", timestamp)
         return message
     }
 
@@ -129,6 +203,14 @@ object MockMessagesRepository {
                 lastMessage = preview,
                 lastTimestamp = timestamp
             )
+        }
+    }
+
+    private fun previewForAttachment(type: AttachmentType): String {
+        return when (type) {
+            AttachmentType.Image -> "Ha inviato un'immagine"
+            AttachmentType.Video -> "Ha inviato un video"
+            AttachmentType.File -> "Ha inviato un file"
         }
     }
 }

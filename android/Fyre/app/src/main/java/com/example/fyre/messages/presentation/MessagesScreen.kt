@@ -20,6 +20,7 @@ fun MessagesScreen(
     val selectedThreadId by viewModel.selectedThreadId.collectAsState()
     val messages by viewModel.messages.collectAsState()
     val draft by viewModel.draft.collectAsState()
+    val replyToMessageId by viewModel.replyToMessageId.collectAsState()
 
     LaunchedEffect(openThreadId) {
         if (openThreadId.isNullOrBlank()) {
@@ -50,8 +51,13 @@ fun MessagesScreen(
         thread = currentThread,
         messages = messages,
         draft = draft,
+        replyToMessageId = replyToMessageId,
         onDraftChange = viewModel::updateDraft,
         onSend = viewModel::sendCurrentMessage,
+        onReply = { messageId -> viewModel.setReplyToMessage(messageId) },
+        onCancelReply = { viewModel.setReplyToMessage(null) },
+        onSendAttachment = viewModel::sendMockAttachment,
+        onSendVoice = viewModel::sendVoiceMessage,
         onBack = onBackToInbox
     )
 }
