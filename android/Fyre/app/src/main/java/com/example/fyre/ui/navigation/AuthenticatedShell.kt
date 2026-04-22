@@ -94,13 +94,25 @@ fun AuthenticatedShell(
                     }
                 )
             }
-            composable(MainRoute.Messages) { MessagesScreen() }
+            composable(MainRoute.Messages) {
+                MessagesScreen(
+                    onOpenThread = { threadId ->
+                        navController.navigate(MainRoute.messagesThread(threadId))
+                    }
+                )
+            }
             composable(
                 route = MainRoute.MessagesThread,
                 arguments = listOf(navArgument(MainRoute.ThreadIdArg) { type = NavType.StringType })
             ) { backStackEntry ->
                 MessagesScreen(
-                    openThreadId = backStackEntry.arguments?.getString(MainRoute.ThreadIdArg)
+                    openThreadId = backStackEntry.arguments?.getString(MainRoute.ThreadIdArg),
+                    onOpenThread = { threadId ->
+                        navController.navigate(MainRoute.messagesThread(threadId))
+                    },
+                    onBackToInbox = {
+                        navController.popBackStack()
+                    }
                 )
             }
             composable(MainRoute.Events) { EventsScreen() }

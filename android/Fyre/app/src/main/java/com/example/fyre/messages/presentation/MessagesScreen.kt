@@ -1,30 +1,57 @@
 package com.example.fyre.messages.presentation
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
- * Placeholder della feature Messages per estensione futura.
+ * Entry point della feature Messaggi.
  */
 @Composable
-fun MessagesScreen(openThreadId: String? = null) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(text = "Messages")
-        if (!openThreadId.isNullOrBlank()) {
-            Text(text = "Thread pronto: $openThreadId")
-            Text(text = "Hook attivo: in futuro qui si aprira la conversazione reale.")
+fun MessagesScreen(
+    openThreadId: String? = null,
+    onOpenThread: (String) -> Unit = {},
+    onBackToInbox: () -> Unit = {}
+) {
+    val viewModel: MessagesViewModel = viewModel()
+    val threads by viewModel.threads.collectAsState()
+    val selectedThreadId by viewModel.selectedThreadId.collectAsState()
+    val messages by viewModel.messages.collectAsState()
+    val draft by viewModel.draft.collectAsState()
+
+    LaunchedEffect(openThreadId) {
+        if (openThreadId.isNullOrBlank()) {
+            viewModel.showInbox()
+        } else {
+            viewModel.openThread(openThreadId)
         }
     }
-}
 
+    if (selectedThreadId == null) {
+        MessagesInboxScreen(
+            threads = threads,
+            onOpenThread = onOpenThread
+        )
+        return
+    }
+
+    val currentThread = threads.firstOrNull { it.id == selectedThreadId }
+    if (currentThread == null) {
+        MessagesInboxScreen(
+            threads = threads,
+            onOpenThread = onOpenThread
+        )
+        return
+    }
+
+    MessageThreadScreen(
+        thread = currentThread,
+        messages = messages,
+        draft = draft,
+        onDraftChange = viewModel::updateDraft,
+        onSend = viewModel::sendCurrentMessage,
+        onBack = onBackToInbox
+    )
+}
