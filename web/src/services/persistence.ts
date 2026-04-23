@@ -10,6 +10,7 @@ import {
   MainEventState,
   PersistedAppState,
   RealtimeConnectionState,
+  RelationshipState,
   UserGender
 } from '../types/models';
 import {
@@ -243,6 +244,7 @@ function sanitizeThread(value: unknown): ChatThread | null {
         : messages[0]?.createdAt ?? new Date().toISOString(),
     matchedAt: typeof value.matchedAt === 'string' ? value.matchedAt : undefined,
     lastSeenAt: typeof value.lastSeenAt === 'string' ? value.lastSeenAt : undefined,
+    relationshipState: sanitizeRelationshipState(value.relationshipState),
     messages
   };
 }
@@ -298,6 +300,20 @@ function sanitizeDeliveryState(value: unknown): ChatDeliveryState | undefined {
   if (value === 'sending' || value === 'sent' || value === 'delivered' || value === 'read') {
     return value;
   }
+  return undefined;
+}
+
+function sanitizeRelationshipState(value: unknown): RelationshipState | undefined {
+  if (
+    value === 'none' ||
+    value === 'liked' ||
+    value === 'matched' ||
+    value === 'archived' ||
+    value === 'blocked'
+  ) {
+    return value;
+  }
+
   return undefined;
 }
 

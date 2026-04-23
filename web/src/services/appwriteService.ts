@@ -9,6 +9,7 @@ import {
   EventHistoryItem,
   EventHistoryStatus,
   MainEventSnapshot,
+  RelationshipState,
   User,
   UserGender,
   UserOrientation,
@@ -326,6 +327,18 @@ export class AppwriteService {
     return this.createOrGetThread(otherUserId, otherUserName);
   }
 
+  async updateRelationship(threadId: string, action: 'archive' | 'unmatch' | 'block'): Promise<void> {
+    const functionId = this.configuration.manageRelationshipFunctionId;
+    if (!functionId) {
+      throw new AppwriteServiceError('Missing manage relationship function configuration', 500);
+    }
+
+    await this.executeUserFunction(functionId, {
+      threadId,
+      action
+    });
+  }
+
   async fetchEventAdminState(eventId?: string): Promise<EventAdminState> {
     const functionId = this.eventAdminFunctionId();
     const payload: Record<string, unknown> = { action: 'fetch' };
@@ -501,6 +514,10 @@ export class AppwriteService {
       .filter((value): value is string => Boolean(value));
 
     const otherUserId = participantUserIds.find((userId) => userId !== resolvedCurrentAccountId) ?? null;
+    const relationshipState = await this.fetchRelationshipState(resolvedCurrentAccountId, otherUserId);
+    if (!this.isRelationshipVisibleInInbox(relationshipState)) {
+      return null;
+    }
     const profileRow = otherUserId ? await this.fetchProfileRow(otherUserId) : null;
 
     const messageRows = await this.listRows(this.configuration.messagesTableId, [
@@ -521,18 +538,100 @@ export class AppwriteService {
 
     const presenceUpdatedAt = this.dateValue(profileRow?.presenceUpdatedAt);
     const isOnline = presenceUpdatedAt ? Date.now() - presenceUpdatedAt.getTime() <= 70_000 : false;
+    const lastSeenAt = this.dateValue(profileRow?.lastSeenAt);
     const threadCreatedAt =
       this.dateValue(threadRow.createdAt) ?? this.dateValue(threadRow.$createdAt) ?? new Date();
 
     return {
       id: threadId,
       name: threadName,
-      avatar: threadName.slice(0, 1).toUpperCase(),
+      avatar: this.avatarUrl(this.stringValue(profileRow?.avatarFileId)) ?? threadName.slice(0, 1).toUpperCase(),
       isOnline,
       unreadCount: 0,
       createdAt: threadCreatedAt.toISOString(),
+      lastSeenAt: lastSeenAt?.toISOString() ?? undefined,
+      relationshipState,
       messages
     };
+  }
+
+  private async fetchRelationshipState(
+    currentAccountId: string,
+    otherUserId: string | null
+  ): Promise<RelationshipState> {
+    if (!otherUserId) {
+      return 'matched';
+    }
+
+    const relationshipRow = await this.fetchRelationshipRow(currentAccountId, otherUserId);
+    if (!relationshipRow) {
+      return (await this.hasLegacyMatch(currentAccountId, otherUserId)) ? 'matched' : 'none';
+    }
+
+    const isCurrentUserA = this.stringValue(relationshipRow.userAId) === currentAccountId;
+    const currentState = this.stringValue(
+      relationshipRow[isCurrentUserA ? 'userAState' : 'userBState']
+    );
+    const otherState = this.stringValue(
+      relationshipRow[isCurrentUserA ? 'userBState' : 'userAState']
+    );
+
+    if (currentState === 'blocked' || otherState === 'blocked') {
+      return 'blocked';
+    }
+
+    if (currentState === 'archived') {
+      return 'archived';
+    }
+
+    if (
+      this.dateValue(relationshipRow.matchedAt) ||
+      currentState === 'matched' ||
+      otherState === 'matched'
+    ) {
+      return 'matched';
+    }
+
+    if (currentState === 'liked') {
+      return 'liked';
+    }
+
+    return 'none';
+  }
+
+  private async fetchRelationshipRow(
+    currentAccountId: string,
+    otherUserId: string
+  ): Promise<Record<string, unknown> | null> {
+    if (!this.configuration.relationshipsTableId) {
+      return null;
+    }
+
+    const pairKey = [currentAccountId, otherUserId].sort().join(':');
+    const rows = await this.listRows(this.configuration.relationshipsTableId, [
+      appwriteQueryEqual('pairKey', [pairKey]),
+      appwriteQueryLimit(1)
+    ]);
+
+    return rows[0] ?? null;
+  }
+
+  private async hasLegacyMatch(currentAccountId: string, otherUserId: string): Promise<boolean> {
+    if (!this.configuration.matchesTableId) {
+      return false;
+    }
+
+    const pairKey = [currentAccountId, otherUserId].sort().join(':');
+    const rows = await this.listRows(this.configuration.matchesTableId, [
+      appwriteQueryEqual('matchKey', [pairKey]),
+      appwriteQueryLimit(1)
+    ]);
+
+    return rows.length > 0;
+  }
+
+  private isRelationshipVisibleInInbox(state: RelationshipState): boolean {
+    return state === 'liked' || state === 'matched';
   }
 
   private makeChatMessage(row: Record<string, unknown>, currentAccountId: string): ChatMessage | null {
@@ -697,6 +796,8 @@ export class AppwriteService {
       date: this.dateValue(eventRow.startsAt)?.toISOString() ?? new Date().toISOString(),
       title: this.stringValue(eventRow.title) ?? 'Evento principale',
       maxParticipants,
+      maleLimit,
+      femaleLimit,
       maleCount,
       femaleCount,
       waitingListCount,
@@ -1071,10 +1172,11 @@ export class AppwriteService {
   }
 
   private makeDiscoverProfile(row: Record<string, unknown>): DiscoverProfile | null {
-    const userId = this.stringValue(row.userId);
+    const userId = this.stringValue(row.id) ?? this.stringValue(row.userId);
+    const directRelationshipState = this.relationshipStateValue(this.stringValue(row.relationshipState));
     const gender = this.userGenderValue(this.stringValue(row.gender));
 
-    if (!userId || !gender) {
+    if (!userId) {
       return null;
     }
 
@@ -1083,14 +1185,31 @@ export class AppwriteService {
     const fullName = `${firstName} ${lastName}`.trim();
     const email = this.stringValue(row.email) ?? '';
     const fallbackName = email.includes('@') ? email.split('@')[0] : 'Match';
+    const photos = this.discoverPhotoUrls(row);
+    const imageUrl = this.stringValue(row.imageUrl) ?? photos[0] ?? undefined;
+    const compatibilityScore = this.integerValue(row.compatibilityScore);
+    const age =
+      this.integerValue(row.age) ??
+      Math.max(18, calculateAge(this.toInputDate(this.dateValue(row.birthDate)) ?? ''));
+    const commonInterests = this.stringArrayValue(row.commonInterests);
+    const interestsFallback = this.stringArrayValue(row.interests);
+    const distance =
+      this.integerValue(row.distance) ?? this.integerValue(row.distanceKm) ?? undefined;
 
     return {
       id: userId,
-      name: fullName || fallbackName,
-      age: Math.max(18, calculateAge(this.toInputDate(this.dateValue(row.birthDate)) ?? '')),
-      gender,
+      name: this.stringValue(row.name) ?? (fullName || fallbackName),
+      age,
+      gender: gender ?? undefined,
+      city: this.stringValue(row.city) ?? undefined,
+      distanceKm: distance,
+      intent: this.intentValue(this.stringValue(row.intent)) ?? undefined,
       bio: this.stringValue(row.bio) ?? 'Say hi and start the conversation.',
-      imageUrl: this.avatarUrl(this.stringValue(row.avatarFileId)) ?? undefined
+      imageUrl,
+      photos: photos.length > 0 ? photos : imageUrl ? [imageUrl] : undefined,
+      compatibilityScore: compatibilityScore == null ? undefined : Math.min(100, Math.max(0, compatibilityScore)),
+      commonInterests: commonInterests.length > 0 ? commonInterests : interestsFallback.slice(0, 4),
+      relationshipState: directRelationshipState ?? 'none'
     };
   }
 
@@ -1102,6 +1221,36 @@ export class AppwriteService {
     const url = new URL(`${this.endpoint}/storage/buckets/${this.configuration.avatarsBucketId}/files/${fileId}/view`);
     url.searchParams.set('project', this.projectId);
     return url.toString();
+  }
+
+  private storageFileUrl(bucketId: string | null, fileId: string | null): string | null {
+    if (!bucketId || !fileId) {
+      return null;
+    }
+
+    const url = new URL(`${this.endpoint}/storage/buckets/${bucketId}/files/${fileId}/view`);
+    url.searchParams.set('project', this.projectId);
+    return url.toString();
+  }
+
+  private discoverPhotoUrls(row: Record<string, unknown>): string[] {
+    const directPhotos = this.stringArrayValue(row.photos)
+      .map((value) => this.stringValue(value))
+      .filter((value): value is string => Boolean(value));
+
+    if (directPhotos.length > 0) {
+      return directPhotos;
+    }
+
+    const fileIds = this.stringArrayValue(row.photoFileIds);
+    if (fileIds.length > 0) {
+      return fileIds
+        .map((fileId) => this.storageFileUrl(this.configuration.avatarsBucketId, fileId))
+        .filter((value): value is string => Boolean(value));
+    }
+
+    const avatar = this.avatarUrl(this.stringValue(row.avatarFileId));
+    return avatar ? [avatar] : [];
   }
 
   private async uploadAvatarDataUrl(dataUrl: string, fileId: string): Promise<void> {
@@ -1251,6 +1400,19 @@ export class AppwriteService {
       case 'bisexual':
       case 'pansexual':
       case 'other':
+        return value;
+      default:
+        return null;
+    }
+  }
+
+  private relationshipStateValue(value: string | null): RelationshipState | null {
+    switch (value) {
+      case 'none':
+      case 'liked':
+      case 'matched':
+      case 'archived':
+      case 'blocked':
         return value;
       default:
         return null;
@@ -1479,6 +1641,24 @@ export class AppwriteService {
     });
   }
 
+  private stringArrayValue(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => this.stringValue(entry))
+        .filter((entry): entry is string => Boolean(entry));
+    }
+
+    const text = this.stringValue(value);
+    if (!text) {
+      return [];
+    }
+
+    return text
+      .split(/[,|\n]/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
   private stringValue(value: unknown): string | null {
     if (typeof value !== 'string') {
       return null;
@@ -1559,6 +1739,10 @@ function appwriteQueryEqual(field: string, values: string[]): string {
 
 function appwriteQueryOrderAsc(field: string): string {
   return JSON.stringify({ method: 'orderAsc', attribute: field });
+}
+
+function appwriteQueryLimit(value: number): string {
+  return JSON.stringify({ method: 'limit', values: [Math.max(1, Math.trunc(value))] });
 }
 
 function wait(milliseconds: number): Promise<void> {

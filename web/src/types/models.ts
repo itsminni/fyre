@@ -4,6 +4,9 @@ export type ChatAttachmentType = 'image' | 'video' | 'audio' | 'file';
 export type ChatDeliveryState = 'sending' | 'sent' | 'delivered' | 'read';
 export type NotificationType = 'chat' | 'match' | 'event' | 'system';
 export type MatchIntent = 'relationship' | 'friendship' | 'casual' | 'networking' | 'notSure';
+export type RelationshipState = 'none' | 'liked' | 'matched' | 'archived' | 'blocked';
+export type ChatBackgroundStyle = 'sunset' | 'midnight' | 'aurora' | 'custom';
+export type ChatBubblePalette = 'default' | 'sunset' | 'ocean' | 'graphite';
 
 export type UserGender = 'male' | 'female' | 'nonBinary' | 'other';
 export type UserOrientation =
@@ -58,12 +61,16 @@ export interface DiscoverProfile {
   id: string;
   name: string;
   age: number;
-  gender: UserGender;
+  gender?: UserGender;
   city?: string;
   distanceKm?: number;
   intent?: MatchIntent;
   bio: string;
   imageUrl?: string;
+  photos?: string[];
+  compatibilityScore?: number;
+  commonInterests?: string[];
+  relationshipState?: RelationshipState;
 }
 
 export interface ChatAttachment {
@@ -98,6 +105,7 @@ export interface ChatThread {
   createdAt: string;
   matchedAt?: string;
   lastSeenAt?: string;
+  relationshipState?: RelationshipState;
   messages: ChatMessage[];
 }
 
@@ -155,6 +163,8 @@ export interface MainEventSnapshot {
   date: string;
   title: string;
   maxParticipants: number;
+  maleLimit: number;
+  femaleLimit: number;
   maleCount: number;
   femaleCount: number;
   waitingListCount: number;
@@ -334,4 +344,39 @@ export function audienceMatches(showMe: UserShowMe, gender: UserGender): boolean
     return gender === 'male';
   }
   return gender === 'female';
+}
+
+export function preferredGenderMatches(
+  preferredGenders: UserGender[] | undefined,
+  showMe: UserShowMe,
+  gender: UserGender | undefined
+): boolean {
+  if (!gender) {
+    return true;
+  }
+
+  if (Array.isArray(preferredGenders) && preferredGenders.length > 0) {
+    return preferredGenders.includes(gender);
+  }
+
+  return audienceMatches(showMe, gender);
+}
+
+export function inferShowMeFromPreferredGenders(
+  preferredGenders: UserGender[] | undefined,
+  fallback: UserShowMe = 'everyone'
+): UserShowMe {
+  if (!preferredGenders || preferredGenders.length === 0) {
+    return fallback;
+  }
+
+  if (preferredGenders.length === 1 && preferredGenders[0] === 'male') {
+    return 'men';
+  }
+
+  if (preferredGenders.length === 1 && preferredGenders[0] === 'female') {
+    return 'women';
+  }
+
+  return 'everyone';
 }

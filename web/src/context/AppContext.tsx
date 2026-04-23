@@ -24,11 +24,13 @@ import {
   MainEventInfo,
   MainEventSnapshot,
   MatchIntent,
+  NotificationType,
   PersistedAppState,
   ProfileUpdateInput,
   User,
   UserGender,
   UserOrientation,
+  inferShowMeFromPreferredGenders,
   calculateAge,
   getDisplayName,
   isProfileComplete,
@@ -67,6 +69,7 @@ interface SendMessageInput {
 
 type SwipeDecision = 'left' | 'right';
 type ParticipantBucket = 'participants' | 'waitingList';
+type RelationshipAction = 'archive' | 'unmatch' | 'block';
 
 interface SwipeDecisionResult {
   matched: boolean;
@@ -335,6 +338,39 @@ function formatLastSeen(dateIso: string | undefined): string {
     hour: '2-digit',
     minute: '2-digit'
   }).format(new Date(timestamp))}`;
+}
+
+function isNotificationEnabledForType(
+  settings: AppSettings,
+  type: NotificationType
+): boolean {
+  if (!settings.notificationsEnabled) {
+    return false;
+  }
+
+  if (type === 'match') {
+    return settings.matchNotificationsEnabled;
+  }
+
+  if (type === 'chat') {
+    return settings.messageNotificationsEnabled;
+  }
+
+  if (type === 'event') {
+    return settings.eventReminderNotificationsEnabled;
+  }
+
+  return true;
+}
+
+function normalizePreferredGenders(preferredGenders: UserGender[]): UserGender[] {
+  const ordered = ['male', 'female', 'nonBinary', 'other'] as const;
+  const unique = new Set(preferredGenders);
+  return ordered.filter((gender) => unique.has(gender));
+}
+
+function normalizeSocialHandle(value: string): string {
+  return value.trim().replace(/^@+/, '').replace(/\s+/g, '');
 }
 
 function createHistoryEntry(

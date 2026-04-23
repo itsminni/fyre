@@ -64,6 +64,8 @@ export function getSnapshot(state: MainEventState, config: MainEventConfig): Mai
     date: config.date,
     title: config.title,
     maxParticipants: config.maxParticipants,
+    maleLimit: config.maxPerGender,
+    femaleLimit: config.maxPerGender,
     maleCount,
     femaleCount,
     waitingListCount: state.waitingList.length,
