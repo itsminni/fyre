@@ -15,7 +15,12 @@ export function SegmentedControl({
   onChange
 }: SegmentedControlProps): JSX.Element {
   return (
-    <div className="segmented-control" role="tablist" aria-label="Segmented sections">
+    <div
+      className="segmented-control"
+      role="tablist"
+      aria-label="Segmented sections"
+      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+    >
       {options.map((option) => (
         <button
           key={option.value}

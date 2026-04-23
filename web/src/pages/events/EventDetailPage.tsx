@@ -214,12 +214,12 @@ export function EventDetailPage(): JSX.Element {
             <EventMetricTile
               title="Uomini"
               value={String(mainEventSnapshot.maleCount)}
-              caption={`Posti rimanenti: ${mainEventSnapshot.remainingMaleSlots}`}
+              caption={`Limite ${mainEventSnapshot.maleLimit} • rimasti ${mainEventSnapshot.remainingMaleSlots}`}
             />
             <EventMetricTile
               title="Donne"
               value={String(mainEventSnapshot.femaleCount)}
-              caption={`Posti rimanenti: ${mainEventSnapshot.remainingFemaleSlots}`}
+              caption={`Limite ${mainEventSnapshot.femaleLimit} • rimasti ${mainEventSnapshot.remainingFemaleSlots}`}
             />
           </div>
 
