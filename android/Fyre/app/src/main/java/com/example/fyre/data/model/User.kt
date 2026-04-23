@@ -17,7 +17,10 @@ data class User(
     val createdAt: Long = System.currentTimeMillis(),
     val termsAcceptedAt: Long? = null,
     val privacyAcceptedAt: Long? = null,
-    val profile: UserProfile? = null
+    val profile: UserProfile? = null,
+    val appwriteUserId: String? = null,
+    val avatarFileId: String? = null,
+    val photoFileIds: List<String> = emptyList()
 )
 
 data class UserProfile(
@@ -27,7 +30,18 @@ data class UserProfile(
     val city: String = "",
     val birthDate: String = "",
     val bio: String = "",
-    val avatarUri: String? = null
+    val avatarUri: String? = null,
+    val gender: String = "male",
+    val orientation: String = "straight",
+    val preferredGenders: List<String> = listOf("male", "female", "nonbinary", "other"),
+    val minPreferredAge: Int = 18,
+    val maxPreferredAge: Int = 35,
+    val maxDistanceKm: Int = 50,
+    val latitude: Double = 44.6979,
+    val longitude: Double = 10.6313,
+    val interests: String = "",
+    val instagramTag: String? = null,
+    val spotifyTag: String? = null
 ) {
     fun isComplete(): Boolean {
         return firstName.isNotBlank() &&

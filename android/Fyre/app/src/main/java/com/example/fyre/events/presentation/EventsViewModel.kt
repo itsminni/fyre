@@ -3,7 +3,8 @@ package com.example.fyre.events.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.fyre.events.data.MockEventsRepository
+import com.example.fyre.events.data.EventsRepository
+import com.example.fyre.events.data.MockEventsDataRepository
 import com.example.fyre.events.model.EventItem
 import com.example.fyre.events.model.EventUserState
 import com.example.fyre.events.model.RegistrationStatus
@@ -15,7 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class EventsViewModel(
-    private val repository: MockEventsRepository = MockEventsRepository,
+    private val repository: EventsRepository = MockEventsDataRepository(),
     private val currentUserId: String = DEFAULT_USER_ID,
     private val currentUserDisplayName: String = DEFAULT_USER_NAME,
     private val currentUserEmail: String? = null,
@@ -35,13 +36,19 @@ class EventsViewModel(
     private val _isAdminInMock = MutableStateFlow(repository.isAdminEmail(currentUserEmail))
     val isAdminInMock: StateFlow<Boolean> = _isAdminInMock.asStateFlow()
 
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
     init {
         refresh()
         if (autoSimulateMetrics) {
             viewModelScope.launch {
                 while (isActive) {
                     delay(3000)
-                    repository.simulateMetricsTick()
+                    repository.simulateMetricsTick(null)
                     refresh()
                 }
             }
@@ -50,8 +57,10 @@ class EventsViewModel(
 
     fun openEvent(eventId: String) {
         _selectedEventId.value = eventId
-        repository.simulateMetricsTick(eventId)
-        refresh()
+        viewModelScope.launch {
+            repository.simulateMetricsTick(eventId)
+            refresh()
+        }
     }
 
     fun closeEventDetail() {
@@ -68,20 +77,55 @@ class EventsViewModel(
 
     fun joinSelected() {
         val eventId = _selectedEventId.value ?: return
-        repository.joinEvent(eventId, currentUserId, currentUserDisplayName)
-        refresh()
+        _isLoading.value = true
+        _errorMessage.value = null
+        viewModelScope.launch {
+            val result = repository.joinEvent(
+                eventId = eventId,
+                userId = currentUserId,
+                displayName = currentUserDisplayName
+            )
+            result.onFailure { throwable ->
+                _errorMessage.value = throwable.message ?: "Iscrizione evento non riuscita"
+            }
+            refresh()
+            _isLoading.value = false
+        }
     }
 
     fun cancelSelected() {
         val eventId = _selectedEventId.value ?: return
-        repository.cancelEvent(eventId, currentUserId)
-        refresh()
+        _isLoading.value = true
+        _errorMessage.value = null
+        viewModelScope.launch {
+            val result = repository.cancelEvent(
+                eventId = eventId,
+                userId = currentUserId
+            )
+            result.onFailure { throwable ->
+                _errorMessage.value = throwable.message ?: "Annullamento iscrizione non riuscito"
+            }
+            refresh()
+            _isLoading.value = false
+        }
     }
 
     fun waitlistSelected() {
         val eventId = _selectedEventId.value ?: return
-        repository.waitlistEvent(eventId, currentUserId, currentUserDisplayName)
-        refresh()
+        _isLoading.value = true
+        _errorMessage.value = null
+        viewModelScope.launch {
+            val result = repository.waitlistEvent(
+                eventId = eventId,
+                userId = currentUserId,
+                displayName = currentUserDisplayName
+            )
+            result.onFailure { throwable ->
+                _errorMessage.value = throwable.message ?: "Ingresso in waitlist non riuscito"
+            }
+            refresh()
+            _isLoading.value = false
+        }
     }
 
     fun adminUpdateSelectedEvent(
@@ -94,31 +138,49 @@ class EventsViewModel(
         rules: List<String>
     ): Boolean {
         val eventId = _selectedEventId.value ?: return false
-        val updated = repository.adminUpdateEvent(
-            eventId = eventId,
-            isAdminMock = _isAdminInMock.value,
-            title = title,
-            dateText = dateText,
-            place = place,
-            description = description,
-            deadlineText = deadlineText,
-            capacity = capacity,
-            rules = rules
-        )
-        if (updated) refresh()
-        return updated
+        if (!_isAdminInMock.value) return false
+
+        _isLoading.value = true
+        _errorMessage.value = null
+        viewModelScope.launch {
+            val result = repository.adminUpdateEvent(
+                eventId = eventId,
+                title = title,
+                dateText = dateText,
+                place = place,
+                description = description,
+                deadlineText = deadlineText,
+                capacity = capacity,
+                rules = rules
+            )
+            result.onFailure { throwable ->
+                _errorMessage.value = throwable.message ?: "Aggiornamento evento non riuscito"
+            }
+            refresh()
+            _isLoading.value = false
+        }
+        return true
     }
 
     fun adminSetParticipantStatus(participantId: String, status: RegistrationStatus): Boolean {
         val eventId = _selectedEventId.value ?: return false
-        val updated = repository.adminSetParticipantStatus(
-            eventId = eventId,
-            isAdminMock = _isAdminInMock.value,
-            participantId = participantId,
-            status = status
-        )
-        if (updated) refresh()
-        return updated
+        if (!_isAdminInMock.value) return false
+
+        _isLoading.value = true
+        _errorMessage.value = null
+        viewModelScope.launch {
+            val result = repository.adminSetParticipantStatus(
+                eventId = eventId,
+                participantId = participantId,
+                status = status
+            )
+            result.onFailure { throwable ->
+                _errorMessage.value = throwable.message ?: "Aggiornamento partecipante non riuscito"
+            }
+            refresh()
+            _isLoading.value = false
+        }
+        return true
     }
 
     fun canShowAdminSection(): Boolean = _isAdminInMock.value
@@ -154,21 +216,41 @@ class EventsViewModel(
 
     fun tickSelectedMetrics() {
         val eventId = _selectedEventId.value ?: return
-        repository.simulateMetricsTick(eventId)
-        refresh()
+        viewModelScope.launch {
+            repository.simulateMetricsTick(eventId)
+            refresh()
+        }
+    }
+
+    fun clearError() {
+        _errorMessage.value = null
     }
 
     private fun refresh() {
-        _events.value = repository.getEventsForUser(
-            userId = currentUserId,
-            displayName = currentUserDisplayName,
-            email = currentUserEmail
-        )
+        viewModelScope.launch {
+            val result = repository.getEventsForUser(
+                userId = currentUserId,
+                displayName = currentUserDisplayName,
+                email = currentUserEmail
+            )
+
+            result.fold(
+                onSuccess = { loadedEvents ->
+                    _events.value = loadedEvents
+                    _isAdminInMock.value = loadedEvents.any { event ->
+                        event.userRole.name.contains("Admin", ignoreCase = true)
+                    } || repository.isAdminEmail(currentUserEmail)
+                },
+                onFailure = { throwable ->
+                    _errorMessage.value = throwable.message ?: "Impossibile caricare gli eventi"
+                }
+            )
+        }
     }
 }
 
 class EventsViewModelFactory(
-    private val repository: MockEventsRepository = MockEventsRepository,
+    private val repository: EventsRepository = MockEventsDataRepository(),
     private val currentUserId: String,
     private val currentUserDisplayName: String,
     private val currentUserEmail: String?

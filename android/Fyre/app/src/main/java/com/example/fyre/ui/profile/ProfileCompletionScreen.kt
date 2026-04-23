@@ -52,9 +52,17 @@ fun ProfileCompletionScreen(
     val avatarUri by viewModel.profileAvatarUri.collectAsState()
     val profileError by viewModel.profileError.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val profileSaveCompleted by viewModel.profileSaveCompleted.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.hydrateProfileDraftFromCurrentUser()
+    }
+
+    LaunchedEffect(profileSaveCompleted) {
+        if (profileSaveCompleted) {
+            viewModel.consumeProfileSaveCompleted()
+            onCompleteProfile()
+        }
     }
 
     val avatarPickerLauncher = rememberLauncherForActivityResult(
@@ -183,11 +191,7 @@ fun ProfileCompletionScreen(
             } else {
                 stringResource(R.string.profile_completion_cta)
             },
-            onClick = {
-                if (viewModel.saveProfileSetup()) {
-                    onCompleteProfile()
-                }
-            },
+            onClick = { viewModel.saveProfileSetup() },
             isLoading = isLoading
         )
 

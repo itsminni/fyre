@@ -58,8 +58,10 @@ import com.example.fyre.account.model.DiscoveryPreferences
 import com.example.fyre.account.model.NotificationSettings
 import com.example.fyre.core.notifications.NotificationChannels
 import com.example.fyre.core.notifications.NotificationGateway
+import com.example.fyre.data.AppGraphProvider
+import com.example.fyre.discover.data.DiscoveryRepository
 import com.example.fyre.discover.data.MockDiscoveryProfiles
-import com.example.fyre.discover.data.MockMatchEngine
+import com.example.fyre.discover.data.SwipeOutcome
 import com.example.fyre.discover.model.DiscoveryProfile
 import kotlin.math.abs
 import kotlin.math.sign
@@ -67,17 +69,48 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun DiscoverScreen(
-    profiles: List<DiscoveryProfile> = MockDiscoveryProfiles.items,
     discoveryPreferences: DiscoveryPreferences = DiscoveryPreferences(),
     notificationSettings: NotificationSettings = NotificationSettings(),
     notificationGateway: NotificationGateway? = null,
-    onOpenThread: (String) -> Unit = {}
+    onOpenThread: (String) -> Unit = {},
+    repository: DiscoveryRepository? = null
 ) {
     val context = LocalContext.current
+    val appGraph = remember(context.applicationContext) {
+        AppGraphProvider.get(context.applicationContext)
+    }
+    val discoveryRepository = remember(repository, appGraph) {
+        repository ?: appGraph.discoveryRepository
+    }
+
+    var profiles by remember { mutableStateOf<List<DiscoveryProfile>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var isSubmittingDecision by remember { mutableStateOf(false) }
+    var globalError by remember { mutableStateOf<String?>(null) }
+
     var currentIndex by rememberSaveable { mutableIntStateOf(0) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var pendingDecision by remember { mutableStateOf<SwipeDecision?>(null) }
-    var matchPayload by remember { mutableStateOf<MockMatchEngine.MatchPayload?>(null) }
+    var matchPayload by remember { mutableStateOf<MatchPayload?>(null) }
+
+    LaunchedEffect(discoveryRepository) {
+        isLoading = true
+        globalError = null
+
+        val result = discoveryRepository.loadProfiles()
+        result.fold(
+            onSuccess = { loadedProfiles ->
+                profiles = if (loadedProfiles.isEmpty()) MockDiscoveryProfiles.items else loadedProfiles
+            },
+            onFailure = { throwable ->
+                profiles = MockDiscoveryProfiles.items
+                globalError = throwable.message ?: "Impossibile caricare i profili discovery"
+            }
+        )
+
+        currentIndex = 0
+        isLoading = false
+    }
 
     val filteredProfiles = profiles.filter { profile ->
         val ageOk = profile.age in discoveryPreferences.minAge..discoveryPreferences.maxAge
@@ -105,16 +138,33 @@ fun DiscoverScreen(
         val decision = pendingDecision ?: return@LaunchedEffect
         val profile = currentProfile ?: return@LaunchedEffect
 
+        isSubmittingDecision = true
         dragOffsetX = if (decision == SwipeDecision.Like) 950f else -950f
         delay(190)
 
-        if (decision == SwipeDecision.Like) {
-            matchPayload = MockMatchEngine.evaluateLike(profile)
-        }
+        val decisionResult = discoveryRepository.submitDecision(
+            profile = profile,
+            liked = decision == SwipeDecision.Like
+        )
+
+        decisionResult.fold(
+            onSuccess = { outcome ->
+                matchPayload = if (outcome.matched && !outcome.threadId.isNullOrBlank()) {
+                    MatchPayload(profileId = profile.id, threadId = outcome.threadId)
+                } else {
+                    null
+                }
+            },
+            onFailure = { throwable ->
+                globalError = throwable.message ?: "Impossibile sincronizzare lo swipe"
+                matchPayload = null
+            }
+        )
 
         currentIndex = (currentIndex + 1).coerceAtMost(filteredProfiles.size)
         dragOffsetX = 0f
         pendingDecision = null
+        isSubmittingDecision = false
     }
 
     LaunchedEffect(filteredProfiles.size) {
@@ -138,7 +188,7 @@ fun DiscoverScreen(
     }
 
     fun triggerDecision(decision: SwipeDecision) {
-        if (pendingDecision != null || currentProfile == null) return
+        if (pendingDecision != null || isSubmittingDecision || currentProfile == null) return
         pendingDecision = decision
     }
 
@@ -153,6 +203,30 @@ fun DiscoverScreen(
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold
         )
+
+        if (globalError != null) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Text(
+                    text = globalError.orEmpty(),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = stringResource(R.string.nav_loading_session))
+            }
+            return@Column
+        }
 
         if (currentProfile == null) {
             EmptyDiscoveryState(hasActiveFilters = filteredProfiles.isEmpty() && profiles.isNotEmpty())
@@ -187,18 +261,20 @@ fun DiscoverScreen(
                         translationX = animatedOffsetX
                         rotationZ = animatedRotation
                     }
-                    .pointerInput(currentProfile.id, pendingDecision) {
+                    .pointerInput(currentProfile.id, pendingDecision, isSubmittingDecision) {
                         detectDragGestures(
                             onDrag = { change, dragAmount ->
-                                if (pendingDecision != null) return@detectDragGestures
+                                if (pendingDecision != null || isSubmittingDecision) return@detectDragGestures
                                 change.consume()
                                 dragOffsetX += dragAmount.x
                             },
                             onDragCancel = {
-                                if (pendingDecision == null) dragOffsetX = 0f
+                                if (pendingDecision == null && !isSubmittingDecision) {
+                                    dragOffsetX = 0f
+                                }
                             },
                             onDragEnd = {
-                                if (pendingDecision != null) return@detectDragGestures
+                                if (pendingDecision != null || isSubmittingDecision) return@detectDragGestures
                                 if (abs(dragOffsetX) >= swipeThreshold) {
                                     val decision = if (dragOffsetX.sign >= 0f) {
                                         SwipeDecision.Like
@@ -259,7 +335,10 @@ fun DiscoverScreen(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { triggerDecision(SwipeDecision.Skip) }) {
+            IconButton(
+                onClick = { triggerDecision(SwipeDecision.Skip) },
+                enabled = !isSubmittingDecision
+            ) {
                 Icon(
                     imageVector = Icons.Filled.Close,
                     contentDescription = stringResource(R.string.discover_pass_profile_cd),
@@ -275,7 +354,10 @@ fun DiscoverScreen(
                 ),
                 style = MaterialTheme.typography.labelLarge
             )
-            IconButton(onClick = { triggerDecision(SwipeDecision.Like) }) {
+            IconButton(
+                onClick = { triggerDecision(SwipeDecision.Like) },
+                enabled = !isSubmittingDecision
+            ) {
                 Icon(
                     imageVector = Icons.Filled.Favorite,
                     contentDescription = stringResource(R.string.discover_like_profile_cd),
@@ -286,6 +368,11 @@ fun DiscoverScreen(
         }
     }
 }
+
+private data class MatchPayload(
+    val profileId: String,
+    val threadId: String
+)
 
 private enum class SwipeDecision {
     Like,
@@ -411,4 +498,3 @@ private fun EmptyDiscoveryState(hasActiveFilters: Boolean) {
         )
     }
 }
-

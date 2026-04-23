@@ -7,9 +7,9 @@ import com.example.fyre.data.model.UserProfile
  * Contratto repository per autenticazione locale/fake.
  */
 interface AuthRepository {
-    fun findUserByEmail(email: String): User?
+    suspend fun findUserByEmail(email: String): User?
 
-    fun registerUser(
+    suspend fun registerUser(
         email: String,
         password: String,
         displayName: String,
@@ -17,8 +17,12 @@ interface AuthRepository {
         privacyAcceptedAt: Long? = null
     ): Result<User>
 
-    fun authenticateUser(email: String, password: String): Result<User>
+    suspend fun authenticateUser(email: String, password: String): Result<User>
 
-    fun updateUserProfile(email: String, profile: UserProfile): Result<User>
+    suspend fun updateUserProfile(email: String, profile: UserProfile): Result<User>
+
+    suspend fun restoreSession(savedEmail: String?): Result<User?>
+
+    suspend fun logout(): Result<Unit>
 }
 

@@ -27,6 +27,7 @@ import com.example.fyre.account.model.NotificationSettings
 import com.example.fyre.core.notifications.EventReminderScheduler
 import com.example.fyre.core.notifications.NotificationChannels
 import com.example.fyre.core.notifications.NotificationGateway
+import com.example.fyre.data.AppGraphProvider
 import com.example.fyre.events.model.EventItem
 import com.example.fyre.events.model.EventUserState
 
@@ -38,6 +39,9 @@ fun EventsScreen(
     notificationGateway: NotificationGateway? = null
 ) {
     val context = LocalContext.current
+    val appGraph = remember(context.applicationContext) {
+        AppGraphProvider.get(context.applicationContext)
+    }
     val userId = remember(currentUserEmail) {
         currentUserEmail?.trim()?.lowercase().takeUnless { it.isNullOrBlank() } ?: "user_default"
     }
@@ -47,6 +51,7 @@ fun EventsScreen(
 
     val viewModel: EventsViewModel = viewModel(
         factory = EventsViewModelFactory(
+            repository = appGraph.eventsRepository,
             currentUserId = userId,
             currentUserDisplayName = displayName,
             currentUserEmail = currentUserEmail
@@ -56,6 +61,8 @@ fun EventsScreen(
     val events by viewModel.events.collectAsState()
     val selectedEventId by viewModel.selectedEventId.collectAsState()
     val isAdminInMock by viewModel.isAdminInMock.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
     LaunchedEffect(selectedEventId) {
         if (selectedEventId != null) {
@@ -113,6 +120,8 @@ fun EventsScreen(
 
     EventsListScreen(
         events = events,
+        isLoading = isLoading,
+        errorMessage = errorMessage,
         onOpenEvent = { eventId -> viewModel.openEvent(eventId) }
     )
 }
@@ -120,6 +129,8 @@ fun EventsScreen(
 @Composable
 private fun EventsListScreen(
     events: List<EventItem>,
+    isLoading: Boolean,
+    errorMessage: String?,
     onOpenEvent: (String) -> Unit
 ) {
     Column(
@@ -133,6 +144,23 @@ private fun EventsListScreen(
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold
         )
+
+        if (!errorMessage.isNullOrBlank()) {
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = errorMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+
+        if (events.isEmpty() && isLoading) {
+            Text(text = stringResource(R.string.nav_loading_session))
+            return@Column
+        }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(events, key = { it.id }) { event ->

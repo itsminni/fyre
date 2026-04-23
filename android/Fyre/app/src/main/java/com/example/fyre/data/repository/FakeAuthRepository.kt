@@ -10,11 +10,11 @@ import com.example.fyre.data.model.UserProfile
 class FakeAuthRepository : AuthRepository {
     private val users = mutableListOf<User>()
 
-    override fun findUserByEmail(email: String): User? {
+    override suspend fun findUserByEmail(email: String): User? {
         return users.find { it.email.equals(email, ignoreCase = true) }
     }
 
-    override fun registerUser(
+    override suspend fun registerUser(
         email: String,
         password: String,
         displayName: String,
@@ -36,7 +36,7 @@ class FakeAuthRepository : AuthRepository {
         return Result.success(user)
     }
 
-    override fun authenticateUser(email: String, password: String): Result<User> {
+    override suspend fun authenticateUser(email: String, password: String): Result<User> {
         val user = findUserByEmail(email)
             ?: return Result.failure(IllegalStateException("Nessun account trovato con questa email"))
 
@@ -47,7 +47,7 @@ class FakeAuthRepository : AuthRepository {
         }
     }
 
-    override fun updateUserProfile(email: String, profile: UserProfile): Result<User> {
+    override suspend fun updateUserProfile(email: String, profile: UserProfile): Result<User> {
         val index = users.indexOfFirst { it.email.equals(email.trim(), ignoreCase = true) }
         if (index == -1) {
             return Result.failure(IllegalStateException("Utente non trovato"))
@@ -56,6 +56,17 @@ class FakeAuthRepository : AuthRepository {
         val updated = users[index].copy(profile = profile)
         users[index] = updated
         return Result.success(updated)
+    }
+
+    override suspend fun restoreSession(savedEmail: String?): Result<User?> {
+        if (savedEmail.isNullOrBlank()) {
+            return Result.success(null)
+        }
+        return Result.success(findUserByEmail(savedEmail))
+    }
+
+    override suspend fun logout(): Result<Unit> {
+        return Result.success(Unit)
     }
 }
 

@@ -12,10 +12,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.compose.runtime.LaunchedEffect
 import com.example.fyre.account.model.ThemeMode
 import com.example.fyre.core.notifications.AndroidNotificationGateway
+import com.example.fyre.data.AppGraphProvider
 import com.example.fyre.data.local.PersistedUserSettings
 import com.example.fyre.data.local.SessionDataStore
 import com.example.fyre.data.local.UserSettingsDataStore
-import com.example.fyre.data.repository.UserRepository
 import com.example.fyre.ui.auth.AuthViewModel
 import com.example.fyre.ui.auth.AuthViewModelFactory
 import com.example.fyre.ui.navigation.AppSessionViewModel
@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
 
         // Inizializza il repository con il contesto dell'applicazione
         // (applicationContext vive per tutta la durata dell'app, evita memory leak)
-        val userRepository = UserRepository(applicationContext)
+        val appGraph = AppGraphProvider.get(applicationContext)
         val sessionDataStore = SessionDataStore(applicationContext)
         val userSettingsDataStore = UserSettingsDataStore(applicationContext)
         val notificationGateway = AndroidNotificationGateway(applicationContext)
@@ -69,17 +69,13 @@ class MainActivity : ComponentActivity() {
                 // ViewModel condiviso tra tutte le schermate di autenticazione
                 // La factory permette di passare il repository al costruttore
                 val authViewModel: AuthViewModel = viewModel(
-                    factory = AuthViewModelFactory(userRepository)
+                    factory = AuthViewModelFactory(appGraph.authRepository)
                 )
                 val sessionViewModel: AppSessionViewModel = viewModel()
 
                 LaunchedEffect(Unit) {
                     val savedEmail = sessionDataStore.currentUserEmail.first()
-                    val restored = if (savedEmail.isNullOrBlank()) {
-                        false
-                    } else {
-                        authViewModel.restoreSession(savedEmail)
-                    }
+                    val restored = authViewModel.restoreSession(savedEmail)
 
                     if (restored) {
                         sessionViewModel.bootstrap(

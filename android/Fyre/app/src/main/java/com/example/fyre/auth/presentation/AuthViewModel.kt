@@ -7,6 +7,7 @@ import com.example.fyre.data.repository.UserRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runBlocking
 
 // ============================================================
 // Stato dell'autenticazione — sealed class per gestire i vari stati
@@ -109,7 +110,7 @@ class AuthViewModel(private val repository: UserRepository) : ViewModel() {
         }
 
         // Tentativo di autenticazione tramite il repository
-        val result = repository.authenticateUser(_email.value, _password.value)
+        val result = runBlocking { repository.authenticateUser(_email.value, _password.value) }
         result.fold(
             onSuccess = { user ->
                 _currentUser.value = user
@@ -153,11 +154,15 @@ class AuthViewModel(private val repository: UserRepository) : ViewModel() {
         }
 
         // Tentativo di registrazione tramite il repository
-        val result = repository.registerUser(
-            email = _email.value,
-            password = _password.value,
-            displayName = _displayName.value
-        )
+        val result = runBlocking {
+            repository.registerUser(
+                email = _email.value,
+                password = _password.value,
+                displayName = _displayName.value,
+                termsAcceptedAt = null,
+                privacyAcceptedAt = null
+            )
+        }
         result.fold(
             onSuccess = { user ->
                 _currentUser.value = user

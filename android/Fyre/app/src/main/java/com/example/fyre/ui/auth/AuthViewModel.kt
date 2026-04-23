@@ -2,6 +2,7 @@ package com.example.fyre.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import com.example.fyre.data.model.User
 import com.example.fyre.data.model.UserProfile
 import com.example.fyre.data.model.hasCompleteProfile
@@ -9,6 +10,7 @@ import com.example.fyre.data.repository.AuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 // ============================================================
 // Stato dell'autenticazione — sealed class per gestire i vari stati
@@ -136,6 +138,9 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     private val _profileError = MutableStateFlow<String?>(null)
     val profileError: StateFlow<String?> = _profileError.asStateFlow()
 
+    private val _profileSaveCompleted = MutableStateFlow(false)
+    val profileSaveCompleted: StateFlow<Boolean> = _profileSaveCompleted.asStateFlow()
+
     // --- Utente attualmente loggato ---
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
@@ -251,22 +256,21 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         }
 
         _isLoading.value = true
-
-        // Tentativo di autenticazione tramite il repository
-        val result = repository.authenticateUser(_email.value, _password.value)
-        result.fold(
-            onSuccess = { user ->
-                _currentUser.value = user
-                _authState.value = AuthState.Success(user)
-            },
-            onFailure = { error ->
-                val message = error.message ?: ValidationMessages.UnknownError
-                _globalError.value = message
-                _authState.value = AuthState.Error(message)
-            }
-        )
-
-        _isLoading.value = false
+        viewModelScope.launch {
+            val result = repository.authenticateUser(_email.value, _password.value)
+            result.fold(
+                onSuccess = { user ->
+                    _currentUser.value = user
+                    _authState.value = AuthState.Success(user)
+                },
+                onFailure = { error ->
+                    val message = error.message ?: ValidationMessages.UnknownError
+                    _globalError.value = message
+                    _authState.value = AuthState.Error(message)
+                }
+            )
+            _isLoading.value = false
+        }
     }
 
     /**
@@ -316,28 +320,28 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
         _isLoading.value = true
         val consentTimestamp = System.currentTimeMillis()
+        viewModelScope.launch {
+            val result = repository.registerUser(
+                email = _email.value,
+                password = _password.value,
+                displayName = _displayName.value,
+                termsAcceptedAt = consentTimestamp,
+                privacyAcceptedAt = consentTimestamp
+            )
+            result.fold(
+                onSuccess = { user ->
+                    _currentUser.value = user
+                    _authState.value = AuthState.Success(user)
+                },
+                onFailure = { error ->
+                    val message = error.message ?: ValidationMessages.UnknownError
+                    _globalError.value = message
+                    _authState.value = AuthState.Error(message)
+                }
+            )
 
-        // Tentativo di registrazione tramite il repository
-        val result = repository.registerUser(
-            email = _email.value,
-            password = _password.value,
-            displayName = _displayName.value,
-            termsAcceptedAt = consentTimestamp,
-            privacyAcceptedAt = consentTimestamp
-        )
-        result.fold(
-            onSuccess = { user ->
-                _currentUser.value = user
-                _authState.value = AuthState.Success(user)
-            },
-            onFailure = { error ->
-                val message = error.message ?: ValidationMessages.UnknownError
-                _globalError.value = message
-                _authState.value = AuthState.Error(message)
-            }
-        )
-
-        _isLoading.value = false
+            _isLoading.value = false
+        }
     }
 
     /**
@@ -345,6 +349,9 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
      * Resetta tutti i campi e lo stato.
      */
     fun logout() {
+        viewModelScope.launch {
+            repository.logout()
+        }
         _currentUser.value = null
         _authState.value = AuthState.Idle
         _email.value = ""
@@ -355,6 +362,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _globalError.value = null
         clearValidationErrors()
         clearProfileDraft()
+        _profileSaveCompleted.value = false
         _isLoading.value = false
     }
 
@@ -364,6 +372,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     fun resetState() {
         _authState.value = AuthState.Idle
         _globalError.value = null
+        _profileSaveCompleted.value = false
     }
 
     /**
@@ -379,6 +388,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _globalError.value = null
         clearValidationErrors()
         clearProfileDraft()
+        _profileSaveCompleted.value = false
         _isLoading.value = false
     }
 
@@ -388,27 +398,31 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
      * Ripristina una sessione locale tramite email salvata su storage.
      * @return true se il profilo viene trovato e caricato, false altrimenti.
      */
-    fun restoreSession(email: String): Boolean {
-        val user = repository.findUserByEmail(email.trim()) ?: return false
+    suspend fun restoreSession(email: String?): Boolean {
+        val result = repository.restoreSession(email)
+        val user = result.getOrElse { throwable ->
+            _globalError.value = throwable.message ?: ValidationMessages.UnknownError
+            return false
+        } ?: return false
+
         _currentUser.value = user
         _authState.value = AuthState.Idle
         _globalError.value = null
         return true
     }
 
-    fun saveProfileSetup(): Boolean {
-        if (_isLoading.value) return false
+    fun saveProfileSetup() {
+        if (_isLoading.value) return
         _profileError.value = validateProfileDraft()
         if (_profileError.value != null) {
-            return false
+            return
         }
 
         val current = _currentUser.value ?: run {
             _profileError.value = ValidationMessages.ProfileSessionUnavailable
-            return false
+            return
         }
 
-        _isLoading.value = true
         val profile = UserProfile(
             firstName = _profileFirstName.value.trim(),
             lastName = _profileLastName.value.trim(),
@@ -419,20 +433,27 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
             avatarUri = _profileAvatarUri.value
         )
 
-        val result = repository.updateUserProfile(current.email, profile)
-        _isLoading.value = false
+        _isLoading.value = true
+        viewModelScope.launch {
+            val result = repository.updateUserProfile(current.email, profile)
+            _isLoading.value = false
 
-        return result.fold(
-            onSuccess = { updatedUser ->
-                _currentUser.value = updatedUser
-                _profileError.value = null
-                true
-            },
-            onFailure = { throwable ->
-                _profileError.value = throwable.message ?: ValidationMessages.ProfileSaveError
-                false
-            }
-        )
+            result.fold(
+                onSuccess = { updatedUser ->
+                    _currentUser.value = updatedUser
+                    _profileError.value = null
+                    _profileSaveCompleted.value = true
+                },
+                onFailure = { throwable ->
+                    _profileError.value = throwable.message ?: ValidationMessages.ProfileSaveError
+                    _profileSaveCompleted.value = false
+                }
+            )
+        }
+    }
+
+    fun consumeProfileSaveCompleted() {
+        _profileSaveCompleted.value = false
     }
 
     // ============================================================
@@ -486,6 +507,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _profileBio.value = ""
         _profileAvatarUri.value = null
         _profileError.value = null
+        _profileSaveCompleted.value = false
     }
 
     private fun validateProfileDraft(): String? {
