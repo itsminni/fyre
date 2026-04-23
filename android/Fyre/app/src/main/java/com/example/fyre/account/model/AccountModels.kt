@@ -27,9 +27,15 @@ data class DiscoveryPreferences(
 
 data class NotificationSettings(
     val pushEnabled: Boolean = true,
+    val matchNotifications: Boolean = true,
     val messageNotifications: Boolean = true,
     val eventReminders: Boolean = true,
     val marketingUpdates: Boolean = false
+)
+
+data class ChatCustomizationSettings(
+    val compactBubbles: Boolean = false,
+    val showTimestamps: Boolean = true
 )
 
 data class SecuritySettings(
@@ -71,6 +77,7 @@ data class AccountUiState(
     val selectedSection: AccountSection? = null,
     val profileDraft: ProfileDraft = ProfileDraft(),
     val discoveryPreferences: DiscoveryPreferences = DiscoveryPreferences(),
+    val chatCustomizationSettings: ChatCustomizationSettings = ChatCustomizationSettings(),
     val notificationSettings: NotificationSettings = NotificationSettings(),
     val securitySettings: SecuritySettings = SecuritySettings(),
     val appearanceSettings: AppearanceSettings = AppearanceSettings(),

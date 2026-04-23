@@ -2,6 +2,7 @@ package com.example.fyre.account.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import com.example.fyre.account.model.AccountSection
 import com.example.fyre.account.model.AccountUiState
 import com.example.fyre.account.model.AppearanceSettings
@@ -12,13 +13,17 @@ import com.example.fyre.account.model.NotificationSettings
 import com.example.fyre.account.model.ProfileDraft
 import com.example.fyre.account.model.SecuritySettings
 import com.example.fyre.account.model.ThemeMode
+import com.example.fyre.data.local.UserSettingsDataStore
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class AccountViewModel(
     initialEmail: String?,
-    initialDisplayName: String?
+    initialDisplayName: String?,
+    private val userSettingsDataStore: UserSettingsDataStore? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -31,6 +36,25 @@ class AccountViewModel(
     )
     val uiState: StateFlow<AccountUiState> = _uiState.asStateFlow()
 
+    init {
+        userSettingsDataStore?.let { dataStore ->
+            viewModelScope.launch {
+                dataStore.settings.collect { persisted ->
+                    val current = _uiState.value
+                    _uiState.value = current.copy(
+                        discoveryPreferences = persisted.discoveryPreferences,
+                        chatCustomizationSettings = persisted.chatCustomizationSettings,
+                        notificationSettings = persisted.notificationSettings,
+                        appearanceSettings = current.appearanceSettings.copy(
+                            themeMode = persisted.themeMode,
+                            dynamicColor = persisted.dynamicColor
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     fun openSection(section: AccountSection) {
         _uiState.value = _uiState.value.copy(selectedSection = section, localStatusMessage = null)
     }
@@ -40,7 +64,12 @@ class AccountViewModel(
     }
 
     fun updateProfile(update: ProfileDraft) {
+        val computedDisplayName = listOf(update.firstName.trim(), update.lastName.trim())
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+
         _uiState.value = _uiState.value.copy(
+            displayName = computedDisplayName.ifBlank { _uiState.value.displayName },
             profileDraft = update,
             localStatusMessage = "Profilo aggiornato localmente"
         )
@@ -51,6 +80,11 @@ class AccountViewModel(
             discoveryPreferences = update,
             localStatusMessage = "Preferenze discovery salvate in locale"
         )
+        userSettingsDataStore?.let { dataStore ->
+            viewModelScope.launch {
+                dataStore.updateDiscoveryPreferences(update)
+            }
+        }
     }
 
     fun updateNotificationSettings(update: NotificationSettings) {
@@ -58,6 +92,11 @@ class AccountViewModel(
             notificationSettings = update,
             localStatusMessage = "Notifiche aggiornate in locale"
         )
+        userSettingsDataStore?.let { dataStore ->
+            viewModelScope.launch {
+                dataStore.updateNotificationSettings(update)
+            }
+        }
     }
 
     fun updateSecuritySettings(update: SecuritySettings) {
@@ -72,6 +111,14 @@ class AccountViewModel(
             appearanceSettings = update,
             localStatusMessage = "Aspetto aggiornato in locale"
         )
+        userSettingsDataStore?.let { dataStore ->
+            viewModelScope.launch {
+                dataStore.updateTheme(
+                    mode = update.themeMode,
+                    dynamicColor = update.dynamicColor
+                )
+            }
+        }
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -124,14 +171,16 @@ class AccountViewModel(
 
 class AccountViewModelFactory(
     private val initialEmail: String?,
-    private val initialDisplayName: String?
+    private val initialDisplayName: String?,
+    private val userSettingsDataStore: UserSettingsDataStore? = null
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(AccountViewModel::class.java)) {
             return AccountViewModel(
                 initialEmail = initialEmail,
-                initialDisplayName = initialDisplayName
+                initialDisplayName = initialDisplayName,
+                userSettingsDataStore = userSettingsDataStore
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

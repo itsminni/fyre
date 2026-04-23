@@ -25,8 +25,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -34,6 +36,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.fyre.account.model.AccountSection
 import com.example.fyre.account.model.AccountUiState
 import com.example.fyre.account.model.ThemeMode
+import com.example.fyre.data.local.UserSettingsDataStore
 
 @Composable
 fun AccountScreen(
@@ -41,10 +44,17 @@ fun AccountScreen(
     currentUserEmail: String? = null,
     currentUserDisplayName: String? = null
 ) {
+    val context = LocalContext.current
+    val userSettingsDataStore = remember(context.applicationContext) {
+        UserSettingsDataStore(context.applicationContext)
+    }
+
     val vm: AccountViewModel = viewModel(
+        key = "account_${currentUserEmail.orEmpty()}",
         factory = AccountViewModelFactory(
             initialEmail = currentUserEmail,
-            initialDisplayName = currentUserDisplayName
+            initialDisplayName = currentUserDisplayName,
+            userSettingsDataStore = userSettingsDataStore
         )
     )
     val state by vm.uiState.collectAsState()
@@ -260,6 +270,11 @@ private fun NotificationsSection(
             label = "Messaggi",
             checked = notifications.messageNotifications,
             onCheckedChange = { onUpdate(notifications.copy(messageNotifications = it)) }
+        )
+        SettingSwitchRow(
+            label = "Nuovi match",
+            checked = notifications.matchNotifications,
+            onCheckedChange = { onUpdate(notifications.copy(matchNotifications = it)) }
         )
         SettingSwitchRow(
             label = "Promemoria eventi",
