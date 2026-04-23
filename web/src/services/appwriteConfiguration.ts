@@ -12,6 +12,7 @@ export interface AppwriteConfiguration {
   messagesTableId: string;
   swipesTableId: string | null;
   matchesTableId: string | null;
+  relationshipsTableId: string | null;
   registerForEventFunctionId: string;
   cancelEventRegistrationFunctionId: string;
   eventAdminFunctionId: string | null;
@@ -19,6 +20,7 @@ export interface AppwriteConfiguration {
   sendMessageFunctionId: string;
   recordSwipeFunctionId: string | null;
   discoverProfilesFunctionId: string | null;
+  manageRelationshipFunctionId: string | null;
 }
 
 function normalizedValue(value: string | undefined): string | null {
@@ -101,12 +103,14 @@ export function loadAppwriteConfiguration(): AppwriteConfiguration | null {
     messagesTableId,
     swipesTableId: optionalEnvValue('VITE_APPWRITE_SWIPES_TABLE_ID'),
     matchesTableId: optionalEnvValue('VITE_APPWRITE_MATCHES_TABLE_ID'),
+    relationshipsTableId: optionalEnvValue('VITE_APPWRITE_RELATIONSHIPS_TABLE_ID'),
     registerForEventFunctionId,
     cancelEventRegistrationFunctionId,
     eventAdminFunctionId: optionalEnvValue('VITE_APPWRITE_EVENT_ADMIN_FUNCTION_ID'),
     createOrGetThreadFunctionId,
     sendMessageFunctionId,
     recordSwipeFunctionId: optionalEnvValue('VITE_APPWRITE_RECORD_SWIPE_FUNCTION_ID'),
-    discoverProfilesFunctionId: optionalEnvValue('VITE_APPWRITE_DISCOVER_PROFILES_FUNCTION_ID')
+    discoverProfilesFunctionId: optionalEnvValue('VITE_APPWRITE_DISCOVER_PROFILES_FUNCTION_ID'),
+    manageRelationshipFunctionId: optionalEnvValue('VITE_APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID')
   };
 }
