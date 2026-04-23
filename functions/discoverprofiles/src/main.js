@@ -1,3 +1,8 @@
+import {
+  makeDiscoverProfileContract,
+  seededIntegerFromString
+} from "../../../shared/contracts/index.js";
+
 const MAX_RESULTS = 40;
 const DEFAULT_MIN_AGE = 18;
 const DEFAULT_MAX_AGE = 35;
@@ -9,18 +14,7 @@ export default async ({ req, res, error }) => {
     const config = getConfig(req);
     const body = parseBody(req);
     const currentUserId = resolveCurrentUserId(req, body);
-
-    const [currentProfile, profiles, swipes, matches, relationships] = await Promise.all([
-      fetchProfile(config, currentUserId),
-      listRows(config, config.profilesTableId, []),
-      listRows(config, config.swipesTableId, [
-        equal("fromUserId", [currentUserId])
-      ]),
-      listRows(config, config.matchesTableId, []),
-      config.relationshipsTableId
-        ? listRows(config, config.relationshipsTableId, [])
-        : Promise.resolve([])
-    ]);
+    const currentProfile = await fetchProfile(config, currentUserId);
 
     if (!currentProfile) {
       console.log("RESULT_JSON:{\"profiles\":[]}");
@@ -28,6 +22,42 @@ export default async ({ req, res, error }) => {
     }
 
     const currentUserContext = makeUserContext(currentProfile);
+    const profileQueries =
+      currentUserContext.preferredGenders.length > 0 && currentUserContext.preferredGenders.length < 4
+        ? [equal("gender", currentUserContext.preferredGenders)]
+        : [];
+
+    const [
+      profiles,
+      swipes,
+      matchesByUserA,
+      matchesByUserB,
+      relationshipsByUserA,
+      relationshipsByUserB
+    ] = await Promise.all([
+      listAllRows(config, config.profilesTableId, profileQueries),
+      listAllRows(config, config.swipesTableId, [
+        equal("fromUserId", [currentUserId])
+      ]),
+      listAllRows(config, config.matchesTableId, [
+        equal("userAId", [currentUserId])
+      ]),
+      listAllRows(config, config.matchesTableId, [
+        equal("userBId", [currentUserId])
+      ]),
+      config.relationshipsTableId
+        ? listAllRows(config, config.relationshipsTableId, [
+            equal("userAId", [currentUserId])
+          ])
+        : Promise.resolve([]),
+      config.relationshipsTableId
+        ? listAllRows(config, config.relationshipsTableId, [
+            equal("userBId", [currentUserId])
+          ])
+        : Promise.resolve([])
+    ]);
+    const matches = dedupeRowsById([...matchesByUserA, ...matchesByUserB]);
+    const relationships = dedupeRowsById([...relationshipsByUserA, ...relationshipsByUserB]);
     const excludedUserIds = buildExcludedUserIds(currentUserId, swipes, matches, relationships);
 
     const discoverProfiles = profiles
@@ -61,7 +91,8 @@ export default async ({ req, res, error }) => {
         distanceKm,
         score,
         relationshipStateForPair(currentUserId, asString(row.userId), relationships)
-      ));
+      ))
+      .filter(Boolean);
 
     console.log(`RESULT_JSON:${JSON.stringify({ profiles: discoverProfiles })}`);
     return res.json({ profiles: discoverProfiles }, 200);
@@ -171,24 +202,37 @@ function candidateScore(row, candidate, currentUser, distanceKm) {
   const completenessComponent = profileCompletenessScore(row);
   const activityBoost = isRecentlyActive(row.presenceUpdatedAt) ? 4 : 0;
   const deterministicScore = interestsScore + distanceComponent + completenessComponent + activityBoost;
-  const randomnessBoost = deterministicScore * (0.05 + (Math.random() * 0.05));
+  const boostMin = Math.max(1, Math.round(deterministicScore * 0.05));
+  const boostMax = Math.max(boostMin, Math.round(deterministicScore * 0.1));
+  const rankingBoost = seededIntegerFromString(
+    `${asString(row.userId) ?? "candidate"}:${currentUser.gender ?? "unknown"}:${currentUser.city ?? "unknown"}`,
+    boostMin,
+    boostMax
+  );
 
-  return Math.max(1, Math.round(deterministicScore + randomnessBoost));
+  return Math.max(1, Math.round(deterministicScore + rankingBoost));
 }
 
 function projectDiscoverProfile(config, row, candidate, currentUser, distanceKm, score, relationshipState) {
   const commonInterests = candidate.interests.filter((interest) => currentUser.interests.includes(interest));
+  const photos = discoverPhotoURLs(config, row);
 
-  return {
+  return makeDiscoverProfileContract({
     id: row.userId,
     name: discoverName(row),
     age: candidate.age,
-    photos: discoverPhotoURLs(config, row),
+    gender: candidate.gender,
+    city: asString(row.city),
+    intent: candidate.intent,
+    bio: discoverBio(row, commonInterests),
+    imageUrl: photos[0] ?? null,
+    photos,
     compatibilityScore: Math.min(99, Math.max(42, score)),
+    distanceKm: roundedDistance(distanceKm),
     distance: roundedDistance(distanceKm),
     commonInterests: commonInterests.slice(0, MAX_SHARED_INTERESTS),
     relationshipState
-  };
+  });
 }
 
 function makeUserContext(row) {
@@ -444,6 +488,19 @@ function roundedDistance(distanceKm) {
   return Math.max(1, Math.round(distanceKm));
 }
 
+function discoverBio(row, commonInterests) {
+  const explicitBio = asString(row.bio);
+  if (explicitBio) {
+    return explicitBio;
+  }
+
+  if (commonInterests.length > 0) {
+    return `Interessi in comune: ${commonInterests.slice(0, 2).join(", ")}`;
+  }
+
+  return "Profilo Fyre";
+}
+
 function toRadians(value) {
   return value * (Math.PI / 180);
 }
@@ -548,6 +605,26 @@ async function listRows(config, tableId, queries) {
   return Array.isArray(payload.rows) ? payload.rows : [];
 }
 
+async function listAllRows(config, tableId, baseQueries, pageSize = 100) {
+  const rows = [];
+  let page = 0;
+
+  while (true) {
+    const batch = await listRows(config, tableId, [
+      ...baseQueries,
+      limit(pageSize),
+      offset(page * pageSize)
+    ]);
+    rows.push(...batch);
+
+    if (batch.length < pageSize) {
+      return rows;
+    }
+
+    page += 1;
+  }
+}
+
 async function request(config, method, path, body, queries = []) {
   const url = new URL(`${config.endpoint}${path}`);
   for (const query of queries) {
@@ -579,6 +656,28 @@ function equal(field, values) {
 
 function limit(value) {
   return JSON.stringify({ method: "limit", values: [value] });
+}
+
+function offset(value) {
+  return JSON.stringify({ method: "offset", values: [value] });
+}
+
+export function dedupeRowsById(rows) {
+  const seenIds = new Set();
+  const deduped = [];
+
+  for (const row of rows) {
+    const rowId = asString(row?.$id)
+      ?? `${asString(row?.userAId) ?? ""}:${asString(row?.userBId) ?? ""}:${asString(row?.matchKey) ?? ""}:${asString(row?.pairKey) ?? ""}`;
+    if (seenIds.has(rowId)) {
+      continue;
+    }
+
+    seenIds.add(rowId);
+    deduped.push(row);
+  }
+
+  return deduped;
 }
 
 function asString(value) {
