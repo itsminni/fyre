@@ -52,6 +52,34 @@ export function createDefaultMainEventInfo(): MainEventInfo {
   };
 }
 
+function makeProfileArtwork(
+  label: string,
+  title: string,
+  subtitle: string,
+  startColor: string,
+  endColor: string
+): string {
+  const initials = label.slice(0, 1).toUpperCase();
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 920">
+      <defs>
+        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${startColor}" />
+          <stop offset="100%" stop-color="${endColor}" />
+        </linearGradient>
+      </defs>
+      <rect width="720" height="920" fill="url(#g)" />
+      <circle cx="590" cy="190" r="150" fill="rgba(255,255,255,0.12)" />
+      <circle cx="150" cy="760" r="180" fill="rgba(255,255,255,0.10)" />
+      <text x="72" y="126" font-family="Arial, sans-serif" font-size="42" fill="rgba(255,255,255,0.78)">${title}</text>
+      <text x="72" y="180" font-family="Arial, sans-serif" font-size="22" fill="rgba(255,255,255,0.72)">${subtitle}</text>
+      <text x="78" y="764" font-family="Arial, sans-serif" font-size="300" font-weight="700" fill="rgba(255,255,255,0.22)">${initials}</text>
+    </svg>
+  `.trim();
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
 export const baseDiscoverProfiles: DiscoverProfile[] = [
   {
     id: crypto.randomUUID(),
@@ -62,7 +90,14 @@ export const baseDiscoverProfiles: DiscoverProfile[] = [
     distanceKm: 4,
     intent: 'relationship',
     bio: 'Concerti, caffe e weekend improvvisati.',
-    imageUrl: '/images/profile-giulia.jpg'
+    imageUrl: makeProfileArtwork('Giulia', 'Live music', 'Caffe and city lights', '#ff8a5c', '#9b2f7f'),
+    photos: [
+      makeProfileArtwork('Giulia', 'Live music', 'Caffe and city lights', '#ff8a5c', '#9b2f7f'),
+      makeProfileArtwork('Giulia', 'Golden hour', 'Aperitivo energy', '#ffb86f', '#f43f5e')
+    ],
+    compatibilityScore: 93,
+    commonInterests: ['Concerti', 'Weekend fuori porta', 'Aperitivi'],
+    relationshipState: 'none'
   },
   {
     id: crypto.randomUUID(),
@@ -73,7 +108,14 @@ export const baseDiscoverProfiles: DiscoverProfile[] = [
     distanceKm: 19,
     intent: 'friendship',
     bio: 'Sport, viaggi in moto e cocktail bar.',
-    imageUrl: '/images/profile-marco.jpg'
+    imageUrl: makeProfileArtwork('Marco', 'Road trip', 'Moto and cocktail bar', '#5b8cff', '#14213d'),
+    photos: [
+      makeProfileArtwork('Marco', 'Road trip', 'Moto and cocktail bar', '#5b8cff', '#14213d'),
+      makeProfileArtwork('Marco', 'Training day', 'Sunrise run', '#3bb2b8', '#1d3557')
+    ],
+    compatibilityScore: 78,
+    commonInterests: ['Sport', 'Viaggi', 'Cocktail bar'],
+    relationshipState: 'none'
   },
   {
     id: crypto.randomUUID(),
@@ -84,7 +126,14 @@ export const baseDiscoverProfiles: DiscoverProfile[] = [
     distanceKm: 27,
     intent: 'casual',
     bio: 'Cinema d autore, podcast e passeggiate serali.',
-    imageUrl: '/images/profile-elena.jpg'
+    imageUrl: makeProfileArtwork('Elena', 'Cinema night', 'Podcast and moonwalks', '#9c89ff', '#312244'),
+    photos: [
+      makeProfileArtwork('Elena', 'Cinema night', 'Podcast and moonwalks', '#9c89ff', '#312244'),
+      makeProfileArtwork('Elena', 'Late talks', 'Books and city corners', '#d16ba5', '#5f0f40')
+    ],
+    compatibilityScore: 88,
+    commonInterests: ['Cinema', 'Podcast', 'Passeggiate'],
+    relationshipState: 'none'
   },
   {
     id: crypto.randomUUID(),
@@ -95,7 +144,14 @@ export const baseDiscoverProfiles: DiscoverProfile[] = [
     distanceKm: 53,
     intent: 'networking',
     bio: 'Vinili, aperitivi e road trip last minute.',
-    imageUrl: '/images/profile-luca.jpg'
+    imageUrl: makeProfileArtwork('Luca', 'Vinyl session', 'Road trip planner', '#ffb703', '#9b2226'),
+    photos: [
+      makeProfileArtwork('Luca', 'Vinyl session', 'Road trip planner', '#ffb703', '#9b2226'),
+      makeProfileArtwork('Luca', 'Afterwork', 'Jazz and orange lights', '#fb8500', '#6d597a')
+    ],
+    compatibilityScore: 74,
+    commonInterests: ['Aperitivi', 'Road trip'],
+    relationshipState: 'none'
   },
   {
     id: crypto.randomUUID(),
@@ -106,7 +162,14 @@ export const baseDiscoverProfiles: DiscoverProfile[] = [
     distanceKm: 69,
     intent: 'friendship',
     bio: 'Arte contemporanea, playlist curate e talk sinceri.',
-    imageUrl: '/images/profile-sam.jpg'
+    imageUrl: makeProfileArtwork('Sam', 'Gallery day', 'Playlists and honest talks', '#6dd3ce', '#3a506b'),
+    photos: [
+      makeProfileArtwork('Sam', 'Gallery day', 'Playlists and honest talks', '#6dd3ce', '#3a506b'),
+      makeProfileArtwork('Sam', 'Studio session', 'Moodboard and coffee', '#84dcc6', '#2d3142')
+    ],
+    compatibilityScore: 84,
+    commonInterests: ['Arte', 'Playlist', 'Talk sinceri'],
+    relationshipState: 'none'
   }
 ];
 
