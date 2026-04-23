@@ -90,11 +90,11 @@ export function EventDetailPage(): JSX.Element {
       ? 'Esci dalla waiting list'
       : 'Partecipa all evento';
 
-  function onPrimaryAction() {
+  async function onPrimaryAction() {
     const result =
       mainEventFlags.isRegistered || mainEventFlags.isWaiting
-        ? cancelCurrentUserMainEventRegistration()
-        : registerCurrentUserForMainEvent();
+        ? await cancelCurrentUserMainEventRegistration()
+        : await registerCurrentUserForMainEvent();
 
     setFeedback({
       text: result.message,
@@ -407,7 +407,7 @@ export function EventDetailPage(): JSX.Element {
         <Button
           variant={mainEventFlags.isRegistered || mainEventFlags.isWaiting ? 'danger' : 'primary'}
           fullWidth
-          onClick={onPrimaryAction}
+          onClick={() => void onPrimaryAction()}
         >
           {actionLabel}
         </Button>

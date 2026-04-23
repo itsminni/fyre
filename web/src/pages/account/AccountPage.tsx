@@ -236,7 +236,7 @@ export function AccountPage(): JSX.Element {
 
     try {
       const imageData = await readFileAsDataUrl(file);
-      const error = updateProfileImage(imageData);
+      const error = await updateProfileImage(imageData);
       setProfileFeedback(
         error
           ? { isError: true, message: error }
@@ -249,7 +249,7 @@ export function AccountPage(): JSX.Element {
     }
   }
 
-  function savePreferences() {
+  async function savePreferences() {
     setProfileFeedback(null);
     if (!currentUser) {
       return;
@@ -266,7 +266,7 @@ export function AccountPage(): JSX.Element {
       }
     }
 
-    const error = updateAccountPreferences({
+    const error = await updateAccountPreferences({
       orientation,
       showMe,
       preferredGenders,

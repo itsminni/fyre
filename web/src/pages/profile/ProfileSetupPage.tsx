@@ -148,7 +148,7 @@ export function ProfileSetupPage(): JSX.Element {
 
     try {
       const imageData = await readFileAsDataUrl(file);
-      const error = updateProfileImage(imageData);
+      const error = await updateProfileImage(imageData);
       if (error) {
         setFeedbackMessage(error);
       }
@@ -159,7 +159,7 @@ export function ProfileSetupPage(): JSX.Element {
     }
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFeedbackMessage(null);
 
@@ -174,7 +174,7 @@ export function ProfileSetupPage(): JSX.Element {
 
     const resolvedCity = findCityByLabel(city) ?? searchCities(city)[0] ?? null;
 
-    const error = updateProfile({
+    const error = await updateProfile({
       firstName,
       lastName,
       city: resolvedCity?.city ?? city,
