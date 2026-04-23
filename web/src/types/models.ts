@@ -64,11 +64,11 @@ export interface DiscoverProfile {
   gender?: UserGender;
   city?: string;
   distanceKm?: number;
+  compatibilityScore?: number;
   intent?: MatchIntent;
   bio: string;
   imageUrl?: string;
   photos?: string[];
-  compatibilityScore?: number;
   commonInterests?: string[];
   relationshipState?: RelationshipState;
 }
@@ -308,6 +308,104 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+export function isUserGender(value: unknown): value is UserGender {
+  return value === 'male' || value === 'female' || value === 'nonBinary' || value === 'other';
+}
+
+export function preferredGendersFromShowMe(
+  showMe: UserShowMe,
+  preferredGenders?: UserGender[]
+): UserGender[] {
+  const sanitizedPreferredGenders = Array.isArray(preferredGenders)
+    ? preferredGenders.filter((gender): gender is UserGender => isUserGender(gender))
+    : [];
+
+  if (sanitizedPreferredGenders.length > 0) {
+    return sanitizedPreferredGenders;
+  }
+
+  switch (showMe) {
+    case 'men':
+      return ['male'];
+    case 'women':
+      return ['female'];
+    default:
+      return [...GENDER_OPTIONS];
+  }
+}
+
+export function showMeFromPreferredGenders(preferredGenders?: UserGender[]): UserShowMe {
+  const sanitizedPreferredGenders = Array.isArray(preferredGenders)
+    ? preferredGenders.filter((gender): gender is UserGender => isUserGender(gender))
+    : [];
+
+  if (sanitizedPreferredGenders.length === 1 && sanitizedPreferredGenders[0] === 'male') {
+    return 'men';
+  }
+
+  if (sanitizedPreferredGenders.length === 1 && sanitizedPreferredGenders[0] === 'female') {
+    return 'women';
+  }
+
+  return 'everyone';
+}
+
+export function createEmptyUser(email: string, password: string): User {
+  return {
+    email: normalizeEmail(email),
+    password,
+    showMe: 'everyone',
+    preferredGenders: preferredGendersFromShowMe('everyone')
+  };
+}
+
+export function normalizeUser(user: Pick<User, 'email' | 'password'> & Partial<User>): User {
+  const preferredGenders = preferredGendersFromShowMe(
+    user.showMe ?? showMeFromPreferredGenders(user.preferredGenders),
+    user.preferredGenders
+  );
+  const showMe = showMeFromPreferredGenders(preferredGenders);
+  const instagramTag = trimOptionalString(user.instagramTag ?? user.favoriteMovie);
+  const spotifyTag = trimOptionalString(user.spotifyTag ?? user.favoriteSong);
+  const favoriteMovie = trimOptionalString(user.favoriteMovie ?? instagramTag);
+  const favoriteSong = trimOptionalString(user.favoriteSong ?? spotifyTag);
+  const cityLat = pickNumber(user.cityLat, user.latitude);
+  const cityLng = pickNumber(user.cityLng, user.longitude);
+  const ageRangeMin = pickInteger(user.ageRangeMin, user.minPreferredAge);
+  const ageRangeMax = pickInteger(user.ageRangeMax, user.maxPreferredAge);
+
+  return {
+    ...user,
+    email: normalizeEmail(user.email),
+    password: user.password,
+    firstName: trimOptionalString(user.firstName),
+    lastName: trimOptionalString(user.lastName),
+    city: trimOptionalString(user.city),
+    birthDate: trimOptionalString(user.birthDate),
+    bio: trimOptionalString(user.bio),
+    hobbies: trimOptionalString(user.hobbies),
+    passions: trimOptionalString(user.passions),
+    lookingFor: trimOptionalString(user.lookingFor),
+    instagram: trimOptionalString(user.instagram),
+    instagramTag,
+    telegram: trimOptionalString(user.telegram),
+    spotifyTag,
+    website: trimOptionalString(user.website),
+    favoriteSong,
+    favoriteMovie,
+    showMe,
+    preferredGenders,
+    cityLat,
+    cityLng,
+    latitude: pickNumber(user.latitude, cityLat),
+    longitude: pickNumber(user.longitude, cityLng),
+    ageRangeMin,
+    ageRangeMax,
+    minPreferredAge: ageRangeMin,
+    maxPreferredAge: ageRangeMax
+  };
+}
+
 export function calculateAge(birthDate: string): number {
   if (!birthDate) {
     return 0;
@@ -399,4 +497,24 @@ export function inferShowMeFromPreferredGenders(
   }
 
   return 'everyone';
+}
+
+function trimOptionalString(value: string | null | undefined): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function pickNumber(...values: Array<number | null | undefined>): number | undefined {
+  return values.find((value): value is number => typeof value === 'number' && Number.isFinite(value));
+}
+
+function pickInteger(...values: Array<number | null | undefined>): number | undefined {
+  const value = values.find(
+    (candidate): candidate is number => typeof candidate === 'number' && Number.isFinite(candidate)
+  );
+  return typeof value === 'number' ? Math.round(value) : undefined;
 }
