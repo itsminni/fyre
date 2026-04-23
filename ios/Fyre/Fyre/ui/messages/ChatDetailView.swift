@@ -2361,14 +2361,34 @@ struct ChatDetailView: View {
         do {
             guard let dto = try await services.backend.fetchThread(threadId: thread.remoteId) else {
                 await MainActor.run {
-                    NotificationCenter.default.post(name: .fyreThreadRemoved, object: thread.remoteId)
-                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
-                    dismiss()
+                    if canInteractWithThread {
+                        let snapshot = currentThreadSnapshot
+                        RecentChatThreadStore.upsert(snapshot)
+                        NotificationCenter.default.post(name: .fyreThreadsDidChange, object: snapshot)
+                    } else {
+                        RecentChatThreadStore.remove(remoteId: thread.remoteId)
+                        NotificationCenter.default.post(name: .fyreThreadRemoved, object: thread.remoteId)
+                        NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                        dismiss()
+                    }
                 }
                 return
             }
 
             let refreshedMessages = dto.messages.map(ChatMessage.init(dto:))
+            let refreshedThread = ChatThread(
+                id: dto.id,
+                remoteId: dto.remoteId,
+                name: dto.name,
+                avatar: dto.avatar,
+                isOnline: dto.isOnline,
+                lastSeenAt: dto.lastSeenAt,
+                currentUserReadAt: dto.currentUserReadAt,
+                otherParticipantReadAt: dto.otherParticipantReadAt,
+                participantUserIds: dto.participantUserIds,
+                relationshipState: dto.relationshipState,
+                messages: refreshedMessages
+            )
 
             await MainActor.run {
                 messages = refreshedMessages
@@ -2384,6 +2404,7 @@ struct ChatDetailView: View {
                 threadIsOnline = dto.isOnline
                 otherParticipantReadAt = dto.otherParticipantReadAt
                 relationshipState = dto.relationshipState
+                RecentChatThreadStore.upsert(refreshedThread)
             }
             await services.backend.markThreadRead(threadId: thread.remoteId)
         } catch {
@@ -2391,6 +2412,22 @@ struct ChatDetailView: View {
             debugPrint("Chat refresh failed for \(thread.remoteId): \(error.localizedDescription)")
 #endif
         }
+    }
+
+    private var currentThreadSnapshot: ChatThread {
+        ChatThread(
+            id: thread.id,
+            remoteId: thread.remoteId,
+            name: threadName,
+            avatar: threadAvatar,
+            isOnline: threadIsOnline,
+            lastSeenAt: thread.lastSeenAt,
+            currentUserReadAt: thread.currentUserReadAt,
+            otherParticipantReadAt: otherParticipantReadAt,
+            participantUserIds: thread.participantUserIds,
+            relationshipState: relationshipState,
+            messages: messages
+        )
     }
 
     private func startRealtime() {

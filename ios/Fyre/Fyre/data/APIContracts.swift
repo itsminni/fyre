@@ -25,6 +25,11 @@ struct DiscoverProfileDTO: Identifiable, Sendable {
     let compatibilityScore: Int
     let distance: Int?
     let commonInterests: [String]
+    let bio: String
+    let city: String?
+    let intent: String?
+    let smokes: Bool?
+    let drinks: Bool?
     let relationshipState: RelationshipStateDTO
 }
 

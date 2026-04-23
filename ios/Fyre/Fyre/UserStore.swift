@@ -156,33 +156,18 @@ struct User: Codable, Sendable {
     }
 
     nonisolated var resolvedPhotoFileIds: [String] {
-        let explicit = photoFileIds ?? []
-        if !explicit.isEmpty {
-            return explicit
-        }
-
-        guard let avatarFileId, !avatarFileId.isEmpty else {
-            return []
-        }
-
-        return [avatarFileId]
+        photoFileIds?.filter { !$0.isEmpty } ?? []
     }
 
     nonisolated var resolvedProfilePhotoDataItems: [Data] {
-        let explicit = profilePhotoDataItems?.filter { !$0.isEmpty } ?? []
-        if !explicit.isEmpty {
-            return explicit
-        }
-
-        guard let profileImageData, !profileImageData.isEmpty else {
-            return []
-        }
-
-        return [profileImageData]
+        profilePhotoDataItems?.filter { !$0.isEmpty } ?? []
     }
 
     nonisolated var primaryProfileImageData: Data? {
-        resolvedProfilePhotoDataItems.first ?? profileImageData
+        guard let profileImageData, !profileImageData.isEmpty else {
+            return nil
+        }
+        return profileImageData
     }
 
     nonisolated var isProfileComplete: Bool {
@@ -779,9 +764,43 @@ final class UserStore: @unchecked Sendable {
 
     @MainActor
     func updateProfileImage(_ imageData: Data?) async -> String? {
-        let trailingImages = Array(currentUser?.resolvedProfilePhotoDataItems.dropFirst() ?? [])
-        let nextImages = ([imageData].compactMap { $0 }) + trailingImages
-        return await updateProfileImages(nextImages)
+        guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
+        let sanitizedImage = imageData.flatMap { $0.isEmpty ? nil : $0 }
+
+        if Self.shouldUseAppwrite {
+            if !user.isProfileComplete {
+                user.profileImageData = sanitizedImage
+                if sanitizedImage == nil {
+                    user.avatarFileId = nil
+                }
+                currentUser = user
+                return nil
+            }
+
+            guard let appwriteService else {
+                return authConfigurationErrorMessage()
+            }
+
+            do {
+                let updatedUser = try await appwriteService.updateProfileImage(sanitizedImage, for: user)
+                currentUser = updatedUser
+                return nil
+            } catch {
+                return profileErrorMessage(for: error)
+            }
+        }
+
+        var users = UserStore.loadUsers()
+        guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+            return L10n.tr("profile.error.noCurrentUser")
+        }
+
+        user.profileImageData = sanitizedImage
+        user.avatarFileId = nil
+        users[userIndex] = user
+        UserStore.saveUsers(users)
+        currentUser = user
+        return nil
     }
 
     @MainActor
@@ -795,9 +814,7 @@ final class UserStore: @unchecked Sendable {
         if Self.shouldUseAppwrite {
             if !user.isProfileComplete {
                 user.profilePhotoDataItems = sanitizedImages
-                user.profileImageData = sanitizedImages.first
                 if sanitizedImages.isEmpty {
-                    user.avatarFileId = nil
                     user.photoFileIds = []
                 }
                 currentUser = user
@@ -823,8 +840,6 @@ final class UserStore: @unchecked Sendable {
         }
 
         user.profilePhotoDataItems = sanitizedImages
-        user.profileImageData = sanitizedImages.first
-        user.avatarFileId = nil
         user.photoFileIds = []
         users[userIndex] = user
         UserStore.saveUsers(users)

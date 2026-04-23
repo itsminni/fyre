@@ -144,12 +144,19 @@ actor AppwriteService {
         updatedUser.appwriteUserId = accountId
 
         var uploadedFileIds: [String] = []
+        if let avatarData = updatedUser.primaryProfileImageData,
+           updatedUser.avatarFileId?.isEmpty ?? true {
+            let avatarFileIds = try await uploadProfilePhotos([avatarData])
+            uploadedFileIds.append(contentsOf: avatarFileIds)
+            updatedUser.avatarFileId = avatarFileIds.first
+            updatedUser.profileImageData = avatarData
+        }
+
         if !updatedUser.resolvedProfilePhotoDataItems.isEmpty,
            updatedUser.resolvedPhotoFileIds.isEmpty {
-            uploadedFileIds = try await uploadProfilePhotos(updatedUser.resolvedProfilePhotoDataItems)
-            updatedUser.photoFileIds = uploadedFileIds
-            updatedUser.avatarFileId = uploadedFileIds.first
-            updatedUser.profileImageData = updatedUser.resolvedProfilePhotoDataItems.first
+            let galleryFileIds = try await uploadProfilePhotos(updatedUser.resolvedProfilePhotoDataItems)
+            uploadedFileIds.append(contentsOf: galleryFileIds)
+            updatedUser.photoFileIds = galleryFileIds
         }
 
         do {
@@ -163,9 +170,38 @@ actor AppwriteService {
     }
 
     func updateProfileImage(_ imageData: Data?, for user: User) async throws -> User {
-        let trailingImages = Array(user.resolvedProfilePhotoDataItems.dropFirst())
-        let nextImages = ([imageData].compactMap { $0 }) + trailingImages
-        return try await updateProfileImages(nextImages, for: user)
+        let accountId = try await resolvedRequiredAccountId(from: user)
+        let previousAvatarFileId = user.avatarFileId
+        let sanitizedImage = imageData.flatMap { $0.isEmpty ? nil : $0 }
+        let nextAvatarFileId: String?
+
+        if let sanitizedImage {
+            nextAvatarFileId = (try await uploadProfilePhotos([sanitizedImage])).first
+        } else {
+            nextAvatarFileId = nil
+        }
+
+        var updatedUser = user
+        updatedUser.appwriteUserId = accountId
+        updatedUser.avatarFileId = nextAvatarFileId
+        updatedUser.profileImageData = sanitizedImage
+
+        do {
+            updatedUser = try await ensureProfileRow(for: updatedUser)
+        } catch {
+            if let nextAvatarFileId {
+                try? await deleteAvatar(fileId: nextAvatarFileId)
+            }
+            throw error
+        }
+
+        if let previousAvatarFileId,
+           previousAvatarFileId != nextAvatarFileId,
+           !updatedUser.resolvedPhotoFileIds.contains(previousAvatarFileId) {
+            try? await deleteAvatar(fileId: previousAvatarFileId)
+        }
+
+        return updatedUser
     }
 
     func updateProfileImages(_ imageDataItems: [Data], for user: User) async throws -> User {
@@ -176,13 +212,11 @@ actor AppwriteService {
 
         var updatedUser = user
         updatedUser.appwriteUserId = accountId
-        updatedUser.avatarFileId = nextFileIds.first
         updatedUser.photoFileIds = nextFileIds
-        updatedUser.profileImageData = sanitizedImages.first
         updatedUser.profilePhotoDataItems = sanitizedImages
 
         do {
-            updatedUser = try await updateProfile(for: updatedUser)
+            updatedUser = try await ensureProfileRow(for: updatedUser)
         } catch {
             for fileId in nextFileIds {
                 try? await deleteAvatar(fileId: fileId)
@@ -192,7 +226,9 @@ actor AppwriteService {
 
         let obsoleteFileIds = Set(previousFileIds).subtracting(Set(nextFileIds))
         for fileId in obsoleteFileIds {
-            try? await deleteAvatar(fileId: fileId)
+            if fileId != updatedUser.avatarFileId {
+                try? await deleteAvatar(fileId: fileId)
+            }
         }
 
         return updatedUser
@@ -479,14 +515,9 @@ actor AppwriteService {
         let profileRow = try await fetchProfileRow(id: accountId)
         let photoFileIds = discoverPhotoFileIds(from: profileRow ?? [:])
         let photoDataItems = try await fetchProfilePhotoDataItems(fileIds: photoFileIds)
-        let avatarData: Data?
-        if let firstPhotoData = photoDataItems.first {
-            avatarData = firstPhotoData
-        } else {
-            avatarData = try await fetchAvatarData(
-                fileId: stringValue(forKey: "avatarFileId", in: profileRow)
-            )
-        }
+        let avatarData = try await fetchAvatarData(
+            fileId: stringValue(forKey: "avatarFileId", in: profileRow)
+        )
 
         var user = User(email: email, password: "")
         user.appwriteUserId = accountId
@@ -509,7 +540,7 @@ actor AppwriteService {
         user.interests = stringValue(forKey: "interests", in: profileRow)
         user.instagramTag = socialTagValue(forKey: "instagramTag", in: profileRow)
         user.spotifyTag = socialTagValue(forKey: "spotifyTag", in: profileRow)
-        user.avatarFileId = stringValue(forKey: "avatarFileId", in: profileRow) ?? photoFileIds.first
+        user.avatarFileId = stringValue(forKey: "avatarFileId", in: profileRow)
         user.photoFileIds = photoFileIds
         user.profileImageData = avatarData
         user.profilePhotoDataItems = photoDataItems.isEmpty ? nil : photoDataItems
@@ -1266,6 +1297,11 @@ actor AppwriteService {
             compatibilityScore: min(max(intValue(forKey: "compatibilityScore", in: row) ?? 0, 0), 100),
             distance: intValue(forKey: "distance", in: row) ?? intValue(forKey: "distanceKm", in: row),
             commonInterests: discoverCommonInterests(from: row),
+            bio: discoverBio(from: row),
+            city: stringValue(forKey: "city", in: row),
+            intent: stringValue(forKey: "intent", in: row),
+            smokes: boolValue(forKey: "smokes", in: row),
+            drinks: boolValue(forKey: "drinks", in: row),
             relationshipState: relationshipStateValue(for: stringValue(forKey: "relationshipState", in: row))
         )
     }
@@ -1292,6 +1328,11 @@ actor AppwriteService {
             compatibilityScore: fallbackScore,
             distance: intValue(forKey: "distanceKm", in: row),
             commonInterests: Array(commonInterests.prefix(4)),
+            bio: discoverBio(from: row),
+            city: stringValue(forKey: "city", in: row),
+            intent: stringValue(forKey: "intent", in: row),
+            smokes: boolValue(forKey: "smokes", in: row),
+            drinks: boolValue(forKey: "drinks", in: row),
             relationshipState: .none
         )
     }
@@ -1397,17 +1438,13 @@ actor AppwriteService {
             return urls
         }
 
-        if let avatarURL = avatarURL(fileId: stringValue(forKey: "avatarFileId", in: row)) {
-            return [avatarURL]
-        }
-
         return []
     }
 
     private func discoverPhotoFileIds(from row: [String: Any]) -> [String] {
         let directArray = stringArrayValue(forKey: "photoFileIds", in: row)
         if !directArray.isEmpty {
-            return directArray
+            return directArray.filter { !$0.isEmpty }
         }
 
         if let rawValue = stringValue(forKey: "photoFileIds", in: row) {
@@ -1415,10 +1452,6 @@ actor AppwriteService {
                 .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == "|" })
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-        }
-
-        if let avatarFileId = stringValue(forKey: "avatarFileId", in: row), !avatarFileId.isEmpty {
-            return [avatarFileId]
         }
 
         return []

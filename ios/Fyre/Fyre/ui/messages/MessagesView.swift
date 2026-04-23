@@ -97,6 +97,23 @@ struct ChatThread: Identifiable, Hashable {
     }
 }
 
+@MainActor
+enum RecentChatThreadStore {
+    private static var cachedThreads: [String: ChatThread] = [:]
+
+    static func all() -> [ChatThread] {
+        Array(cachedThreads.values)
+    }
+
+    static func upsert(_ thread: ChatThread) {
+        cachedThreads[thread.remoteId] = thread
+    }
+
+    static func remove(remoteId: String) {
+        cachedThreads.removeValue(forKey: remoteId)
+    }
+}
+
 struct MessagesView: View {
     private struct PendingRelationshipAction: Identifiable {
         let id = UUID()
@@ -112,6 +129,12 @@ struct MessagesView: View {
     @State private var reloadToken = UUID()
     @State private var realtimeSubscription: AppwriteRealtimeSubscription?
     @State private var realtimeReloadTask: Task<Void, Never>?
+    @State private var selectedThread: ChatThread?
+    @Binding private var externalOpenThread: ChatThread?
+
+    init(openThread: Binding<ChatThread?> = .constant(nil)) {
+        _externalOpenThread = openThread
+    }
 
     var body: some View {
         NavigationStack {
@@ -126,11 +149,14 @@ struct MessagesView: View {
                 } else {
                     List {
                         ForEach(Array(threads.enumerated()), id: \.element.id) { index, thread in
-                            NavigationLink(destination: ChatDetailView(thread: thread)) {
+                            Button {
+                                openThread(thread)
+                            } label: {
                                 ChatThreadRow(thread: thread)
-                                .padding(.vertical, 4)
-                                .accessibilityHint(L10n.tr("messages.openChat.hint"))
+                                    .padding(.vertical, 4)
+                                    .accessibilityHint(L10n.tr("messages.openChat.hint"))
                             }
+                            .buttonStyle(.plain)
                             .contextMenu {
                                 Button {
                                     pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .archive)
@@ -197,6 +223,9 @@ struct MessagesView: View {
             }
             .navigationTitle(L10n.tr("messages.navigationTitle"))
             .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(item: $selectedThread) { thread in
+                ChatDetailView(thread: thread)
+            }
             .alert(item: $pendingRelationshipAction) { pending in
                 Alert(
                     title: Text(confirmTitle(for: pending.action)),
@@ -212,18 +241,27 @@ struct MessagesView: View {
             await loadThreads()
         }
         .onAppear {
+            consumeExternalOpenThreadIfNeeded()
             startRealtime()
         }
         .onDisappear {
             stopRealtime()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .fyreThreadsDidChange)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .fyreThreadsDidChange)) { notification in
             // Swipe matches and chat sends publish this signal so the inbox can refresh lazily.
+            if let thread = notification.object as? ChatThread {
+                RecentChatThreadStore.upsert(thread)
+                upsertThread(thread)
+            }
             reloadToken = UUID()
         }
         .onReceive(NotificationCenter.default.publisher(for: .fyreThreadRemoved)) { notification in
             guard let remoteId = notification.object as? String else { return }
+            RecentChatThreadStore.remove(remoteId: remoteId)
             threads.removeAll { $0.remoteId == remoteId }
+        }
+        .onChange(of: externalOpenThread) { _, _ in
+            consumeExternalOpenThreadIfNeeded()
         }
         .background {
             TabBarRestoreController()
@@ -234,7 +272,7 @@ struct MessagesView: View {
         do {
             let dtos = try await services.backend.fetchThreads()
             let existingNames = Dictionary(uniqueKeysWithValues: threads.map { ($0.remoteId, $0.name) })
-            threads = dtos.map { dto in
+            let fetchedThreads = dtos.map { dto in
                 let resolvedName: String
                 if ThreadNaming.isPlaceholderThreadName(dto.name),
                    let cachedName = existingNames[dto.remoteId],
@@ -258,15 +296,52 @@ struct MessagesView: View {
                     messages: dto.messages.map(ChatMessage.init(dto:))
                 )
             }
+            fetchedThreads.forEach(RecentChatThreadStore.upsert)
+            threads = mergedThreads(fetchedThreads: fetchedThreads)
         } catch {
 #if DEBUG
             debugPrint("Inbox refresh failed: \(error.localizedDescription)")
 #endif
+            threads = mergedThreads(fetchedThreads: threads)
         }
+    }
+
+    private func consumeExternalOpenThreadIfNeeded() {
+        guard let thread = externalOpenThread else { return }
+        openThread(thread)
+        externalOpenThread = nil
+    }
+
+    private func openThread(_ thread: ChatThread) {
+        RecentChatThreadStore.upsert(thread)
+        upsertThread(thread)
+        selectedThread = thread
+    }
+
+    private func upsertThread(_ thread: ChatThread) {
+        if let existingIndex = threads.firstIndex(where: { $0.remoteId == thread.remoteId }) {
+            threads[existingIndex] = thread
+        } else {
+            threads.insert(thread, at: 0)
+        }
+    }
+
+    private func mergedThreads(fetchedThreads: [ChatThread]) -> [ChatThread] {
+        var merged = fetchedThreads
+        let fetchedRemoteIds = Set(fetchedThreads.map(\.remoteId))
+
+        for cachedThread in RecentChatThreadStore.all() where !fetchedRemoteIds.contains(cachedThread.remoteId) {
+            if !merged.contains(where: { $0.remoteId == cachedThread.remoteId }) {
+                merged.insert(cachedThread, at: 0)
+            }
+        }
+
+        return merged
     }
 
     private func applyRelationshipAction(_ pending: PendingRelationshipAction) {
         threads.removeAll { $0.id == pending.thread.id }
+        RecentChatThreadStore.remove(remoteId: pending.thread.remoteId)
 
         Task {
             do {

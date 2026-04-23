@@ -909,7 +909,8 @@ struct AccountView: View {
 
                 PhotosPicker(
                     selection: $pickedAdditionalPhotoItems,
-                    maxSelectionCount: maxProfilePhotoCount,
+                    maxSelectionCount: max(1, remainingProfilePhotoCapacity),
+                    selectionBehavior: .ordered,
                     matching: .images
                 ) {
                     Label(L10n.tr("profile.photo.addAction"), systemImage: "plus.circle.fill")
@@ -920,13 +921,20 @@ struct AccountView: View {
                 .opacity(currentProfilePhotoDataItems.count >= maxProfilePhotoCount ? 0.45 : 1)
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(Array(currentProfilePhotoDataItems.enumerated()), id: \.offset) { index, data in
-                        profilePhotoThumbnail(data: data, index: index)
+            if currentProfilePhotoDataItems.isEmpty {
+                Text(L10n.tr("profile.photo.galleryEmpty"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(Array(currentProfilePhotoDataItems.enumerated()), id: \.offset) { index, data in
+                            profilePhotoThumbnail(data: data, index: index)
+                        }
                     }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
             }
         }
         .padding(.horizontal, 14)
@@ -936,51 +944,110 @@ struct AccountView: View {
 
     @ViewBuilder
     private func profilePhotoThumbnail(data: Data, index: Int) -> some View {
-        ZStack(alignment: .topTrailing) {
-            Group {
-                if let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFill()
-                } else {
+        VStack(spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let uiImage = UIImage(data: data) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(.white.opacity(0.05))
+                            .overlay {
+                                Image(systemName: "photo")
+                                    .foregroundStyle(.secondary)
+                            }
+                    }
+                }
+                .frame(width: 92, height: 118)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(alignment: .bottomLeading) {
+                    if index == 0 {
+                        Text(L10n.tr("profile.photo.primaryBadge"))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.orange.opacity(0.92), in: Capsule(style: .continuous))
+                            .padding(8)
+                    }
+                }
+                .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(.white.opacity(0.05))
-                        .overlay {
-                            Image(systemName: "photo")
-                                .foregroundStyle(.secondary)
-                        }
+                        .stroke(.white.opacity(0.10), lineWidth: 1)
                 }
-            }
-            .frame(width: 92, height: 118)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(alignment: .bottomLeading) {
-                if index == 0 {
-                    Text(L10n.tr("profile.photo.primaryBadge"))
-                        .font(.caption2.weight(.bold))
+
+                Button {
+                    removeProfilePhoto(at: index)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(.orange.opacity(0.92), in: Capsule(style: .continuous))
-                        .padding(8)
+                        .frame(width: 24, height: 24)
+                        .background(.black.opacity(0.72), in: Circle())
                 }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.white.opacity(0.10), lineWidth: 1)
+                .buttonStyle(.plain)
+                .padding(8)
+                .accessibilityLabel(L10n.tr("profile.photo.remove"))
             }
 
-            Button {
-                removeProfilePhoto(at: index)
-            } label: {
-                Image(systemName: "xmark")
+            HStack(spacing: 6) {
+                Button {
+                    moveProfilePhoto(at: index, by: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.plain)
+                .disabled(index == 0)
+                .opacity(index == 0 ? 0.35 : 1)
+
+                Text("\(index + 1)")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 24, height: 24)
-                    .background(.black.opacity(0.72), in: Circle())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+
+                Button {
+                    moveProfilePhoto(at: index, by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 26, height: 24)
+                }
+                .buttonStyle(.plain)
+                .disabled(index >= currentProfilePhotoDataItems.count - 1)
+                .opacity(index >= currentProfilePhotoDataItems.count - 1 ? 0.35 : 1)
             }
-            .buttonStyle(.plain)
-            .padding(8)
-            .accessibilityLabel(L10n.tr("profile.photo.remove"))
+            .foregroundStyle(.orange)
+            .background(.white.opacity(0.05), in: Capsule(style: .continuous))
+        }
+        .frame(width: 92)
+    }
+
+    private var remainingProfilePhotoCapacity: Int {
+        max(0, maxProfilePhotoCount - currentProfilePhotoDataItems.count)
+    }
+
+    private func moveProfilePhoto(at index: Int, by delta: Int) {
+        let targetIndex = index + delta
+        guard currentProfilePhotoDataItems.indices.contains(index),
+              currentProfilePhotoDataItems.indices.contains(targetIndex) else { return }
+
+        var updatedImages = currentProfilePhotoDataItems
+        updatedImages.swapAt(index, targetIndex)
+
+        Task { @MainActor in
+            let result = await store.updateProfileImages(updatedImages)
+            if let result {
+                profileMessage = result
+                profileMessageIsError = true
+            } else {
+                profileMessage = nil
+                profileMessageIsError = false
+                fillFromUser()
+            }
         }
     }
 

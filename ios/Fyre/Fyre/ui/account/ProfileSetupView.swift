@@ -29,10 +29,13 @@ struct ProfileSetupView: View {
     @State private var smokes = false
     @State private var drinks = false
     @State private var pickedPhotoItem: PhotosPickerItem?
+    @State private var pickedAdditionalPhotoItems: [PhotosPickerItem] = []
     @State private var errorMessage: String?
     @State private var isSaving = false
     @State private var showEventRemovalAlert = false
     @State private var hasHydratedFromUser = false
+
+    private let maxProfilePhotoCount = 6
 
     var body: some View {
         NavigationStack {
@@ -45,6 +48,40 @@ struct ProfileSetupView: View {
                             Text(L10n.tr("profile.photo.action"))
                         }
                     }
+                }
+
+                Section(L10n.tr("profile.photo.galleryTitle")) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L10n.tr("profile.photo.galleryHint"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        PhotosPicker(
+                            selection: $pickedAdditionalPhotoItems,
+                            maxSelectionCount: max(1, remainingProfilePhotoCapacity),
+                            selectionBehavior: .ordered,
+                            matching: .images
+                        ) {
+                            Label(L10n.tr("profile.photo.addAction"), systemImage: "plus.circle.fill")
+                        }
+                        .disabled(currentProfilePhotoDataItems.count >= maxProfilePhotoCount)
+
+                        if currentProfilePhotoDataItems.isEmpty {
+                            Text(L10n.tr("profile.photo.galleryEmpty"))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(Array(currentProfilePhotoDataItems.enumerated()), id: \.offset) { index, data in
+                                        profilePhotoThumbnail(data: data, index: index)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
 
                 Section(L10n.tr("profile.section.required")) {
@@ -156,6 +193,15 @@ struct ProfileSetupView: View {
                     errorMessage = await store.updateProfileImage(data)
                 }
             }
+            .onChange(of: pickedAdditionalPhotoItems) { _, newItems in
+                guard !newItems.isEmpty else { return }
+                let selectedItems = newItems
+                pickedAdditionalPhotoItems = []
+
+                Task { @MainActor in
+                    await handleAdditionalPhotoSelection(selectedItems)
+                }
+            }
             .onAppear {
                 hydrateFromCurrentUserIfNeeded()
             }
@@ -177,6 +223,131 @@ struct ProfileSetupView: View {
                 .scaledToFit()
                 .foregroundStyle(.secondary)
                 .frame(width: 64, height: 64)
+            }
+    }
+
+    private var currentProfilePhotoDataItems: [Data] {
+        store.currentUser?.resolvedProfilePhotoDataItems ?? []
+    }
+
+    private var remainingProfilePhotoCapacity: Int {
+        max(0, maxProfilePhotoCount - currentProfilePhotoDataItems.count)
+    }
+
+    private func profilePhotoThumbnail(data: Data, index: Int) -> some View {
+        VStack(spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let uiImage = UIImage(data: data) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(.secondary.opacity(0.12))
+                            .overlay {
+                                Image(systemName: "photo")
+                                    .foregroundStyle(.secondary)
+                            }
+                    }
+                }
+                .frame(width: 86, height: 112)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(alignment: .bottomLeading) {
+                    if index == 0 {
+                        Text(L10n.tr("profile.photo.primaryBadge"))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.orange.opacity(0.92), in: Capsule(style: .continuous))
+                            .padding(7)
+                    }
+                }
+
+                Button {
+                    removeProfilePhoto(at: index)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(.black.opacity(0.72), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(7)
+                .accessibilityLabel(L10n.tr("profile.photo.remove"))
+            }
+
+            HStack(spacing: 6) {
+                Button {
+                    moveProfilePhoto(at: index, by: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 24, height: 24)
+                }
+                .disabled(index == 0)
+                .opacity(index == 0 ? 0.35 : 1)
+
+                Text("\(index + 1)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+
+                Button {
+                    moveProfilePhoto(at: index, by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 24, height: 24)
+                }
+                .disabled(index >= currentProfilePhotoDataItems.count - 1)
+                .opacity(index >= currentProfilePhotoDataItems.count - 1 ? 0.35 : 1)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.orange)
+        }
+        .frame(width: 86)
+    }
+
+    @MainActor
+    private func handleAdditionalPhotoSelection(_ items: [PhotosPickerItem]) async {
+        let remainingCapacity = max(0, maxProfilePhotoCount - currentProfilePhotoDataItems.count)
+        guard remainingCapacity > 0 else { return }
+
+        var appendedImages: [Data] = []
+        for item in items.prefix(remainingCapacity) {
+            if let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty {
+                appendedImages.append(data)
+            }
+        }
+
+        guard !appendedImages.isEmpty else { return }
+        errorMessage = await store.updateProfileImages(currentProfilePhotoDataItems + appendedImages)
+    }
+
+    private func removeProfilePhoto(at index: Int) {
+        guard currentProfilePhotoDataItems.indices.contains(index) else { return }
+
+        var updatedImages = currentProfilePhotoDataItems
+        updatedImages.remove(at: index)
+
+        Task { @MainActor in
+            errorMessage = await store.updateProfileImages(updatedImages)
+        }
+    }
+
+    private func moveProfilePhoto(at index: Int, by delta: Int) {
+        let targetIndex = index + delta
+        guard currentProfilePhotoDataItems.indices.contains(index),
+              currentProfilePhotoDataItems.indices.contains(targetIndex) else { return }
+
+        var updatedImages = currentProfilePhotoDataItems
+        updatedImages.swapAt(index, targetIndex)
+
+        Task { @MainActor in
+            errorMessage = await store.updateProfileImages(updatedImages)
         }
     }
 

@@ -736,7 +736,9 @@ function discoverName(row) {
 
 function discoverPhotoFileIds(row) {
   if (Array.isArray(row.photoFileIds)) {
-    return row.photoFileIds.map((value) => asString(value)).filter(Boolean);
+    return row.photoFileIds
+      .map((value) => asString(value))
+      .filter(Boolean);
   }
 
   const serialized = asString(row.photoFileIds);
@@ -747,8 +749,7 @@ function discoverPhotoFileIds(row) {
       .filter(Boolean);
   }
 
-  const avatarFileId = asString(row.avatarFileId);
-  return avatarFileId ? [avatarFileId] : [];
+  return [];
 }
 
 function discoverPhotoURLs(config, row) {
