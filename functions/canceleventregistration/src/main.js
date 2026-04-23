@@ -16,9 +16,8 @@ export default async ({ req, res, error }) => {
       return res.json({ messageKey: "events.error.notRegistered" }, 404);
     }
 
-    const registrations = await listRows(config, config.eventRegistrationsTableId, [
-      equal("eventId", [event.$id]),
-      limit(200)
+    const registrations = await listAllRows(config, config.eventRegistrationsTableId, [
+      equal("eventId", [event.$id])
     ]);
 
     const currentRegistration = registrations.find((row) => {
@@ -42,13 +41,7 @@ export default async ({ req, res, error }) => {
 
     if (CONFIRMED_STATUSES.has(normalizeStatus(currentRegistration.status))) {
       // Promote the oldest waitlisted person of the same gender to preserve the event balance rules.
-      const candidate = registrations
-        .filter((row) => normalizeStatus(row.status) === "waitlisted" && row.gender === currentRegistration.gender)
-        .sort((lhs, rhs) => {
-          const left = parseDate(lhs.createdAt ?? lhs.$createdAt)?.getTime() ?? 0;
-          const right = parseDate(rhs.createdAt ?? rhs.$createdAt)?.getTime() ?? 0;
-          return left - right;
-        })[0];
+      const candidate = selectPromotionCandidate(registrations, currentRegistration);
 
       if (candidate) {
         try {
@@ -171,6 +164,26 @@ async function listRows(config, tableId, queries) {
   return Array.isArray(payload.rows) ? payload.rows : [];
 }
 
+async function listAllRows(config, tableId, baseQueries, pageSize = 100) {
+  const rows = [];
+  let page = 0;
+
+  while (true) {
+    const batch = await listRows(config, tableId, [
+      ...baseQueries,
+      limit(pageSize),
+      offset(page * pageSize)
+    ]);
+    rows.push(...batch);
+
+    if (batch.length < pageSize) {
+      return rows;
+    }
+
+    page += 1;
+  }
+}
+
 async function updateRow(config, tableId, rowId, data) {
   return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
     data
@@ -254,8 +267,25 @@ function limit(value) {
   return JSON.stringify({ method: "limit", values: [value] });
 }
 
+function offset(value) {
+  return JSON.stringify({ method: "offset", values: [value] });
+}
+
 function normalizeStatus(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+export function selectPromotionCandidate(registrations, cancelledRegistration) {
+  return registrations
+    .filter((row) => (
+      normalizeStatus(row.status) === "waitlisted"
+      && row.gender === cancelledRegistration.gender
+    ))
+    .sort((lhs, rhs) => {
+      const left = parseDate(lhs.createdAt ?? lhs.$createdAt)?.getTime() ?? 0;
+      const right = parseDate(rhs.createdAt ?? rhs.$createdAt)?.getTime() ?? 0;
+      return left - right;
+    })[0] ?? null;
 }
 
 function resolveUserId(row) {

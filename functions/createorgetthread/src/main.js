@@ -149,39 +149,44 @@ async function listRows(config, tableId, queries) {
   return Array.isArray(payload.rows) ? payload.rows : [];
 }
 
+async function listAllRows(config, tableId, baseQueries, pageSize = 100) {
+  const rows = [];
+  let page = 0;
+
+  while (true) {
+    const batch = await listRows(config, tableId, [
+      ...baseQueries,
+      limit(pageSize),
+      offset(page * pageSize)
+    ]);
+    rows.push(...batch);
+
+    if (batch.length < pageSize) {
+      return rows;
+    }
+
+    page += 1;
+  }
+}
+
 async function findExistingThreadIdByParticipants(config, firstUserId, secondUserId) {
-  const firstRows = await listRows(config, config.threadParticipantsTableId, [
-    equal("userId", [firstUserId]),
-    limit(100)
+  const firstRows = await listAllRows(config, config.threadParticipantsTableId, [
+    equal("userId", [firstUserId])
   ]);
 
   if (!firstRows.length) {
     return null;
   }
 
-  const firstThreadIds = new Set(
-    firstRows
-      .map((row) => asString(row.threadId))
-      .filter(Boolean)
-  );
-
-  if (!firstThreadIds.size) {
+  if (!firstRows.some((row) => asString(row.threadId))) {
     return null;
   }
 
-  const secondRows = await listRows(config, config.threadParticipantsTableId, [
-    equal("userId", [secondUserId]),
-    limit(100)
+  const secondRows = await listAllRows(config, config.threadParticipantsTableId, [
+    equal("userId", [secondUserId])
   ]);
 
-  for (const row of secondRows) {
-    const threadId = asString(row.threadId);
-    if (threadId && firstThreadIds.has(threadId)) {
-      return threadId;
-    }
-  }
-
-  return null;
+  return sharedThreadIdFromParticipantRows(firstRows, secondRows);
 }
 
 async function createRow(config, tableId, rowId, data, permissions) {
@@ -385,6 +390,10 @@ function limit(value) {
   return JSON.stringify({ method: "limit", values: [value] });
 }
 
+function offset(value) {
+  return JSON.stringify({ method: "offset", values: [value] });
+}
+
 function uniqueId() {
   return randomUUID().replaceAll("-", "");
 }
@@ -417,4 +426,21 @@ function stableParticipantRowId(threadId, userId) {
 
 function stableRowId(prefix, seed) {
   return `${prefix}_${createHash("sha256").update(seed).digest("hex").slice(0, 32)}`;
+}
+
+export function sharedThreadIdFromParticipantRows(firstRows, secondRows) {
+  const firstThreadIds = new Set(
+    firstRows
+      .map((row) => asString(row.threadId))
+      .filter(Boolean)
+  );
+
+  for (const row of secondRows) {
+    const threadId = asString(row.threadId);
+    if (threadId && firstThreadIds.has(threadId)) {
+      return threadId;
+    }
+  }
+
+  return null;
 }
