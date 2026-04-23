@@ -1,17 +1,72 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChatAvatar } from '../../components/messages/ChatAvatar';
 import { Button } from '../../components/ui/Button';
 import { useAppStore } from '../../hooks/useAppStore';
 import { formatLastSeen } from '../../context/AppContext';
 
+const RELATIONSHIP_ACTION_LABELS = {
+  archive: 'Archivia',
+  unmatch: 'Unmatch',
+  block: 'Blocca'
+} as const;
+
+function threadPreviewText(
+  thread: ReturnType<typeof useAppStore>['persisted']['threads'][number]
+): string {
+  const lastMessage = thread.messages[thread.messages.length - 1];
+  if (!lastMessage) {
+    return 'Nessun messaggio';
+  }
+
+  if (lastMessage.text.trim()) {
+    return lastMessage.text;
+  }
+
+  if (lastMessage.attachments?.length) {
+    const [attachment] = lastMessage.attachments;
+    switch (attachment.type) {
+      case 'image':
+        return 'Foto allegata';
+      case 'video':
+        return 'Video allegato';
+      case 'audio':
+        return 'Messaggio vocale';
+      default:
+        return attachment.name;
+    }
+  }
+
+  return 'Nessun messaggio';
+}
+
 export function MessagesPage(): JSX.Element {
   const {
     persisted,
-    deleteThread,
+    applyRelationshipAction,
     markNotificationRead,
     markAllNotificationsRead,
     unreadNotificationsCount
   } = useAppStore();
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+
+  async function handleRelationshipAction(
+    threadId: string,
+    action: keyof typeof RELATIONSHIP_ACTION_LABELS
+  ): Promise<void> {
+    setActionFeedback(null);
+    const confirmed = window.confirm(
+      `${RELATIONSHIP_ACTION_LABELS[action]} questa conversazione?`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const error = await applyRelationshipAction(threadId, action);
+    if (error) {
+      setActionFeedback(error);
+    }
+  }
 
   return (
     <section className="messages-page fade-in-up">
@@ -69,7 +124,6 @@ export function MessagesPage(): JSX.Element {
       ) : (
         <ul className="thread-list">
           {persisted.threads.map((thread) => {
-            const lastMessage = thread.messages[thread.messages.length - 1];
             return (
               <li key={thread.id} className="thread-row">
                 <Link to={`/app/messages/${thread.id}`} className="thread-row__content">
@@ -77,11 +131,13 @@ export function MessagesPage(): JSX.Element {
 
                   <div className="thread-row__meta">
                     <p className="thread-row__name">{thread.name}</p>
-                    <p className="thread-row__preview">{lastMessage?.text ?? 'Nessun messaggio'}</p>
+                    <p className="thread-row__preview">
+                      {thread.isTyping ? 'Sta scrivendo...' : threadPreviewText(thread)}
+                    </p>
                   </div>
 
                   <div className="thread-row__status">
-                    <p>{lastMessage?.time ?? '--:--'}</p>
+                    <p>{thread.messages[thread.messages.length - 1]?.time ?? '--:--'}</p>
                     {thread.isOnline ? (
                       <span className="thread-status-online">Online</span>
                     ) : (
@@ -91,14 +147,33 @@ export function MessagesPage(): JSX.Element {
                   </div>
                 </Link>
 
-                <Button variant="ghost" onClick={() => deleteThread(thread.id)}>
-                  Elimina
-                </Button>
+                <div className="thread-row__actions">
+                  <Button
+                    variant="ghost"
+                    onClick={() => void handleRelationshipAction(thread.id, 'archive')}
+                  >
+                    Archivia
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => void handleRelationshipAction(thread.id, 'unmatch')}
+                  >
+                    Unmatch
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => void handleRelationshipAction(thread.id, 'block')}
+                  >
+                    Blocca
+                  </Button>
+                </div>
               </li>
             );
           })}
         </ul>
       )}
+
+      {actionFeedback && <p className="form-feedback form-feedback--error">{actionFeedback}</p>}
     </section>
   );
 }

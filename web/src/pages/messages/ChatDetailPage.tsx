@@ -1,5 +1,5 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { CSSProperties, ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChatAvatar } from '../../components/messages/ChatAvatar';
 import { Button } from '../../components/ui/Button';
 import { useAppStore } from '../../hooks/useAppStore';
@@ -58,13 +58,73 @@ function formatDeliveryLabel(deliveryState: string | undefined, readAt: string |
   return 'Inviato';
 }
 
+function attachmentLabel(attachment: ChatAttachment): string {
+  switch (attachment.type) {
+    case 'image':
+      return 'Foto';
+    case 'video':
+      return 'Video';
+    case 'audio':
+      return 'Audio';
+    default:
+      return attachment.name;
+  }
+}
+
+function bubblePalette(name: string, isOutgoing: boolean): { background: string; border: string } {
+  if (isOutgoing) {
+    switch (name) {
+      case 'ocean':
+        return { background: 'rgba(70, 130, 180, 0.26)', border: 'rgba(70, 130, 180, 0.32)' };
+      case 'graphite':
+        return { background: 'rgba(48, 54, 64, 0.76)', border: 'rgba(150, 160, 180, 0.18)' };
+      case 'default':
+        return { background: 'rgba(255, 106, 59, 0.16)', border: 'rgba(255, 106, 59, 0.28)' };
+      default:
+        return { background: 'rgba(244, 114, 182, 0.18)', border: 'rgba(255, 148, 114, 0.3)' };
+    }
+  }
+
+  switch (name) {
+    case 'ocean':
+      return { background: 'rgba(80, 130, 180, 0.12)', border: 'rgba(80, 130, 180, 0.2)' };
+    case 'sunset':
+      return { background: 'rgba(255, 173, 96, 0.12)', border: 'rgba(255, 173, 96, 0.22)' };
+    case 'default':
+      return { background: 'rgba(255, 255, 255, 0.14)', border: 'rgba(255, 255, 255, 0.16)' };
+    default:
+      return { background: 'rgba(28, 32, 38, 0.74)', border: 'rgba(255, 255, 255, 0.08)' };
+  }
+}
+
+function chatSurfaceStyle(settings: ReturnType<typeof useAppStore>['persisted']['settings']): CSSProperties {
+  const outgoing = bubblePalette(settings.outgoingBubblePalette, true);
+  const incoming = bubblePalette(settings.incomingBubblePalette, false);
+
+  return {
+    '--chat-background-1': settings.chatBackgroundColor1,
+    '--chat-background-2': settings.chatBackgroundColor2,
+    '--chat-background-3': settings.chatBackgroundColor3,
+    '--chat-background-brightness': String(1 + settings.chatBackgroundBrightness),
+    '--chat-send-1': settings.sendButtonColor1,
+    '--chat-send-2': settings.sendButtonColor2,
+    '--chat-send-3': settings.sendButtonColor3,
+    '--chat-bubble-outgoing-bg': outgoing.background,
+    '--chat-bubble-outgoing-border': outgoing.border,
+    '--chat-bubble-incoming-bg': incoming.background,
+    '--chat-bubble-incoming-border': incoming.border
+  } as CSSProperties;
+}
+
 export function ChatDetailPage(): JSX.Element {
+  const navigate = useNavigate();
   const { threadId } = useParams();
-  const { persisted, sendMessage, markThreadRead } = useAppStore();
+  const { persisted, sendMessage, markThreadRead, applyRelationshipAction } = useAppStore();
   const [draft, setDraft] = useState('');
   const [replyToId, setReplyToId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [relationshipFeedback, setRelationshipFeedback] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const thread = useMemo(
@@ -78,6 +138,8 @@ export function ChatDetailPage(): JSX.Element {
     }
     return thread.messages.find((message) => message.id === replyToId) ?? null;
   }, [replyToId, thread]);
+
+  const themedSurfaceStyle = useMemo(() => chatSurfaceStyle(persisted.settings), [persisted.settings]);
 
   useEffect(() => {
     if (!thread) {
@@ -128,6 +190,29 @@ export function ChatDetailPage(): JSX.Element {
     setAttachments([]);
   }
 
+  async function handleRelationshipAction(action: 'archive' | 'unmatch' | 'block'): Promise<void> {
+    if (!thread) {
+      return;
+    }
+
+    const confirmed = window.confirm(`${action === 'archive'
+      ? 'Archiviare'
+      : action === 'unmatch'
+        ? 'Rimuovere il match con'
+        : 'Bloccare'} ${thread.name}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    const error = await applyRelationshipAction(thread.id, action);
+    if (error) {
+      setRelationshipFeedback(error);
+      return;
+    }
+
+    navigate('/app/messages', { replace: true });
+  }
+
   if (!thread) {
     return (
       <section className="chat-detail-page fade-in-up">
@@ -143,7 +228,10 @@ export function ChatDetailPage(): JSX.Element {
   }
 
   return (
-    <section className="chat-detail-page fade-in-up">
+    <section
+      className={`chat-detail-page fade-in-up chat-detail-page--${persisted.settings.chatBackgroundStyle}`}
+      style={themedSurfaceStyle}
+    >
       <Link className="chat-back-link" to="/app/messages">
         Torna ai messaggi
       </Link>
@@ -153,6 +241,17 @@ export function ChatDetailPage(): JSX.Element {
         <div>
           <h2>{thread.name}</h2>
           <p>{thread.isOnline ? 'Online ora' : formatLastSeen(thread.lastSeenAt)}</p>
+        </div>
+        <div className="chat-detail-page__actions">
+          <Button variant="ghost" onClick={() => void handleRelationshipAction('archive')}>
+            Archivia
+          </Button>
+          <Button variant="ghost" onClick={() => void handleRelationshipAction('unmatch')}>
+            Unmatch
+          </Button>
+          <Button variant="danger" onClick={() => void handleRelationshipAction('block')}>
+            Blocca
+          </Button>
         </div>
       </header>
 
@@ -170,7 +269,12 @@ export function ChatDetailPage(): JSX.Element {
               {replied && (
                 <div className="chat-reply-preview">
                   <small>{replied.isMe ? 'Tu' : thread.name}</small>
-                  <p>{replied.text || 'Allegato'}</p>
+                  <p>
+                    {replied.text
+                      || (replied.attachments?.[0]
+                        ? attachmentLabel(replied.attachments[0])
+                        : 'Allegato')}
+                  </p>
                 </div>
               )}
 
@@ -258,6 +362,9 @@ export function ChatDetailPage(): JSX.Element {
       )}
 
       {uploadError && <p className="form-feedback form-feedback--error">{uploadError}</p>}
+      {relationshipFeedback && (
+        <p className="form-feedback form-feedback--error">{relationshipFeedback}</p>
+      )}
     </section>
   );
 }
