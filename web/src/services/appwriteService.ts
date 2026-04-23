@@ -1,4 +1,5 @@
 import {
+  ChatAttachment,
   ChatMessage,
   ChatThread,
   DiscoverProfile,
@@ -13,13 +14,18 @@ import {
   User,
   UserGender,
   UserOrientation,
-  UserShowMe,
   calculateAge,
   isProfileComplete,
-  normalizeEmail
+  normalizeEmail,
+  normalizeUser,
+  preferredGendersFromShowMe
 } from '../types/models';
 import { formatTime } from '../data/mockData';
 import { AppwriteConfiguration } from './appwriteConfiguration';
+import {
+  parseChatMessageContract,
+  parseDiscoverProfilesPayload
+} from '../../../shared/contracts/index.js';
 
 const RESPONSE_FORMAT = '1.8.0';
 const ACTIVE_EVENT_STATUSES = new Set<EventHistoryStatus>(['confirmed', 'promoted', 'waitlisted']);
@@ -192,14 +198,12 @@ export class AppwriteService {
   async fetchDiscoverProfiles(): Promise<DiscoverProfile[]> {
     if (this.configuration.discoverProfilesFunctionId) {
       const payload = await this.executeUserFunction(this.configuration.discoverProfilesFunctionId, {});
-      const profiles = this.arrayOfDictionaries(payload.profiles);
-      const mapped = profiles
-        .map((row) => this.makeDiscoverProfile(row))
-        .filter((profile): profile is DiscoverProfile => profile !== null);
-
-      if (mapped.length > 0) {
-        return mapped;
+      if (!Array.isArray(payload.profiles)) {
+        throw new AppwriteServiceError('Invalid discover profiles response', 500, null, payload);
       }
+
+      return parseDiscoverProfilesPayload(payload.profiles)
+        .map((profile) => this.mapContractDiscoverProfile(profile));
     }
 
     const currentAccountId = await this.fetchCurrentAccountId(false);
@@ -256,28 +260,90 @@ export class AppwriteService {
       .map(({ thread }) => thread);
   }
 
-  async sendMessage(threadId: string, text: string): Promise<ChatMessage> {
-    const trimmedText = text.trim();
-    if (!trimmedText) {
+  async sendMessage(input: {
+    threadId: string;
+    text: string;
+    replyToMessageId?: string;
+    attachment?: ChatAttachment;
+  }): Promise<ChatMessage> {
+    const trimmedText = input.text.trim();
+    if (!trimmedText && !input.attachment) {
       throw new AppwriteServiceError('Message cannot be empty', 400);
     }
 
-    const response = await this.executeUserFunction(this.configuration.sendMessageFunctionId, {
-      threadId,
-      text: trimmedText
-    });
+    const uploadedAttachment = input.attachment
+      ? await this.uploadChatAttachment(input.attachment)
+      : null;
 
-    const messageId = this.stringValue(response.messageId) ?? crypto.randomUUID();
-    const createdAt = this.dateValue(response.createdAt) ?? new Date();
+    const response = await this.executeUserFunction(this.configuration.sendMessageFunctionId, {
+      threadId: input.threadId,
+      text: trimmedText,
+      replyToMessageId: input.replyToMessageId,
+      messageType: uploadedAttachment?.type ?? undefined,
+      attachmentFileId: uploadedAttachment?.fileId ?? undefined,
+      attachmentName: uploadedAttachment?.name ?? undefined,
+      attachmentMimeType: uploadedAttachment?.mimeType ?? undefined,
+      attachmentSize: uploadedAttachment?.sizeBytes ?? undefined
+    });
+    const payload = parseChatMessageContract(response);
+    const messageId = payload?.messageId ?? this.stringValue(response.messageId) ?? crypto.randomUUID();
+    const createdAt = this.dateValue(payload?.createdAt) ?? this.dateValue(response.createdAt) ?? new Date();
 
     return {
       id: messageId,
-      text: this.stringValue(response.text) ?? trimmedText,
+      text: payload?.text ?? this.stringValue(response.text) ?? trimmedText,
       isMe: true,
       time: formatTime(createdAt),
       createdAt: createdAt.toISOString(),
+      replyToMessageId: payload?.replyToMessageId ?? input.replyToMessageId,
+      attachments: uploadedAttachment
+        ? [
+            {
+              id: uploadedAttachment.fileId,
+              type: uploadedAttachment.type,
+              name: uploadedAttachment.name,
+              mimeType: uploadedAttachment.mimeType,
+              sizeBytes: uploadedAttachment.sizeBytes,
+              dataUrl: this.attachmentUrl(uploadedAttachment.fileId) ?? input.attachment?.dataUrl ?? ''
+            }
+          ]
+        : undefined,
       deliveryState: 'sent'
     };
+  }
+
+  async markThreadRead(threadId: string): Promise<void> {
+    const currentAccountId = await this.fetchCurrentAccountId(false);
+    if (!currentAccountId) {
+      return;
+    }
+
+    const participantRows = await this.listRows(this.configuration.threadParticipantsTableId, [
+      appwriteQueryEqual('threadId', [threadId]),
+      appwriteQueryEqual('userId', [currentAccountId])
+    ]);
+
+    const participantRow = participantRows[0];
+    const participantRowId = this.stringValue(participantRow?.$id);
+    if (!participantRowId) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    await this.sendJsonRequest('PATCH', `${this.tableRowsPath(this.configuration.threadParticipantsTableId)}/${participantRowId}`, {
+      body: {
+        data: {
+          threadId,
+          userId: currentAccountId,
+          role: this.stringValue(participantRow.role) ?? 'participant',
+          lastReadAt: now,
+          muted: this.booleanValue(participantRow.muted) ?? false,
+          pinned: this.booleanValue(participantRow.pinned) ?? false,
+          notificationsEnabled: this.booleanValue(participantRow.notificationsEnabled) ?? true
+        }
+      },
+      expectedStatusCodes: [200]
+    });
   }
 
   async createOrGetThread(otherUserId: string, otherUserName: string | null): Promise<ChatThread | null> {
@@ -512,6 +578,8 @@ export class AppwriteService {
     const participantUserIds = participantRows
       .map((row) => this.stringValue(row.userId))
       .filter((value): value is string => Boolean(value));
+    const currentParticipantRow =
+      participantRows.find((row) => this.stringValue(row.userId) === resolvedCurrentAccountId) ?? null;
 
     const otherUserId = participantUserIds.find((userId) => userId !== resolvedCurrentAccountId) ?? null;
     const relationshipState = await this.fetchRelationshipState(resolvedCurrentAccountId, otherUserId);
@@ -528,6 +596,18 @@ export class AppwriteService {
     const messages = messageRows
       .map((row) => this.makeChatMessage(row, resolvedCurrentAccountId))
       .filter((message): message is ChatMessage => message !== null);
+    const currentUserReadAt = this.dateValue(currentParticipantRow?.lastReadAt);
+    const unreadCount = messages.filter((message) => {
+      if (message.isMe) {
+        return false;
+      }
+
+      if (!currentUserReadAt) {
+        return true;
+      }
+
+      return Date.parse(message.createdAt) > currentUserReadAt.getTime();
+    }).length;
 
     const threadName = this.displayName(
       this.stringValue(profileRow?.firstName),
@@ -547,9 +627,9 @@ export class AppwriteService {
       name: threadName,
       avatar: this.avatarUrl(this.stringValue(profileRow?.avatarFileId)) ?? threadName.slice(0, 1).toUpperCase(),
       isOnline,
-      unreadCount: 0,
+      unreadCount,
       createdAt: threadCreatedAt.toISOString(),
-      lastSeenAt: lastSeenAt?.toISOString() ?? undefined,
+      lastSeenAt: lastSeenAt?.toISOString() ?? presenceUpdatedAt?.toISOString() ?? undefined,
       relationshipState,
       messages
     };
@@ -647,7 +727,9 @@ export class AppwriteService {
       text: this.stringValue(row.text) ?? '',
       isMe: this.stringValue(row.senderUserId) === currentAccountId,
       time: formatTime(createdAt),
-      createdAt: createdAt.toISOString()
+      createdAt: createdAt.toISOString(),
+      replyToMessageId: this.stringValue(row.replyToMessageId) ?? undefined,
+      attachments: this.makeMessageAttachments(row)
     };
   }
 
@@ -693,7 +775,7 @@ export class AppwriteService {
     const gender = this.userGenderValue(this.stringValue(profileRow?.gender));
     const preferredGenders = this.genderListValue(profileRow?.preferredGenders);
 
-    return {
+    return normalizeUser({
       email: this.stringValue(account.email) ?? '',
       password: '',
       appwriteUserId: accountId,
@@ -702,7 +784,7 @@ export class AppwriteService {
       birthDate: this.toInputDate(this.dateValue(profileRow?.birthDate)),
       gender: gender ?? undefined,
       orientation: this.userOrientationValue(this.stringValue(profileRow?.orientation)) ?? undefined,
-      showMe: this.showMeValue(preferredGenders),
+      showMe: 'everyone',
       smokes: this.booleanValue(profileRow?.smokes) ?? undefined,
       drinks: this.booleanValue(profileRow?.drinks) ?? undefined,
       hobbies: this.stringValue(profileRow?.interests) ?? '',
@@ -723,39 +805,49 @@ export class AppwriteService {
       intent: this.intentValue(this.stringValue(profileRow?.intent)) ?? undefined,
       instagramTag: this.stringValue(profileRow?.instagramTag) ?? undefined,
       spotifyTag: this.stringValue(profileRow?.spotifyTag) ?? undefined
-    };
+    });
   }
 
   private makeProfilePayload(user: User): Record<string, unknown> {
-    const accountId = this.stringValue(user.appwriteUserId) ?? '';
-    const city = this.stringValue(user.city) ?? DEFAULT_CITY;
-    const latitude = typeof user.latitude === 'number' ? user.latitude : DEFAULT_LATITUDE;
-    const longitude = typeof user.longitude === 'number' ? user.longitude : DEFAULT_LONGITUDE;
+    const normalizedUser = normalizeUser(user);
+    const accountId = this.stringValue(normalizedUser.appwriteUserId) ?? '';
+    const city = this.stringValue(normalizedUser.city) ?? DEFAULT_CITY;
+    const latitude =
+      typeof normalizedUser.latitude === 'number' ? normalizedUser.latitude : DEFAULT_LATITUDE;
+    const longitude =
+      typeof normalizedUser.longitude === 'number' ? normalizedUser.longitude : DEFAULT_LONGITUDE;
 
     return {
       userId: accountId,
-      email: user.email,
-      firstName: this.nullOrString(user.firstName),
-      lastName: this.nullOrString(user.lastName),
+      email: normalizedUser.email,
+      firstName: this.nullOrString(normalizedUser.firstName),
+      lastName: this.nullOrString(normalizedUser.lastName),
       city: this.nullOrString(city),
-      birthDate: this.nullOrDateString(user.birthDate),
-      gender: this.nullOrString(this.genderToBackendValue(user.gender)),
-      orientation: this.nullOrString(user.orientation ?? null),
-      preferredGenders: this.preferredGendersFromShowMe(user.showMe, user.preferredGenders),
-      minPreferredAge: user.minPreferredAge ?? 18,
-      maxPreferredAge: user.maxPreferredAge ?? 35,
-      maxDistanceKm: user.maxDistanceKm ?? null,
+      birthDate: this.nullOrDateString(normalizedUser.birthDate),
+      gender: this.nullOrString(this.genderToBackendValue(normalizedUser.gender)),
+      orientation: this.nullOrString(normalizedUser.orientation ?? null),
+      preferredGenders: preferredGendersFromShowMe(
+        normalizedUser.showMe,
+        normalizedUser.preferredGenders
+      )
+        .map((gender) => this.genderToBackendValue(gender))
+        .filter((gender): gender is string => Boolean(gender)),
+      minPreferredAge: normalizedUser.minPreferredAge ?? 18,
+      maxPreferredAge: normalizedUser.maxPreferredAge ?? 35,
+      maxDistanceKm: normalizedUser.maxDistanceKm ?? null,
       latitude,
       longitude,
-      smokes: typeof user.smokes === 'boolean' ? user.smokes : null,
-      drinks: typeof user.drinks === 'boolean' ? user.drinks : null,
-      bio: this.nullOrString(this.userBio(user)),
-      intent: this.nullOrString(this.intentFromText(user.lookingFor, user.intent)),
-      interests: this.nullOrString(user.hobbies),
-      instagramTag: this.nullOrString(user.instagramTag ?? user.favoriteMovie),
-      spotifyTag: this.nullOrString(user.spotifyTag ?? user.favoriteSong),
-      profileReady: isProfileComplete(user),
-      avatarFileId: this.nullOrString(user.avatarFileId)
+      smokes: typeof normalizedUser.smokes === 'boolean' ? normalizedUser.smokes : null,
+      drinks: typeof normalizedUser.drinks === 'boolean' ? normalizedUser.drinks : null,
+      bio: this.nullOrString(this.userBio(normalizedUser)),
+      intent: this.nullOrString(
+        normalizedUser.intent ?? this.intentFromText(normalizedUser.lookingFor, normalizedUser.intent)
+      ),
+      interests: this.nullOrString(normalizedUser.hobbies),
+      instagramTag: this.nullOrString(normalizedUser.instagramTag),
+      spotifyTag: this.nullOrString(normalizedUser.spotifyTag),
+      profileReady: isProfileComplete(normalizedUser),
+      avatarFileId: this.nullOrString(normalizedUser.avatarFileId)
     };
   }
 
@@ -1213,6 +1305,26 @@ export class AppwriteService {
     };
   }
 
+  private mapContractDiscoverProfile(
+    profile: ReturnType<typeof parseDiscoverProfilesPayload>[number]
+  ): DiscoverProfile {
+    return {
+      id: profile.id,
+      name: profile.name,
+      age: profile.age,
+      gender: profile.gender ?? 'other',
+      city: profile.city,
+      distanceKm: profile.distanceKm,
+      compatibilityScore: profile.compatibilityScore,
+      intent: profile.intent,
+      bio: profile.bio,
+      imageUrl: profile.imageUrl,
+      photos: profile.photos,
+      commonInterests: profile.commonInterests,
+      relationshipState: profile.relationshipState
+    };
+  }
+
   private avatarUrl(fileId: string | null): string | null {
     if (!fileId) {
       return null;
@@ -1229,6 +1341,17 @@ export class AppwriteService {
     }
 
     const url = new URL(`${this.endpoint}/storage/buckets/${bucketId}/files/${fileId}/view`);
+
+    url.searchParams.set('project', this.projectId);
+    return url.toString();
+  }
+
+  private attachmentUrl(fileId: string | null): string | null {
+    if (!fileId || !this.configuration.chatAttachmentsBucketId) {
+      return null;
+    }
+
+    const url = new URL(`${this.endpoint}/storage/buckets/${this.configuration.chatAttachmentsBucketId}/files/${fileId}/view`);
     url.searchParams.set('project', this.projectId);
     return url.toString();
   }
@@ -1251,6 +1374,80 @@ export class AppwriteService {
 
     const avatar = this.avatarUrl(this.stringValue(row.avatarFileId));
     return avatar ? [avatar] : [];
+  }
+
+  private async uploadChatAttachment(attachment: ChatAttachment): Promise<{
+    fileId: string;
+    type: ChatAttachment['type'];
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+  }> {
+    if (!this.configuration.chatAttachmentsBucketId) {
+      throw new AppwriteServiceError('Chat attachments bucket not configured', 400);
+    }
+
+    const fileId = this.makeRandomIdentifier();
+    const file = dataUrlToFile(attachment.dataUrl, attachment.name, attachment.mimeType);
+    const formData = new FormData();
+    formData.append('fileId', fileId);
+    formData.append('file', file);
+
+    await this.sendRequest('POST', `/storage/buckets/${this.configuration.chatAttachmentsBucketId}/files`, {
+      body: formData,
+      expectedStatusCodes: [201],
+      isFormData: true
+    });
+
+    return {
+      fileId,
+      type: attachment.type,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes
+    };
+  }
+
+  private makeMessageAttachments(row: Record<string, unknown>): ChatAttachment[] | undefined {
+    const attachmentFileId = this.stringValue(row.attachmentFileId);
+    if (!attachmentFileId) {
+      return undefined;
+    }
+
+    return [
+      {
+        id: attachmentFileId,
+        type: this.chatAttachmentType(
+          this.stringValue(row.messageType),
+          this.stringValue(row.attachmentMimeType)
+        ),
+        name: this.stringValue(row.attachmentName) ?? 'attachment',
+        mimeType: this.stringValue(row.attachmentMimeType) ?? 'application/octet-stream',
+        sizeBytes: this.integerValue(row.attachmentSize) ?? 0,
+        dataUrl: this.attachmentUrl(attachmentFileId) ?? ''
+      }
+    ];
+  }
+
+  private chatAttachmentType(
+    messageType: string | null,
+    mimeType: string | null
+  ): ChatAttachment['type'] {
+    if (messageType === 'image' || messageType === 'video' || messageType === 'audio' || messageType === 'file') {
+      return messageType;
+    }
+
+    if (mimeType?.startsWith('image/')) {
+      return 'image';
+    }
+    if (mimeType?.startsWith('video/')) {
+      return 'video';
+    }
+    if (mimeType?.startsWith('audio/')) {
+      return 'audio';
+    }
+
+    return 'file';
   }
 
   private async uploadAvatarDataUrl(dataUrl: string, fileId: string): Promise<void> {
@@ -1348,33 +1545,6 @@ export class AppwriteService {
       default:
         return null;
     }
-  }
-
-  private preferredGendersFromShowMe(showMe: UserShowMe, preferredGenders: UserGender[] | undefined): string[] {
-    if (Array.isArray(preferredGenders) && preferredGenders.length > 0) {
-      return preferredGenders.map((gender) => this.genderToBackendValue(gender)).filter((value): value is string => Boolean(value));
-    }
-
-    switch (showMe) {
-      case 'men':
-        return ['male'];
-      case 'women':
-        return ['female'];
-      default:
-        return ['male', 'female', 'nonbinary', 'other'];
-    }
-  }
-
-  private showMeValue(preferredGenders: UserGender[]): UserShowMe {
-    if (preferredGenders.length === 1 && preferredGenders[0] === 'male') {
-      return 'men';
-    }
-
-    if (preferredGenders.length === 1 && preferredGenders[0] === 'female') {
-      return 'women';
-    }
-
-    return 'everyone';
   }
 
   private userGenderValue(value: string | null): UserGender | null {
@@ -1751,14 +1921,14 @@ function wait(milliseconds: number): Promise<void> {
   });
 }
 
-function dataUrlToFile(dataUrl: string, fileName: string): File {
+function dataUrlToFile(dataUrl: string, fileName: string, fallbackMimeType?: string): File {
   const [metadata, encoded] = dataUrl.split(',');
   if (!metadata || !encoded) {
     throw new AppwriteServiceError('Invalid image payload', 400);
   }
 
   const mimeMatch = metadata.match(/data:([^;]+);base64/);
-  const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const mimeType = mimeMatch ? mimeMatch[1] : fallbackMimeType ?? 'application/octet-stream';
   const bytes = atob(encoded);
   const buffer = new Uint8Array(bytes.length);
 
