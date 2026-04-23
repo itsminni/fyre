@@ -1308,6 +1308,11 @@ export class AppwriteService {
   private mapContractDiscoverProfile(
     profile: ReturnType<typeof parseDiscoverProfilesPayload>[number]
   ): DiscoverProfile {
+    const photos = profile.photos.length > 0
+      ? profile.photos
+      : this.discoverContractPhotoUrls(profile);
+    const imageUrl = profile.imageUrl ?? photos[0] ?? undefined;
+
     return {
       id: profile.id,
       name: profile.name,
@@ -1318,11 +1323,24 @@ export class AppwriteService {
       compatibilityScore: profile.compatibilityScore,
       intent: profile.intent,
       bio: profile.bio,
-      imageUrl: profile.imageUrl,
-      photos: profile.photos,
+      imageUrl,
+      photos: photos.length > 0 ? photos : imageUrl ? [imageUrl] : undefined,
       commonInterests: profile.commonInterests,
       relationshipState: profile.relationshipState
     };
+  }
+
+  private discoverContractPhotoUrls(
+    profile: ReturnType<typeof parseDiscoverProfilesPayload>[number]
+  ): string[] {
+    if (profile.photoFileIds && profile.photoFileIds.length > 0) {
+      return profile.photoFileIds
+        .map((fileId) => this.storageFileUrl(this.configuration.avatarsBucketId, fileId))
+        .filter((value): value is string => Boolean(value));
+    }
+
+    const avatar = this.avatarUrl(profile.avatarFileId ?? null);
+    return avatar ? [avatar] : [];
   }
 
   private avatarUrl(fileId: string | null): string | null {

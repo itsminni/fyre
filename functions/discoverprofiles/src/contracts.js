@@ -27,6 +27,7 @@ export function makeDiscoverProfileContract(input) {
   }
 
   const photos = toStringArray(input.photos);
+  const photoFileIds = toStringArray(input.photoFileIds);
   const distanceKm = normalizeNullableInteger(input.distanceKm ?? input.distance);
   const compatibilityScore = normalizeNullableInteger(input.compatibilityScore);
   const imageUrl = asString(input.imageUrl) ?? photos[0];
@@ -42,6 +43,8 @@ export function makeDiscoverProfileContract(input) {
     bio,
     imageUrl: imageUrl ?? undefined,
     photos,
+    photoFileIds,
+    avatarFileId: asString(input.avatarFileId) ?? undefined,
     compatibilityScore: compatibilityScore ?? undefined,
     distanceKm: distanceKm ?? undefined,
     distance: distanceKm,

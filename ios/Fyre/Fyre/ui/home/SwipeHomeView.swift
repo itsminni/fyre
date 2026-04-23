@@ -452,6 +452,7 @@ struct SwipeHomeView: View {
 #else
             swipeErrorMessage = L10n.tr("home.swipe.error")
 #endif
+            await loadProfiles()
         }
     }
 

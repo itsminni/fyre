@@ -18,6 +18,8 @@ export interface DiscoverProfileContract {
   bio: string;
   imageUrl?: string;
   photos: string[];
+  photoFileIds?: string[];
+  avatarFileId?: string;
   compatibilityScore?: number;
   distanceKm?: number;
   distance: number | null;

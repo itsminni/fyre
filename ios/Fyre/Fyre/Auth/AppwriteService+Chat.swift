@@ -16,10 +16,12 @@ extension AppwriteService {
 
     func createOrGetThreadDTO(otherUserId: String) async throws -> ThreadDTO {
         let threadId = try await createOrGetThread(otherUserId: otherUserId)
-        guard let thread = try await fetchThread(threadId: threadId) else {
-            throw AppwriteServiceError.invalidResponse
-        }
-        return thread
+        return try await fetchThreadAfterWrite(
+            threadId: threadId,
+            otherUserId: otherUserId,
+            otherUserName: nil,
+            fallbackRelationshipState: .matched
+        )
     }
 
     func fetchThreadDTO(threadId: String) async throws -> ThreadDTO? {
@@ -47,7 +49,10 @@ extension AppwriteService {
             }
             let lastActivity = thread.messages
                 .map(\.sentAt)
-                .last ?? .distantPast
+                .last
+                ?? dateValue(forKey: "createdAt", in: participantRow)
+                ?? dateValue(forKey: "$createdAt", in: participantRow)
+                ?? .distantPast
             threads.append((thread, lastActivity))
         }
 
@@ -161,12 +166,16 @@ extension AppwriteService {
         let isMatch = boolValue(forKey: "matched", in: response) ?? false
         guard isMatch else { return nil }
 
-        guard let threadId = stringValue(forKey: "threadId", in: response),
-              let thread = try await fetchThread(threadId: threadId) else {
+        guard let threadId = stringValue(forKey: "threadId", in: response) else {
             throw AppwriteServiceError.invalidResponse
         }
 
-        return thread
+        return try await fetchThreadAfterWrite(
+            threadId: threadId,
+            otherUserId: otherUserId,
+            otherUserName: otherUserName,
+            fallbackRelationshipState: .matched
+        )
     }
 
     func updateRelationship(threadId: String, action: RelationshipActionDTO) async throws {
@@ -371,6 +380,61 @@ extension AppwriteService {
 }
 
 private extension AppwriteService {
+    func fetchThreadAfterWrite(
+        threadId: String,
+        otherUserId: String,
+        otherUserName: String?,
+        fallbackRelationshipState: RelationshipStateDTO
+    ) async throws -> ThreadDTO {
+        var lastError: Error?
+
+        for attempt in 0..<6 {
+            do {
+                if let thread = try await fetchThread(threadId: threadId) {
+                    return thread
+                }
+            } catch {
+                lastError = error
+            }
+
+            if attempt < 5 {
+                let delayNanoseconds: UInt64 = attempt < 2 ? 250_000_000 : 500_000_000
+                try await Task.sleep(nanoseconds: delayNanoseconds)
+            }
+        }
+
+        if let currentAccountId = try await fetchCurrentAccountId(required: false) {
+            let profileRow = try? await fetchProfileRow(id: otherUserId)
+            let presenceUpdatedAt = dateValue(forKey: "presenceUpdatedAt", in: profileRow)
+            let fallbackName = ThreadNaming.displayName(
+                firstName: stringValue(forKey: "firstName", in: profileRow),
+                lastName: stringValue(forKey: "lastName", in: profileRow),
+                email: stringValue(forKey: "email", in: profileRow),
+                fallback: otherUserName
+            )
+
+            return ThreadDTO(
+                id: stableUUID(from: threadId),
+                remoteId: threadId,
+                name: fallbackName,
+                avatar: threadAvatarURLString(from: profileRow),
+                isOnline: presenceUpdatedAt.map { Date().timeIntervalSince($0) <= 70 } ?? false,
+                lastSeenAt: dateValue(forKey: "lastSeenAt", in: profileRow),
+                currentUserReadAt: nil,
+                otherParticipantReadAt: nil,
+                participantUserIds: [currentAccountId, otherUserId],
+                relationshipState: fallbackRelationshipState,
+                messages: []
+            )
+        }
+
+        if let lastError {
+            throw lastError
+        }
+
+        throw AppwriteServiceError.invalidResponse
+    }
+
     func fetchRelationshipState(currentAccountId: String, otherUserId: String?) async throws -> RelationshipStateDTO {
         guard let otherUserId, !otherUserId.isEmpty else {
             return .matched

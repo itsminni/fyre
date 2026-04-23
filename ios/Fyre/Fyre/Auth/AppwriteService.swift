@@ -1387,6 +1387,10 @@ actor AppwriteService {
             return directURLs
         }
 
+        if let directURL = stringValue(forKey: "imageUrl", in: row).flatMap(URL.init(string:)) {
+            return [directURL]
+        }
+
         let fileIds = discoverPhotoFileIds(from: row)
         let urls = fileIds.compactMap(avatarURL(fileId:))
         if !urls.isEmpty {
