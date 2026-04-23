@@ -216,10 +216,27 @@ export interface EventAdminDraftInput {
 export interface AppSettings {
   themeMode: ThemeMode;
   notificationsEnabled: boolean;
+  matchNotificationsEnabled: boolean;
+  messageNotificationsEnabled: boolean;
+  eventReminderNotificationsEnabled: boolean;
   notificationsPollingEnabled: boolean;
   browserPushEnabled: boolean;
   showAge: boolean;
   showDistance: boolean;
+  showIntent: boolean;
+  showInterests: boolean;
+  showInstagramTag: boolean;
+  showSpotifyTag: boolean;
+  chatBackgroundStyle: ChatBackgroundStyle;
+  chatBackgroundBrightness: number;
+  chatBackgroundColor1: string;
+  chatBackgroundColor2: string;
+  chatBackgroundColor3: string;
+  outgoingBubblePalette: ChatBubblePalette;
+  incomingBubblePalette: ChatBubblePalette;
+  sendButtonColor1: string;
+  sendButtonColor2: string;
+  sendButtonColor3: string;
 }
 
 export interface PersistedAppState {
@@ -251,6 +268,7 @@ export interface ProfileUpdateInput {
   gender: UserGender;
   orientation: UserOrientation;
   showMe: UserShowMe;
+  preferredGenders: UserGender[];
   smokes: boolean;
   drinks: boolean;
   bio: string;
@@ -262,7 +280,9 @@ export interface ProfileUpdateInput {
   passions: string;
   lookingFor: string;
   instagram: string;
+  instagramTag: string;
   telegram: string;
+  spotifyTag: string;
   website: string;
   favoriteSong: string;
   favoriteMovie: string;

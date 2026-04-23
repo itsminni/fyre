@@ -25,10 +25,27 @@ const STORAGE_KEY = 'fyre_web_state_v1';
 const defaultSettings: AppSettings = {
   themeMode: 'system',
   notificationsEnabled: true,
+  matchNotificationsEnabled: true,
+  messageNotificationsEnabled: true,
+  eventReminderNotificationsEnabled: true,
   notificationsPollingEnabled: true,
   browserPushEnabled: false,
   showAge: true,
-  showDistance: true
+  showDistance: true,
+  showIntent: true,
+  showInterests: true,
+  showInstagramTag: true,
+  showSpotifyTag: true,
+  chatBackgroundStyle: 'midnight',
+  chatBackgroundBrightness: 0,
+  chatBackgroundColor1: '#3F4755',
+  chatBackgroundColor2: '#8B7A74',
+  chatBackgroundColor3: '#B9A89B',
+  outgoingBubblePalette: 'sunset',
+  incomingBubblePalette: 'graphite',
+  sendButtonColor1: '#FF9A00',
+  sendButtonColor2: '#FF8A1F',
+  sendButtonColor3: '#E14D33'
 };
 
 export function createDefaultPersistedState(): PersistedAppState {

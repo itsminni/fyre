@@ -114,6 +114,7 @@ interface AppContextValue {
   updateAccountPreferences(input: {
     orientation: UserOrientation;
     showMe: User['showMe'];
+    preferredGenders: UserGender[];
     smokes: boolean;
     drinks: boolean;
     bio: string;
@@ -125,7 +126,9 @@ interface AppContextValue {
     passions: string;
     lookingFor: string;
     instagram: string;
+    instagramTag: string;
     telegram: string;
+    spotifyTag: string;
     website: string;
     favoriteSong: string;
     favoriteMovie: string;
@@ -144,6 +147,7 @@ interface AppContextValue {
   sendMessage(input: SendMessageInput): void;
   markThreadRead(threadId: string): void;
   deleteThread(threadId: string): void;
+  applyRelationshipAction(threadId: string, action: RelationshipAction): Promise<string | null>;
   submitSwipeDecision(profileId: string, decision: SwipeDecision): Promise<SwipeDecisionResult>;
   fetchMainEventAdminState(eventId?: string): Promise<EventAdminActionResult>;
   updateMainEventAsAdmin(eventId: string, draft: EventAdminDraftInput): Promise<EventAdminActionResult>;
@@ -560,7 +564,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
   const pushNotification = useCallback(
     (payload: Omit<AppNotification, 'id' | 'createdAt' | 'readAt'>): void => {
-      if (!persisted.settings.notificationsEnabled) {
+      if (!isNotificationEnabledForType(persisted.settings, payload.type)) {
         return;
       }
 
@@ -579,7 +583,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         ].slice(0, 180)
       }));
     },
-    [persisted.settings.notificationsEnabled]
+    [persisted.settings]
   );
 
   const signUp = useCallback(
@@ -813,6 +817,11 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'La distanza massima deve essere tra 1 e 300 km.';
       }
 
+      const preferredGenders = normalizePreferredGenders(input.preferredGenders);
+      if (preferredGenders.length === 0) {
+        return 'Seleziona almeno una preferenza di genere.';
+      }
+
       const shouldRemoveMainEvent = willLoseMainEventRegistrations(
         persisted.mainEventState,
         currentUser,
@@ -841,7 +850,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           birthDate: input.birthDate,
           gender: input.gender,
           orientation: input.orientation,
-          showMe: input.showMe,
+          showMe: inferShowMeFromPreferredGenders(preferredGenders, input.showMe),
+          preferredGenders,
           smokes: input.smokes,
           drinks: input.drinks,
           bio: input.bio.trim(),
@@ -853,7 +863,9 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           passions: input.passions.trim(),
           lookingFor: input.lookingFor.trim(),
           instagram: input.instagram.trim(),
+          instagramTag: normalizeSocialHandle(input.instagramTag),
           telegram: input.telegram.trim(),
+          spotifyTag: normalizeSocialHandle(input.spotifyTag),
           website: input.website.trim(),
           favoriteSong: input.favoriteSong.trim(),
           favoriteMovie: input.favoriteMovie.trim()
@@ -880,6 +892,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     (input: {
       orientation: UserOrientation;
       showMe: User['showMe'];
+      preferredGenders: UserGender[];
       smokes: boolean;
       drinks: boolean;
       bio: string;
@@ -891,7 +904,9 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       passions: string;
       lookingFor: string;
       instagram: string;
+      instagramTag: string;
       telegram: string;
+      spotifyTag: string;
       website: string;
       favoriteSong: string;
       favoriteMovie: string;
@@ -908,6 +923,11 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Distanza non valida.';
       }
 
+      const preferredGenders = normalizePreferredGenders(input.preferredGenders);
+      if (preferredGenders.length === 0) {
+        return 'Seleziona almeno una preferenza di genere.';
+      }
+
       const shouldRemoveMainEvent = willLoseMainEventRegistrations(
         persisted.mainEventState,
         currentUser,
@@ -918,7 +938,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       withCurrentUser((existing) => ({
         ...existing,
         orientation: input.orientation,
-        showMe: input.showMe,
+        showMe: inferShowMeFromPreferredGenders(preferredGenders, input.showMe),
+        preferredGenders,
         smokes: input.smokes,
         drinks: input.drinks,
         bio: input.bio.trim(),
@@ -930,7 +951,9 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         passions: input.passions.trim(),
         lookingFor: input.lookingFor.trim(),
         instagram: input.instagram.trim(),
+        instagramTag: normalizeSocialHandle(input.instagramTag),
         telegram: input.telegram.trim(),
+        spotifyTag: normalizeSocialHandle(input.spotifyTag),
         website: input.website.trim(),
         favoriteSong: input.favoriteSong.trim(),
         favoriteMovie: input.favoriteMovie.trim()
@@ -1286,6 +1309,32 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     }));
   }, []);
 
+  const applyRelationshipAction = useCallback(
+    async (threadId: string, action: RelationshipAction): Promise<string | null> => {
+      const thread = persisted.threads.find((candidate) => candidate.id === threadId);
+      if (!thread) {
+        return 'Conversazione non trovata.';
+      }
+
+      if (IS_BACKEND_MODE && appwriteService && appwriteConfiguration?.manageRelationshipFunctionId) {
+        try {
+          await appwriteService.updateRelationship(threadId, action);
+        } catch {
+          return 'Operazione relazione non riuscita. Riprova.';
+        }
+      }
+
+      setPersisted((prev) => ({
+        ...prev,
+        threads: prev.threads.filter((candidate) => candidate.id !== threadId),
+        notifications: prev.notifications.filter((notification) => notification.threadId !== threadId)
+      }));
+
+      return null;
+    },
+    [persisted.threads]
+  );
+
   const submitSwipeDecision = useCallback(
     async (profileId: string, decision: SwipeDecision): Promise<SwipeDecisionResult> => {
       const profile = discoverProfiles.find((candidate) => candidate.id === profileId);
@@ -1327,7 +1376,9 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
               thread,
               ...prev.threads.filter((existingThread) => existingThread.id !== thread.id)
             ],
-            notifications: [matchNotification, ...prev.notifications].slice(0, 180)
+            notifications: isNotificationEnabledForType(prev.settings, 'match')
+              ? [matchNotification, ...prev.notifications].slice(0, 180)
+              : prev.notifications
           }));
 
           return {
@@ -1392,6 +1443,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         createdAt,
         matchedAt: createdAt,
         lastSeenAt: createdAt,
+        relationshipState: 'matched',
         messages: [openerMessage]
       };
 
@@ -1407,7 +1459,9 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       setPersisted((prev) => ({
         ...prev,
         threads: [newThread, ...prev.threads],
-        notifications: [matchNotification, ...prev.notifications].slice(0, 180)
+        notifications: isNotificationEnabledForType(prev.settings, 'match')
+          ? [matchNotification, ...prev.notifications].slice(0, 180)
+          : prev.notifications
       }));
 
       return {
@@ -1670,7 +1724,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           threadId: target.id
         };
 
-        const nextNotifications: AppNotification[] = prev.settings.notificationsEnabled
+        const nextNotifications: AppNotification[] = isNotificationEnabledForType(prev.settings, 'chat')
           ? [incomingNotification, ...prev.notifications].slice(0, 180)
           : prev.notifications;
 
@@ -1782,6 +1836,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       sendMessage,
       markThreadRead,
       deleteThread,
+      applyRelationshipAction,
       submitSwipeDecision,
       fetchMainEventAdminState,
       updateMainEventAsAdmin,
@@ -1830,6 +1885,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       sendMessage,
       markThreadRead,
       deleteThread,
+      applyRelationshipAction,
       submitSwipeDecision,
       fetchMainEventAdminState,
       updateMainEventAsAdmin,
