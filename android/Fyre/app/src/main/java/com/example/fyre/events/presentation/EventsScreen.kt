@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -22,10 +23,28 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.fyre.events.model.EventItem
 
 @Composable
-fun EventsScreen() {
-    val viewModel: EventsViewModel = viewModel()
+fun EventsScreen(
+    currentUserEmail: String? = null,
+    currentUserDisplayName: String? = null
+) {
+    val userId = remember(currentUserEmail) {
+        currentUserEmail?.trim()?.lowercase().takeUnless { it.isNullOrBlank() } ?: "user_default"
+    }
+    val displayName = remember(currentUserDisplayName) {
+        currentUserDisplayName?.trim().takeUnless { it.isNullOrBlank() } ?: "Utente"
+    }
+
+    val viewModel: EventsViewModel = viewModel(
+        factory = EventsViewModelFactory(
+            currentUserId = userId,
+            currentUserDisplayName = displayName,
+            currentUserEmail = currentUserEmail
+        )
+    )
+
     val events by viewModel.events.collectAsState()
     val selectedEventId by viewModel.selectedEventId.collectAsState()
+    val isAdminInMock by viewModel.isAdminInMock.collectAsState()
 
     LaunchedEffect(selectedEventId) {
         if (selectedEventId != null) {
@@ -37,8 +56,29 @@ fun EventsScreen() {
     if (selected != null) {
         EventDetailScreen(
             event = selected,
+            isAdminInMock = isAdminInMock,
+            userStateLabel = viewModel.currentUserEventStateLabel(),
+            canJoin = viewModel.canJoinSelected(),
+            canCancel = viewModel.canCancelSelected(),
+            canWaitlist = viewModel.canWaitlistSelected(),
             onBack = { viewModel.closeEventDetail() },
-            onSetStatus = { status -> viewModel.updateRegistrationForSelected(status) }
+            onJoin = { viewModel.joinSelected() },
+            onCancel = { viewModel.cancelSelected() },
+            onWaitlist = { viewModel.waitlistSelected() },
+            onAdminUpdateEvent = { title, dateText, place, description, deadlineText, capacity, rules ->
+                viewModel.adminUpdateSelectedEvent(
+                    title = title,
+                    dateText = dateText,
+                    place = place,
+                    description = description,
+                    deadlineText = deadlineText,
+                    capacity = capacity,
+                    rules = rules
+                )
+            },
+            onAdminSetParticipantStatus = { participantId, status ->
+                viewModel.adminSetParticipantStatus(participantId, status)
+            }
         )
         return
     }
@@ -85,7 +125,7 @@ private fun EventsListScreen(
                         )
                         Text(text = event.dateText, style = MaterialTheme.typography.bodyMedium)
                         Text(text = event.place, style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Stato: ${event.registrationStatus.name}", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Stato utente: ${event.userState.name}", style = MaterialTheme.typography.bodyMedium)
                         Text(
                             text = "Capienza ${event.registeredCount}/${event.capacity} - Deadline ${event.deadlineText}",
                             style = MaterialTheme.typography.labelMedium

@@ -7,6 +7,24 @@ enum class RegistrationStatus {
     Closed
 }
 
+enum class EventUserRole {
+    Participant,
+    AdminMock
+}
+
+enum class EventUserState {
+    NotRegistered,
+    Registered,
+    Waitlist,
+    Closed
+}
+
+data class EventParticipant(
+    val id: String,
+    val displayName: String,
+    val status: RegistrationStatus
+)
+
 enum class EventSyncStatus {
     LocalOnly,
     Synced,
@@ -27,8 +45,11 @@ data class EventItem(
     val description: String,
     val rules: List<String>,
     val registrationStatus: RegistrationStatus,
+    val userState: EventUserState,
+    val userRole: EventUserRole,
     val capacity: Int,
     val registeredCount: Int,
+    val participants: List<EventParticipant>,
     val deadlineText: String,
     val liveMetrics: LiveMetrics,
     val backendEventId: String? = null,

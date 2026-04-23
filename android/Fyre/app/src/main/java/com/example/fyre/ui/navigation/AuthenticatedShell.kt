@@ -11,6 +11,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -39,6 +40,7 @@ fun AuthenticatedShell(
     onLogout: () -> Unit
 ) {
     val navController = rememberNavController()
+    val currentUser by authViewModel.currentUser.collectAsState()
     val tabs = listOf(
         MainTab(MainRoute.Home, "Discovery", Icons.Filled.Explore),
         MainTab(MainRoute.Messages, "Messaggi", Icons.AutoMirrored.Filled.Chat),
@@ -115,11 +117,13 @@ fun AuthenticatedShell(
                     }
                 )
             }
-            composable(MainRoute.Events) { EventsScreen() }
+            composable(MainRoute.Events) {
+                EventsScreen(
+                    currentUserEmail = currentUser?.email,
+                    currentUserDisplayName = currentUser?.displayName
+                )
+            }
             composable(MainRoute.Account) { AccountScreen(onLogout = onLogout) }
         }
     }
 }
-
-
-
