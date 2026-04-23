@@ -1,4 +1,4 @@
-import { makeChatMessageContract } from "../../../shared/contracts/index.js";
+import { makeChatMessageContract } from "./contracts.js";
 
 export default async ({ req, res, error }) => {
   try {

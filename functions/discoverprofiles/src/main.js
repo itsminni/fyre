@@ -1,7 +1,7 @@
 import {
   makeDiscoverProfileContract,
   seededIntegerFromString
-} from "../../../shared/contracts/index.js";
+} from "./contracts.js";
 
 const MAX_RESULTS = 40;
 const DEFAULT_MIN_AGE = 18;
