@@ -28,10 +28,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.fyre.R
 import com.example.fyre.ui.components.FyreButton
 import com.example.fyre.ui.theme.FyreGradientEnd
 import com.example.fyre.ui.theme.FyreGradientStart
@@ -56,6 +58,8 @@ fun WelcomeScreen(
     onNavigateToRegister: () -> Unit,
     onNavigateToTerms: () -> Unit
 ) {
+    val appName = stringResource(R.string.app_name)
+
     // ============================================================
     // Animazioni di entrata
     // ============================================================
@@ -151,7 +155,7 @@ fun WelcomeScreen(
 
             // --- Nome app ---
             Text(
-                text = "Fyre",
+                text = appName,
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontSize = 52.sp,
                     letterSpacing = (-1).sp
@@ -170,7 +174,7 @@ fun WelcomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Benvenuto",
+                    text = stringResource(R.string.welcome_title),
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onBackground,
                     fontWeight = FontWeight.SemiBold
@@ -179,7 +183,7 @@ fun WelcomeScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Accedi o crea un account per iniziare\nla tua esperienza con Fyre.",
+                    text = stringResource(R.string.welcome_description, appName),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center,
@@ -200,7 +204,7 @@ fun WelcomeScreen(
             ) {
                 // --- Bottone primario: Accedi ---
                 FyreButton(
-                    text = "Accedi",
+                    text = stringResource(R.string.welcome_cta_login),
                     onClick = onNavigateToLogin
                 )
 
@@ -217,7 +221,7 @@ fun WelcomeScreen(
                     )
                 ) {
                     Text(
-                        text = "Crea un account",
+                        text = stringResource(R.string.welcome_cta_create_account),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -227,7 +231,7 @@ fun WelcomeScreen(
                     onClick = onNavigateToTerms,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Leggi Termini e Privacy")
+                    Text(stringResource(R.string.welcome_terms_link))
                 }
             }
         }
@@ -236,7 +240,7 @@ fun WelcomeScreen(
         // Footer — testo in basso
         // ============================================================
         Text(
-            text = "Progetto scolastico — Fyre App",
+            text = stringResource(R.string.welcome_footer, appName),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f),
             modifier = Modifier

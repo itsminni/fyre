@@ -18,9 +18,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.fyre.R
 import com.example.fyre.account.model.NotificationSettings
 import com.example.fyre.core.notifications.EventReminderScheduler
 import com.example.fyre.core.notifications.NotificationChannels
@@ -83,8 +85,8 @@ fun EventsScreen(
                         eventDate = updatedSelected.dateText
                     )
                     notificationGateway?.showLocalNotification(
-                        title = "Reminder impostato",
-                        body = "Ti ricorderemo ${updatedSelected.title}",
+                        title = context.getString(R.string.events_reminder_set_title),
+                        body = context.getString(R.string.events_reminder_set_body, updatedSelected.title),
                         channelId = NotificationChannels.EVENTS
                     )
                 }
@@ -127,7 +129,7 @@ private fun EventsListScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text(
-            text = "Eventi",
+            text = stringResource(R.string.events_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold
         )
@@ -151,15 +153,35 @@ private fun EventsListScreen(
                         )
                         Text(text = event.dateText, style = MaterialTheme.typography.bodyMedium)
                         Text(text = event.place, style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Stato utente: ${event.userState.name}", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            text = "Capienza ${event.registeredCount}/${event.capacity} - Deadline ${event.deadlineText}",
+                            text = stringResource(R.string.events_user_state, event.userState.name),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = stringResource(
+                                R.string.events_capacity_deadline,
+                                event.registeredCount,
+                                event.capacity,
+                                event.deadlineText
+                            ),
                             style = MaterialTheme.typography.labelMedium
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(text = "Online ${event.liveMetrics.viewersOnline}", style = MaterialTheme.typography.labelSmall)
-                            Text(text = "Check-in ${event.liveMetrics.checkIns}", style = MaterialTheme.typography.labelSmall)
-                            Text(text = "Chat/min ${event.liveMetrics.chatPerMinute}", style = MaterialTheme.typography.labelSmall)
+                            Text(
+                                text = stringResource(R.string.events_metric_online, event.liveMetrics.viewersOnline),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                text = stringResource(R.string.events_metric_checkin, event.liveMetrics.checkIns),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.events_metric_chat_per_min,
+                                    event.liveMetrics.chatPerMinute
+                                ),
+                                style = MaterialTheme.typography.labelSmall
+                            )
                         }
                     }
                 }

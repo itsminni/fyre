@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.example.fyre.R
 import com.example.fyre.data.local.SessionDataStore
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -49,7 +51,7 @@ fun NavGraph(
 
     if (sessionState == AppSessionState.Loading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(text = "Caricamento sessione...")
+            Text(text = stringResource(R.string.nav_loading_session))
         }
         return
     }

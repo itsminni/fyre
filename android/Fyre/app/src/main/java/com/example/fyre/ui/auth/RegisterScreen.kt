@@ -36,9 +36,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.fyre.R
 import com.example.fyre.ui.components.FyreButton
 import com.example.fyre.ui.components.FyrePasswordField
 import com.example.fyre.ui.components.FyreTextField
@@ -63,6 +65,8 @@ fun RegisterScreen(
     onNavigateToTerms: () -> Unit,
     onRegisterSuccess: () -> Unit
 ) {
+    val appName = stringResource(R.string.app_name)
+
     // Raccoglie lo stato dal ViewModel
     val displayName by viewModel.displayName.collectAsState()
     val email by viewModel.email.collectAsState()
@@ -104,14 +108,14 @@ fun RegisterScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             Text(
-                text = "Crea Account",
+                text = stringResource(R.string.auth_register_title),
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold
             )
 
             Text(
-                text = "Unisciti a Fyre 🔥",
+                text = stringResource(R.string.auth_register_subtitle, appName),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
             )
@@ -139,14 +143,14 @@ fun RegisterScreen(
                     FyreTextField(
                         value = displayName,
                         onValueChange = { viewModel.updateDisplayName(it) },
-                        label = "Nome",
-                        placeholder = "Mario Rossi",
+                        label = stringResource(R.string.common_name),
+                        placeholder = stringResource(R.string.auth_register_name_placeholder),
                         isError = displayNameError != null,
                         supportingText = displayNameError,
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Person,
-                                contentDescription = "Nome",
+                                contentDescription = stringResource(R.string.common_name),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -156,14 +160,14 @@ fun RegisterScreen(
                     FyreTextField(
                         value = email,
                         onValueChange = { viewModel.updateEmail(it) },
-                        label = "Email",
-                        placeholder = "mario.rossi@email.com",
+                        label = stringResource(R.string.common_email),
+                        placeholder = stringResource(R.string.auth_login_email_placeholder),
                         isError = emailError != null,
                         supportingText = emailError,
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Email,
-                                contentDescription = "Email",
+                                contentDescription = stringResource(R.string.common_email),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -173,28 +177,32 @@ fun RegisterScreen(
                     FyrePasswordField(
                         value = password,
                         onValueChange = { viewModel.updatePassword(it) },
-                        label = "Password",
+                        label = stringResource(R.string.common_password),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Lock,
-                                contentDescription = "Password",
+                                contentDescription = stringResource(R.string.common_password),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
                         isError = passwordError != null,
                         supportingText = passwordError
-                            ?: if (password.isNotEmpty()) "Min. 8 caratteri, 1 maiuscola, 1 numero" else null
+                            ?: if (password.isNotEmpty()) {
+                                stringResource(R.string.auth_register_password_hint)
+                            } else {
+                                null
+                            }
                     )
 
                     // --- Campo Conferma Password ---
                     FyrePasswordField(
                         value = confirmPassword,
                         onValueChange = { viewModel.updateConfirmPassword(it) },
-                        label = "Conferma Password",
+                        label = stringResource(R.string.auth_register_confirm_password),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Lock,
-                                contentDescription = "Conferma Password",
+                                contentDescription = stringResource(R.string.auth_register_confirm_password),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
@@ -211,7 +219,7 @@ fun RegisterScreen(
                             onCheckedChange = { viewModel.setTermsAccepted(it) }
                         )
                         Text(
-                            text = "Accetto Termini e Privacy",
+                            text = stringResource(R.string.auth_register_terms_checkbox),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.clickable { viewModel.setTermsAccepted(!termsAccepted) }
                         )
@@ -221,7 +229,7 @@ fun RegisterScreen(
                         onClick = onNavigateToTerms,
                         modifier = Modifier.align(Alignment.Start)
                     ) {
-                        Text("Leggi Termini e Privacy")
+                        Text(stringResource(R.string.welcome_terms_link))
                     }
 
                     if (termsError != null) {
@@ -253,7 +261,11 @@ fun RegisterScreen(
 
                     // --- Bottone Registrazione ---
                     FyreButton(
-                        text = if (isLoading) "Registrazione..." else "Registrati",
+                        text = if (isLoading) {
+                            stringResource(R.string.auth_register_loading)
+                        } else {
+                            stringResource(R.string.auth_register_cta)
+                        },
                         onClick = { viewModel.register() },
                         isLoading = isLoading
                     )
@@ -267,7 +279,7 @@ fun RegisterScreen(
             // ============================================================
             TextButton(onClick = onNavigateToLogin) {
                 Text(
-                    text = "Hai già un account? Accedi",
+                    text = stringResource(R.string.auth_register_login_prompt),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold
@@ -287,7 +299,7 @@ fun RegisterScreen(
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Torna indietro",
+                contentDescription = stringResource(R.string.common_back),
                 tint = MaterialTheme.colorScheme.onBackground
             )
         }

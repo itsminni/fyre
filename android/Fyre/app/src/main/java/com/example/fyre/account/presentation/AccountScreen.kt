@@ -29,10 +29,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.fyre.R
 import com.example.fyre.account.model.AccountSection
 import com.example.fyre.account.model.AccountUiState
 import com.example.fyre.account.model.ThemeMode
@@ -117,10 +119,18 @@ private fun AccountHubSection(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(text = "Account e profilo", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            text = stringResource(R.string.account_hub_title),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold
+        )
         if (state.displayName.isNotBlank() || state.email.isNotBlank()) {
             Text(
-                text = "${state.displayName.ifBlank { "Utente" }} - ${state.email.ifBlank { "email non disponibile" }}",
+                text = stringResource(
+                    R.string.account_user_email_summary,
+                    state.displayName.ifBlank { stringResource(R.string.account_user_fallback) },
+                    state.email.ifBlank { stringResource(R.string.account_email_fallback) }
+                ),
                 style = MaterialTheme.typography.bodyMedium
             )
         }
@@ -131,7 +141,7 @@ private fun AccountHubSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = section.title,
+                    text = stringResource(section.titleRes),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(14.dp)
                 )
@@ -144,10 +154,10 @@ private fun AccountHubSection(
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.Logout,
-                contentDescription = "Logout",
+                contentDescription = stringResource(R.string.common_logout),
                 modifier = Modifier.padding(end = 8.dp)
             )
-            Text(text = "Esci")
+            Text(text = stringResource(R.string.common_logout))
         }
     }
 }
@@ -160,36 +170,36 @@ private fun EditProfileSection(
 ) {
     val profile = state.profileDraft
 
-    SectionScaffold(title = "Modifica profilo", onBack = onBack) {
+    SectionScaffold(title = stringResource(R.string.account_section_edit_profile), onBack = onBack) {
         OutlinedTextField(
             value = profile.firstName,
             onValueChange = { onUpdate(profile.copy(firstName = it)) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Nome") }
+            label = { Text(stringResource(R.string.common_name)) }
         )
         OutlinedTextField(
             value = profile.lastName,
             onValueChange = { onUpdate(profile.copy(lastName = it)) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Cognome") }
+            label = { Text(stringResource(R.string.common_last_name)) }
         )
         OutlinedTextField(
             value = profile.username,
             onValueChange = { onUpdate(profile.copy(username = it)) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Username") }
+            label = { Text(stringResource(R.string.common_username)) }
         )
         OutlinedTextField(
             value = profile.city,
             onValueChange = { onUpdate(profile.copy(city = it)) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Citta") }
+            label = { Text(stringResource(R.string.common_city)) }
         )
         OutlinedTextField(
             value = profile.bio,
             onValueChange = { onUpdate(profile.copy(bio = it)) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Bio") }
+            label = { Text(stringResource(R.string.common_bio)) }
         )
         state.localStatusMessage?.let {
             Text(text = it, style = MaterialTheme.typography.labelMedium)
@@ -205,7 +215,7 @@ private fun DiscoveryPreferencesSection(
 ) {
     val prefs = state.discoveryPreferences
 
-    SectionScaffold(title = "Preferenze discovery", onBack = onBack) {
+    SectionScaffold(title = stringResource(R.string.account_section_discovery_preferences), onBack = onBack) {
         OutlinedTextField(
             value = prefs.minAge.toString(),
             onValueChange = {
@@ -213,7 +223,7 @@ private fun DiscoveryPreferencesSection(
                 onUpdate(prefs.copy(minAge = next.coerceAtLeast(18)))
             },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Eta minima") },
+            label = { Text(stringResource(R.string.account_age_min_label)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
         )
         OutlinedTextField(
@@ -223,7 +233,7 @@ private fun DiscoveryPreferencesSection(
                 onUpdate(prefs.copy(maxAge = next.coerceAtLeast(prefs.minAge)))
             },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Eta massima") },
+            label = { Text(stringResource(R.string.account_age_max_label)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
         )
         OutlinedTextField(
@@ -233,17 +243,17 @@ private fun DiscoveryPreferencesSection(
                 onUpdate(prefs.copy(maxDistanceKm = next.coerceAtLeast(1)))
             },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Distanza massima (km)") },
+            label = { Text(stringResource(R.string.account_distance_max_label)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
         )
         OutlinedTextField(
             value = prefs.intent,
             onValueChange = { onUpdate(prefs.copy(intent = it)) },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Intent") }
+            label = { Text(stringResource(R.string.account_intent_label)) }
         )
         SettingSwitchRow(
-            label = "Mostra solo profili verificati",
+            label = stringResource(R.string.account_switch_only_verified),
             checked = prefs.showOnlyVerified,
             onCheckedChange = { onUpdate(prefs.copy(showOnlyVerified = it)) }
         )
@@ -261,29 +271,29 @@ private fun NotificationsSection(
 ) {
     val notifications = state.notificationSettings
 
-    SectionScaffold(title = "Notifiche", onBack = onBack) {
+    SectionScaffold(title = stringResource(R.string.account_section_notifications), onBack = onBack) {
         SettingSwitchRow(
-            label = "Push notifications",
+            label = stringResource(R.string.account_switch_push_notifications),
             checked = notifications.pushEnabled,
             onCheckedChange = { onUpdate(notifications.copy(pushEnabled = it)) }
         )
         SettingSwitchRow(
-            label = "Messaggi",
+            label = stringResource(R.string.account_switch_messages),
             checked = notifications.messageNotifications,
             onCheckedChange = { onUpdate(notifications.copy(messageNotifications = it)) }
         )
         SettingSwitchRow(
-            label = "Nuovi match",
+            label = stringResource(R.string.account_switch_matches),
             checked = notifications.matchNotifications,
             onCheckedChange = { onUpdate(notifications.copy(matchNotifications = it)) }
         )
         SettingSwitchRow(
-            label = "Promemoria eventi",
+            label = stringResource(R.string.account_switch_event_reminders),
             checked = notifications.eventReminders,
             onCheckedChange = { onUpdate(notifications.copy(eventReminders = it)) }
         )
         SettingSwitchRow(
-            label = "Comunicazioni marketing",
+            label = stringResource(R.string.account_switch_marketing),
             checked = notifications.marketingUpdates,
             onCheckedChange = { onUpdate(notifications.copy(marketingUpdates = it)) }
         )
@@ -301,24 +311,24 @@ private fun SecuritySection(
 ) {
     val security = state.securitySettings
 
-    SectionScaffold(title = "Sicurezza", onBack = onBack) {
+    SectionScaffold(title = stringResource(R.string.account_section_security), onBack = onBack) {
         SettingSwitchRow(
-            label = "Sblocco biometrico",
+            label = stringResource(R.string.account_switch_biometric),
             checked = security.biometricUnlock,
             onCheckedChange = { onUpdate(security.copy(biometricUnlock = it)) }
         )
         SettingSwitchRow(
-            label = "Autenticazione a due fattori",
+            label = stringResource(R.string.account_switch_two_factor),
             checked = security.twoFactorEnabled,
             onCheckedChange = { onUpdate(security.copy(twoFactorEnabled = it)) }
         )
         SettingSwitchRow(
-            label = "Nascondi stato online",
+            label = stringResource(R.string.account_switch_hide_online),
             checked = security.hideOnlineStatus,
             onCheckedChange = { onUpdate(security.copy(hideOnlineStatus = it)) }
         )
         SettingSwitchRow(
-            label = "PIN sessione",
+            label = stringResource(R.string.account_switch_session_pin),
             checked = security.sessionPinEnabled,
             onCheckedChange = { onUpdate(security.copy(sessionPinEnabled = it)) }
         )
@@ -339,39 +349,47 @@ private fun AppearanceSection(
     val appearance = state.appearanceSettings
     val chat = state.chatCustomizationSettings
 
-    SectionScaffold(title = "Aspetto", onBack = onBack) {
-        Text(text = "Tema", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    SectionScaffold(title = stringResource(R.string.account_section_appearance), onBack = onBack) {
+        Text(
+            text = stringResource(R.string.account_theme_label),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { onSetThemeMode(ThemeMode.System) }) {
-                Text("Sistema")
+                Text(stringResource(R.string.account_theme_system))
             }
             OutlinedButton(onClick = { onSetThemeMode(ThemeMode.Light) }) {
-                Text("Chiaro")
+                Text(stringResource(R.string.account_theme_light))
             }
             OutlinedButton(onClick = { onSetThemeMode(ThemeMode.Dark) }) {
-                Text("Scuro")
+                Text(stringResource(R.string.account_theme_dark))
             }
         }
-        Text(text = "Tema attuale: ${appearance.themeMode.name}")
+        Text(text = stringResource(R.string.account_theme_current, appearance.themeMode.name))
         SettingSwitchRow(
-            label = "Dynamic color",
+            label = stringResource(R.string.account_switch_dynamic_color),
             checked = appearance.dynamicColor,
             onCheckedChange = { onUpdate(appearance.copy(dynamicColor = it)) }
         )
         SettingSwitchRow(
-            label = "Modalita compatta",
+            label = stringResource(R.string.account_switch_compact_mode),
             checked = appearance.compactMode,
             onCheckedChange = { onUpdate(appearance.copy(compactMode = it)) }
         )
 
-        Text(text = "Chat", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = stringResource(R.string.account_chat_label),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
         SettingSwitchRow(
-            label = "Bubble compatte",
+            label = stringResource(R.string.account_switch_compact_bubbles),
             checked = chat.compactBubbles,
             onCheckedChange = { onUpdateChatCustomization(chat.copy(compactBubbles = it)) }
         )
         SettingSwitchRow(
-            label = "Mostra orario messaggi",
+            label = stringResource(R.string.account_switch_show_timestamps),
             checked = chat.showTimestamps,
             onCheckedChange = { onUpdateChatCustomization(chat.copy(showTimestamps = it)) }
         )
@@ -400,11 +418,11 @@ private fun EventHistorySection(
             IconButton(onClick = onBack) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Torna all'hub account"
+                    contentDescription = stringResource(R.string.account_back_to_hub_cd)
                 )
             }
             Text(
-                text = "Cronologia eventi",
+                text = stringResource(R.string.account_section_event_history),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
@@ -422,7 +440,10 @@ private fun EventHistorySection(
                         Text(item.title, style = MaterialTheme.typography.titleMedium)
                         Text(item.dateText, style = MaterialTheme.typography.bodyMedium)
                         Text(item.place, style = MaterialTheme.typography.bodyMedium)
-                        Text("Stato: ${item.status.name}", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            text = stringResource(R.string.account_event_status, item.status.name),
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
                 }
             }
@@ -451,7 +472,7 @@ private fun SectionScaffold(
             IconButton(onClick = onBack) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Torna all'hub account"
+                    contentDescription = stringResource(R.string.account_back_to_hub_cd)
                 )
             }
             Text(text = title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)

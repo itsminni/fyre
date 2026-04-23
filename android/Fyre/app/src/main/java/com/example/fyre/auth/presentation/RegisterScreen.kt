@@ -33,24 +33,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.fyre.R
 import com.example.fyre.core.ui.components.FyreButton
 import com.example.fyre.core.ui.components.FyrePasswordField
 import com.example.fyre.core.ui.components.FyreTextField
 
-/**
- * Schermata di Registrazione.
- *
- * Form completo con nome, email, password e conferma password.
- * Include validazione in tempo reale della robustezza della password.
- *
- * @param viewModel ViewModel condiviso per l'autenticazione
- * @param onNavigateBack Callback per tornare alla schermata precedente
- * @param onNavigateToLogin Callback per tornare al login
- * @param onRegisterSuccess Callback eseguita dopo una registrazione riuscita
- */
 @Composable
 fun RegisterScreen(
     viewModel: AuthViewModel,
@@ -58,18 +49,15 @@ fun RegisterScreen(
     onNavigateToLogin: () -> Unit,
     onRegisterSuccess: () -> Unit
 ) {
-    // Raccoglie lo stato dal ViewModel
     val displayName by viewModel.displayName.collectAsState()
     val email by viewModel.email.collectAsState()
     val password by viewModel.password.collectAsState()
     val confirmPassword by viewModel.confirmPassword.collectAsState()
     val authState by viewModel.authState.collectAsState()
 
-    // Calcola in tempo reale se la password rispetta i requisiti
     val passwordError = if (password.isNotEmpty()) viewModel.validatePassword(password) else null
     val passwordsMatch = confirmPassword.isEmpty() || password == confirmPassword
 
-    // Naviga automaticamente alla Home se la registrazione ha successo
     LaunchedEffect(authState) {
         if (authState is AuthState.Success) {
             onRegisterSuccess()
@@ -89,29 +77,23 @@ fun RegisterScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // ============================================================
-            // Header — Titolo della schermata
-            // ============================================================
             Spacer(modifier = Modifier.height(32.dp))
 
             Text(
-                text = "Crea Account",
+                text = stringResource(R.string.auth_register_title),
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold
             )
 
             Text(
-                text = "Unisciti a Fyre 🔥",
+                text = stringResource(R.string.auth_register_subtitle, stringResource(R.string.app_name)),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
             )
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // ============================================================
-            // Card con il form di registrazione
-            // ============================================================
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
@@ -126,70 +108,72 @@ fun RegisterScreen(
                         .padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // --- Campo Nome ---
                     FyreTextField(
                         value = displayName,
                         onValueChange = { viewModel.updateDisplayName(it) },
-                        label = "Nome",
-                        placeholder = "Mario Rossi",
+                        label = stringResource(R.string.common_name),
+                        placeholder = stringResource(R.string.auth_register_name_placeholder),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Person,
-                                contentDescription = "Nome",
+                                contentDescription = stringResource(R.string.common_name),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     )
 
-                    // --- Campo Email ---
                     FyreTextField(
                         value = email,
                         onValueChange = { viewModel.updateEmail(it) },
-                        label = "Email",
-                        placeholder = "mario.rossi@email.com",
+                        label = stringResource(R.string.common_email),
+                        placeholder = stringResource(R.string.auth_login_email_placeholder),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Email,
-                                contentDescription = "Email",
+                                contentDescription = stringResource(R.string.common_email),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     )
 
-                    // --- Campo Password con validazione in tempo reale ---
                     FyrePasswordField(
                         value = password,
                         onValueChange = { viewModel.updatePassword(it) },
-                        label = "Password",
+                        label = stringResource(R.string.common_password),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Lock,
-                                contentDescription = "Password",
+                                contentDescription = stringResource(R.string.common_password),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
                         isError = passwordError != null,
-                        supportingText = passwordError
-                            ?: if (password.isNotEmpty()) "✓ Password valida" else "Min. 8 caratteri, 1 maiuscola, 1 numero"
+                        supportingText = passwordError ?: if (password.isNotEmpty()) {
+                            stringResource(R.string.auth_register_password_valid)
+                        } else {
+                            stringResource(R.string.auth_register_password_hint)
+                        }
                     )
 
-                    // --- Campo Conferma Password ---
                     FyrePasswordField(
                         value = confirmPassword,
                         onValueChange = { viewModel.updateConfirmPassword(it) },
-                        label = "Conferma Password",
+                        label = stringResource(R.string.auth_register_confirm_password),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Lock,
-                                contentDescription = "Conferma Password",
+                                contentDescription = stringResource(R.string.auth_register_confirm_password),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
                         isError = !passwordsMatch,
-                        supportingText = if (!passwordsMatch) "Le password non corrispondono" else null
+                        supportingText = if (!passwordsMatch) {
+                            stringResource(R.string.auth_register_password_mismatch)
+                        } else {
+                            null
+                        }
                     )
 
-                    // --- Messaggio di errore dal server/repository ---
                     AnimatedVisibility(
                         visible = authState is AuthState.Error,
                         enter = fadeIn(),
@@ -208,9 +192,8 @@ fun RegisterScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // --- Bottone Registrazione ---
                     FyreButton(
-                        text = "Registrati",
+                        text = stringResource(R.string.auth_register_cta),
                         onClick = { viewModel.register() }
                     )
                 }
@@ -218,12 +201,9 @@ fun RegisterScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // ============================================================
-            // Link al login
-            // ============================================================
             TextButton(onClick = onNavigateToLogin) {
                 Text(
-                    text = "Hai già un account? Accedi",
+                    text = stringResource(R.string.auth_register_login_prompt),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold
@@ -233,8 +213,6 @@ fun RegisterScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // --- Pulsante Indietro (torna alla schermata precedente) ---
-        // Posizionato per ultimo nel Box così resta sopra la Column e riceve i tocchi
         IconButton(
             onClick = onNavigateBack,
             modifier = Modifier
@@ -243,11 +221,9 @@ fun RegisterScreen(
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Torna indietro",
+                contentDescription = stringResource(R.string.common_back),
                 tint = MaterialTheme.colorScheme.onBackground
             )
         }
     }
 }
-
-

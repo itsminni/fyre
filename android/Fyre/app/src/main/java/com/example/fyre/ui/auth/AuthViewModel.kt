@@ -43,6 +43,33 @@ sealed class AuthState {
  */
 class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
+    private object ValidationMessages {
+        const val UnknownError = "Errore sconosciuto"
+
+        const val DisplayNameRequired = "Inserisci il tuo nome"
+        const val DisplayNameMinLength = "Il nome deve avere almeno 2 caratteri"
+
+        const val EmailRequired = "Inserisci l'email"
+        const val EmailInvalid = "Formato email non valido"
+
+        const val LoginPasswordRequired = "Inserisci la password"
+        const val RegisterPasswordMinLength = "La password deve avere almeno 8 caratteri"
+        const val RegisterPasswordUppercase = "La password deve contenere almeno una lettera maiuscola"
+        const val RegisterPasswordDigit = "La password deve contenere almeno un numero"
+        const val PasswordMismatch = "Le password non corrispondono"
+
+        const val TermsRequired = "Devi accettare Termini e Privacy per continuare"
+
+        const val ProfileFirstNameRequired = "Inserisci il nome"
+        const val ProfileLastNameRequired = "Inserisci il cognome"
+        const val ProfileUsernameMinLength = "Username minimo 3 caratteri"
+        const val ProfileCityRequired = "Inserisci la citta"
+        const val ProfileBirthDateRequired = "Inserisci la data di nascita"
+        const val ProfileAvatarRequired = "Seleziona un avatar"
+        const val ProfileSessionUnavailable = "Sessione utente non disponibile"
+        const val ProfileSaveError = "Errore salvataggio profilo"
+    }
+
     // --- Stato dell'autenticazione ---
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
@@ -233,7 +260,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
                 _authState.value = AuthState.Success(user)
             },
             onFailure = { error ->
-                val message = error.message ?: "Errore sconosciuto"
+                val message = error.message ?: ValidationMessages.UnknownError
                 _globalError.value = message
                 _authState.value = AuthState.Error(message)
             }
@@ -253,12 +280,12 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
         // Validazione nome
         if (_displayName.value.isBlank()) {
-            _displayNameError.value = "Inserisci il tuo nome"
+            _displayNameError.value = ValidationMessages.DisplayNameRequired
             return
         }
 
         if (_displayName.value.trim().length < 2) {
-            _displayNameError.value = "Il nome deve avere almeno 2 caratteri"
+            _displayNameError.value = ValidationMessages.DisplayNameMinLength
             return
         }
 
@@ -278,12 +305,12 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
         // Controllo corrispondenza password
         if (_password.value != _confirmPassword.value) {
-            _confirmPasswordError.value = "Le password non corrispondono"
+            _confirmPasswordError.value = ValidationMessages.PasswordMismatch
             return
         }
 
         if (!_termsAccepted.value) {
-            _termsError.value = "Devi accettare Termini e Privacy per continuare"
+            _termsError.value = ValidationMessages.TermsRequired
             return
         }
 
@@ -304,7 +331,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
                 _authState.value = AuthState.Success(user)
             },
             onFailure = { error ->
-                val message = error.message ?: "Errore sconosciuto"
+                val message = error.message ?: ValidationMessages.UnknownError
                 _globalError.value = message
                 _authState.value = AuthState.Error(message)
             }
@@ -377,7 +404,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         }
 
         val current = _currentUser.value ?: run {
-            _profileError.value = "Sessione utente non disponibile"
+            _profileError.value = ValidationMessages.ProfileSessionUnavailable
             return false
         }
 
@@ -402,7 +429,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
                 true
             },
             onFailure = { throwable ->
-                _profileError.value = throwable.message ?: "Errore salvataggio profilo"
+                _profileError.value = throwable.message ?: ValidationMessages.ProfileSaveError
                 false
             }
         )
@@ -417,15 +444,15 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
      * @return Messaggio di errore se non valida, null se corretta
      */
     private fun validateEmail(email: String): String? {
-        if (email.isBlank()) return "Inserisci l'email"
+        if (email.isBlank()) return ValidationMessages.EmailRequired
         // Pattern semplice per validazione email
         val emailPattern = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
-        if (!emailPattern.matches(email.trim())) return "Formato email non valido"
+        if (!emailPattern.matches(email.trim())) return ValidationMessages.EmailInvalid
         return null
     }
 
     private fun validateLoginPassword(password: String): String? {
-        if (password.isBlank()) return "Inserisci la password"
+        if (password.isBlank()) return ValidationMessages.LoginPasswordRequired
         return null
     }
 
@@ -436,9 +463,9 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
      * @return Messaggio di errore se non valida, null se corretta
      */
     fun validatePassword(password: String): String? {
-        if (password.length < 8) return "La password deve avere almeno 8 caratteri"
-        if (!password.any { it.isUpperCase() }) return "La password deve contenere almeno una lettera maiuscola"
-        if (!password.any { it.isDigit() }) return "La password deve contenere almeno un numero"
+        if (password.length < 8) return ValidationMessages.RegisterPasswordMinLength
+        if (!password.any { it.isUpperCase() }) return ValidationMessages.RegisterPasswordUppercase
+        if (!password.any { it.isDigit() }) return ValidationMessages.RegisterPasswordDigit
         return null
     }
 
@@ -462,12 +489,12 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     }
 
     private fun validateProfileDraft(): String? {
-        if (_profileFirstName.value.isBlank()) return "Inserisci il nome"
-        if (_profileLastName.value.isBlank()) return "Inserisci il cognome"
-        if (_profileUsername.value.trim().length < 3) return "Username minimo 3 caratteri"
-        if (_profileCity.value.isBlank()) return "Inserisci la citta"
-        if (_profileBirthDate.value.isBlank()) return "Inserisci la data di nascita"
-        if (_profileAvatarUri.value.isNullOrBlank()) return "Seleziona un avatar"
+        if (_profileFirstName.value.isBlank()) return ValidationMessages.ProfileFirstNameRequired
+        if (_profileLastName.value.isBlank()) return ValidationMessages.ProfileLastNameRequired
+        if (_profileUsername.value.trim().length < 3) return ValidationMessages.ProfileUsernameMinLength
+        if (_profileCity.value.isBlank()) return ValidationMessages.ProfileCityRequired
+        if (_profileBirthDate.value.isBlank()) return ValidationMessages.ProfileBirthDateRequired
+        if (_profileAvatarUri.value.isNullOrBlank()) return ValidationMessages.ProfileAvatarRequired
         return null
     }
 }

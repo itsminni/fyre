@@ -1,12 +1,15 @@
 package com.example.fyre.account.model
 
-enum class AccountSection(val title: String) {
-    EditProfile("Modifica profilo"),
-    DiscoveryPreferences("Preferenze discovery"),
-    Notifications("Notifiche"),
-    Security("Sicurezza"),
-    Appearance("Aspetto"),
-    EventHistory("Cronologia eventi")
+import androidx.annotation.StringRes
+import com.example.fyre.R
+
+enum class AccountSection(@param:StringRes val titleRes: Int) {
+    EditProfile(R.string.account_section_edit_profile),
+    DiscoveryPreferences(R.string.account_section_discovery_preferences),
+    Notifications(R.string.account_section_notifications),
+    Security(R.string.account_section_security),
+    Appearance(R.string.account_section_appearance),
+    EventHistory(R.string.account_section_event_history)
 }
 
 data class ProfileDraft(

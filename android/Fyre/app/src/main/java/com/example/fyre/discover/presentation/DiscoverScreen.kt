@@ -47,10 +47,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.fyre.R
 import com.example.fyre.account.model.DiscoveryPreferences
 import com.example.fyre.account.model.NotificationSettings
 import com.example.fyre.core.notifications.NotificationChannels
@@ -70,6 +73,7 @@ fun DiscoverScreen(
     notificationGateway: NotificationGateway? = null,
     onOpenThread: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
     var currentIndex by rememberSaveable { mutableIntStateOf(0) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var pendingDecision by remember { mutableStateOf<SwipeDecision?>(null) }
@@ -125,8 +129,10 @@ fun DiscoverScreen(
 
         val matchedProfile = filteredProfiles.firstOrNull { it.id == payload.profileId }
         notificationGateway?.showLocalNotification(
-            title = "Nuovo match",
-            body = matchedProfile?.let { "Hai fatto match con ${it.name}" } ?: "Hai un nuovo match",
+            title = context.getString(R.string.account_switch_matches),
+            body = matchedProfile?.let {
+                context.getString(R.string.discover_match_notification_body, it.name)
+            } ?: context.getString(R.string.discover_match_notification_fallback),
             channelId = NotificationChannels.MATCHES
         )
     }
@@ -143,7 +149,7 @@ fun DiscoverScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Discovery",
+            text = stringResource(R.string.discover_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold
         )
@@ -222,12 +228,12 @@ fun DiscoverScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "It is a match!",
+                        text = stringResource(R.string.discover_match_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Match reciproco simulato in locale. Puoi gia aprire il thread mock.",
+                        text = stringResource(R.string.discover_match_description),
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -238,10 +244,10 @@ fun DiscoverScreen(
                                 matchPayload = null
                             }
                         ) {
-                            Text("Apri thread")
+                            Text(stringResource(R.string.discover_open_thread))
                         }
                         Button(onClick = { matchPayload = null }) {
-                            Text("Continua")
+                            Text(stringResource(R.string.discover_continue))
                         }
                     }
                 }
@@ -256,19 +262,23 @@ fun DiscoverScreen(
             IconButton(onClick = { triggerDecision(SwipeDecision.Skip) }) {
                 Icon(
                     imageVector = Icons.Filled.Close,
-                    contentDescription = "Passa profilo",
+                    contentDescription = stringResource(R.string.discover_pass_profile_cd),
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(34.dp)
                 )
             }
             Text(
-                text = "${(currentIndex + 1).coerceAtMost(filteredProfiles.size.coerceAtLeast(1))}/${filteredProfiles.size}",
+                text = stringResource(
+                    R.string.discover_counter,
+                    (currentIndex + 1).coerceAtMost(filteredProfiles.size.coerceAtLeast(1)),
+                    filteredProfiles.size
+                ),
                 style = MaterialTheme.typography.labelLarge
             )
             IconButton(onClick = { triggerDecision(SwipeDecision.Like) }) {
                 Icon(
                     imageVector = Icons.Filled.Favorite,
-                    contentDescription = "Mi piace",
+                    contentDescription = stringResource(R.string.discover_like_profile_cd),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(34.dp)
                 )
@@ -309,7 +319,7 @@ private fun DiscoveryCard(
                 contentAlignment = Alignment.BottomStart
             ) {
                 Text(
-                    text = "${profile.name}, ${profile.age}",
+                    text = stringResource(R.string.discover_profile_name_age, profile.name, profile.age),
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onPrimary,
                     fontWeight = FontWeight.Bold
@@ -323,7 +333,11 @@ private fun DiscoveryCard(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "${profile.city} - ${profile.distanceKm} km",
+                    text = stringResource(
+                        R.string.discover_profile_city_distance,
+                        profile.city,
+                        profile.distanceKm
+                    ),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium
                 )
@@ -336,7 +350,7 @@ private fun DiscoveryCard(
                 )
 
                 Text(
-                    text = "Intent: ${profile.intent}",
+                    text = stringResource(R.string.discover_intent, profile.intent),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -344,19 +358,19 @@ private fun DiscoveryCard(
                 if (profile.isVerified) {
                     AssistChip(
                         onClick = { },
-                        label = { Text("Profilo verificato", fontSize = 12.sp) }
+                        label = { Text(stringResource(R.string.discover_verified_chip), fontSize = 12.sp) }
                     )
                 }
 
                 Text(
-                    text = "Interessi",
+                    text = stringResource(R.string.discover_interests),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )
                 TagList(tags = profile.interests)
 
                 Text(
-                    text = "Tag social",
+                    text = stringResource(R.string.discover_social_tags),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -389,9 +403,9 @@ private fun EmptyDiscoveryState(hasActiveFilters: Boolean) {
     ) {
         Text(
             text = if (hasActiveFilters) {
-                "Nessun profilo compatibile con i filtri correnti."
+                stringResource(R.string.discover_empty_filtered)
             } else {
-                "Hai finito i profili disponibili. Torna piu tardi."
+                stringResource(R.string.discover_empty_exhausted)
             },
             style = MaterialTheme.typography.bodyLarge
         )

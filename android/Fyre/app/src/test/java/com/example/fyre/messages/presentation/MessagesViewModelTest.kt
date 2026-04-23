@@ -78,6 +78,20 @@ class MessagesViewModelTest {
         val last = viewModel.messages.value.last()
         assertEquals(5, last.voiceNote?.durationSec)
     }
+
+    @Test
+    fun show_inbox_resets_thread_state_and_reply() {
+        val viewModel = MessagesViewModel()
+        viewModel.openThread("thread_p4")
+        val targetId = viewModel.messages.value.first().id
+        viewModel.setReplyToMessage(targetId)
+
+        viewModel.showInbox()
+
+        assertEquals(null, viewModel.selectedThreadId.value)
+        assertTrue(viewModel.messages.value.isEmpty())
+        assertEquals(null, viewModel.replyToMessageId.value)
+    }
 }
 
 

@@ -1,3 +1,200 @@
 <resources>
     <string name="app_name">Fyre</string>
+
+    <!-- Common -->
+    <string name="common_back">Torna indietro</string>
+    <string name="common_email">Email</string>
+    <string name="common_password">Password</string>
+    <string name="common_name">Nome</string>
+    <string name="common_last_name">Cognome</string>
+    <string name="common_username">Username</string>
+    <string name="common_city">Citta</string>
+    <string name="common_bio">Bio</string>
+    <string name="common_avatar">Avatar</string>
+    <string name="common_cancel">Annulla</string>
+    <string name="common_logout">Esci</string>
+    <string name="common_terms_privacy">Termini e Privacy</string>
+    <string name="common_dash">-</string>
+
+    <!-- Navigation -->
+    <string name="nav_loading_session">Caricamento sessione...</string>
+
+    <!-- Tabs -->
+    <string name="tab_discovery">Discovery</string>
+    <string name="tab_messages">Messaggi</string>
+    <string name="tab_events">Eventi</string>
+    <string name="tab_account">Account</string>
+
+    <!-- Welcome -->
+    <string name="welcome_title">Benvenuto</string>
+    <string name="welcome_description">Accedi o crea un account per iniziare\nla tua esperienza con %1$s.</string>
+    <string name="welcome_cta_login">Accedi</string>
+    <string name="welcome_cta_create_account">Crea un account</string>
+    <string name="welcome_terms_link">Leggi Termini e Privacy</string>
+    <string name="welcome_footer">Progetto scolastico - %1$s App</string>
+
+    <!-- Auth Login -->
+    <string name="auth_login_subtitle">Accedi al tuo account</string>
+    <string name="auth_login_email_placeholder">mario.rossi@email.com</string>
+    <string name="auth_login_loading">Accesso...</string>
+    <string name="auth_login_register_prompt">Non hai un account? Registrati</string>
+
+    <!-- Auth Register -->
+    <string name="auth_register_title">Crea Account</string>
+    <string name="auth_register_subtitle">Unisciti a %1$s</string>
+    <string name="auth_register_name_placeholder">Mario Rossi</string>
+    <string name="auth_register_password_hint">Min. 8 caratteri, 1 maiuscola, 1 numero</string>
+    <string name="auth_register_confirm_password">Conferma Password</string>
+    <string name="auth_register_terms_checkbox">Accetto Termini e Privacy</string>
+    <string name="auth_register_loading">Registrazione...</string>
+    <string name="auth_register_cta">Registrati</string>
+    <string name="auth_register_login_prompt">Hai gia un account? Accedi</string>
+    <string name="auth_register_password_valid">Password valida</string>
+    <string name="auth_register_password_mismatch">Le password non corrispondono</string>
+
+    <!-- Terms & Privacy -->
+    <string name="terms_title">Termini e Privacy</string>
+    <string name="terms_intro">Versione bozza locale: continuando confermi di aver letto e compreso condizioni d\'uso e informativa privacy.</string>
+    <string name="terms_section_1">1) Usi consentiti\nL\'app e ad uso didattico. Evita contenuti illeciti o dannosi.</string>
+    <string name="terms_section_2">2) Dati trattati\nI dati restano in locale su questo dispositivo finche non verra integrato un backend.</string>
+    <string name="terms_section_3">3) Responsabilita\nLe credenziali sono gestite localmente in ambiente di sviluppo e non rappresentano un servizio di produzione.</string>
+    <string name="terms_section_4">4) Consenso\nPer registrarti e obbligatorio accettare Termini e Privacy.</string>
+    <string name="terms_accept_and_continue">Accetto e continuo</string>
+
+    <!-- Profile Completion -->
+    <string name="profile_completion_title">Completa il tuo profilo</string>
+    <string name="profile_completion_subtitle">Questi dati sono locali/mock e servono a sbloccare la main app.</string>
+    <string name="profile_completion_avatar_cd">Avatar profilo</string>
+    <string name="profile_completion_pick_avatar_hint">Tocca per scegliere un\'immagine</string>
+    <string name="profile_completion_birth_date">Data nascita</string>
+    <string name="profile_completion_birth_date_placeholder">GG/MM/AAAA</string>
+    <string name="profile_completion_bio_placeholder">Raccontati in poche righe</string>
+    <string name="profile_completion_loading">Salvataggio...</string>
+    <string name="profile_completion_cta">Completa profilo</string>
+
+    <!-- Account -->
+    <string name="account_hub_title">Account e profilo</string>
+    <string name="account_user_fallback">Utente</string>
+    <string name="account_email_fallback">email non disponibile</string>
+    <string name="account_user_email_summary">%1$s - %2$s</string>
+    <string name="account_section_edit_profile">Modifica profilo</string>
+    <string name="account_section_discovery_preferences">Preferenze discovery</string>
+    <string name="account_section_notifications">Notifiche</string>
+    <string name="account_section_security">Sicurezza</string>
+    <string name="account_section_appearance">Aspetto</string>
+    <string name="account_section_event_history">Cronologia eventi</string>
+    <string name="account_switch_only_verified">Mostra solo profili verificati</string>
+    <string name="account_switch_push_notifications">Push notifications</string>
+    <string name="account_switch_messages">Messaggi</string>
+    <string name="account_switch_matches">Nuovi match</string>
+    <string name="account_switch_event_reminders">Promemoria eventi</string>
+    <string name="account_switch_marketing">Comunicazioni marketing</string>
+    <string name="account_switch_biometric">Sblocco biometrico</string>
+    <string name="account_switch_two_factor">Autenticazione a due fattori</string>
+    <string name="account_switch_hide_online">Nascondi stato online</string>
+    <string name="account_switch_session_pin">PIN sessione</string>
+    <string name="account_theme_label">Tema</string>
+    <string name="account_theme_system">Sistema</string>
+    <string name="account_theme_light">Chiaro</string>
+    <string name="account_theme_dark">Scuro</string>
+    <string name="account_theme_current">Tema attuale: %1$s</string>
+    <string name="account_switch_dynamic_color">Dynamic color</string>
+    <string name="account_switch_compact_mode">Modalita compatta</string>
+    <string name="account_chat_label">Chat</string>
+    <string name="account_switch_compact_bubbles">Bubble compatte</string>
+    <string name="account_switch_show_timestamps">Mostra orario messaggi</string>
+    <string name="account_back_to_hub_cd">Torna all\'hub account</string>
+    <string name="account_event_status">Stato: %1$s</string>
+    <string name="account_intent_label">Intent</string>
+    <string name="account_age_min_label">Eta minima</string>
+    <string name="account_age_max_label">Eta massima</string>
+    <string name="account_distance_max_label">Distanza massima (km)</string>
+
+    <!-- Discover -->
+    <string name="discover_title">Discovery</string>
+    <string name="discover_match_title">It is a match!</string>
+    <string name="discover_match_description">Match reciproco simulato in locale. Puoi gia aprire il thread mock.</string>
+    <string name="discover_match_notification_body">Hai fatto match con %1$s</string>
+    <string name="discover_match_notification_fallback">Hai un nuovo match</string>
+    <string name="discover_open_thread">Apri thread</string>
+    <string name="discover_continue">Continua</string>
+    <string name="discover_counter">%1$d/%2$d</string>
+    <string name="discover_pass_profile_cd">Passa profilo</string>
+    <string name="discover_like_profile_cd">Mi piace</string>
+    <string name="discover_profile_name_age">%1$s, %2$d</string>
+    <string name="discover_profile_city_distance">%1$s - %2$d km</string>
+    <string name="discover_verified_chip">Profilo verificato</string>
+    <string name="discover_intent">Intent: %1$s</string>
+    <string name="discover_interests">Interessi</string>
+    <string name="discover_social_tags">Tag social</string>
+    <string name="discover_empty_filtered">Nessun profilo compatibile con i filtri correnti.</string>
+    <string name="discover_empty_exhausted">Hai finito i profili disponibili. Torna piu tardi.</string>
+    <string name="discover_flame">🔥</string>
+
+    <!-- Messages -->
+    <string name="messages_new_message_one">1 nuovo messaggio</string>
+    <string name="messages_new_messages_many">%1$d nuovi messaggi</string>
+    <string name="messages_notification_fallback">Apri la chat per leggerli</string>
+    <string name="messages_notification_body">%1$s: %2$s</string>
+    <string name="messages_back_to_inbox_cd">Torna all\'inbox</string>
+    <string name="messages_reply_to">Rispondi a: %1$s</string>
+    <string name="messages_attachment_image">Immagine</string>
+    <string name="messages_attachment_video">Video</string>
+    <string name="messages_attachment_file">File</string>
+    <string name="messages_record_voice">Registra</string>
+    <string name="messages_stop_voice">Stop vocale</string>
+    <string name="messages_draft_placeholder">Scrivi un messaggio</string>
+    <string name="messages_send_cd">Invia</string>
+    <string name="messages_reply_prefix">Reply: %1$s</string>
+    <string name="messages_attachment_item">%1$s: %2$s</string>
+    <string name="messages_play_voice">Play vocale</string>
+    <string name="messages_stop">Stop</string>
+    <string name="messages_reply_action">Reply</string>
+    <string name="messages_preview_voice">Messaggio vocale</string>
+    <string name="messages_preview_generic">Messaggio</string>
+    <string name="messages_voice_duration">%1$ds</string>
+
+    <!-- Events -->
+    <string name="events_title">Eventi</string>
+    <string name="events_user_state">Stato utente: %1$s</string>
+    <string name="events_capacity_deadline">Capienza %1$d/%2$d - Deadline %3$s</string>
+    <string name="events_metric_online">Online %1$d</string>
+    <string name="events_metric_checkin">Check-in %1$d</string>
+    <string name="events_metric_chat_per_min">Chat/min %1$d</string>
+    <string name="events_reminder_set_title">Reminder impostato</string>
+    <string name="events_reminder_set_body">Ti ricorderemo %1$s</string>
+    <string name="events_detail_back_to_events_cd">Torna agli eventi</string>
+    <string name="events_detail_label_date">Data</string>
+    <string name="events_detail_label_place">Luogo</string>
+    <string name="events_detail_label_deadline">Deadline</string>
+    <string name="events_detail_label_capacity">Capienza</string>
+    <string name="events_detail_label_user_state">Stato utente evento</string>
+    <string name="events_detail_capacity_value">%1$d/%2$d</string>
+    <string name="events_detail_section_description">Descrizione</string>
+    <string name="events_detail_section_rules">Regole</string>
+    <string name="events_detail_section_live_metrics">Metriche live</string>
+    <string name="events_detail_section_registration_actions">Azioni iscrizione</string>
+    <string name="events_detail_action_join">Join</string>
+    <string name="events_detail_action_cancel">Cancel</string>
+    <string name="events_detail_action_waitlist">Waitlist</string>
+    <string name="events_detail_section_admin">Admin mock</string>
+    <string name="events_detail_input_title">Titolo</string>
+    <string name="events_detail_input_date">Data</string>
+    <string name="events_detail_input_place">Luogo</string>
+    <string name="events_detail_input_description">Descrizione</string>
+    <string name="events_detail_input_deadline">Deadline</string>
+    <string name="events_detail_input_capacity">Capienza</string>
+    <string name="events_detail_input_rules">Regole (una per riga)</string>
+    <string name="events_detail_save_changes">Salva modifiche evento</string>
+    <string name="events_detail_section_manage_participants">Gestione partecipanti</string>
+    <string name="events_detail_participant_status">%1$s - %2$s</string>
+    <string name="events_detail_rule_item">- %1$s</string>
+    <string name="events_detail_status_registered_short">R</string>
+    <string name="events_detail_status_waitlist_short">W</string>
+    <string name="events_detail_status_none_short">N</string>
+
+    <!-- Home -->
+    <string name="home_welcome_title">Benvenuto! 👋</string>
+    <string name="home_account_title">Il tuo account</string>
+    <string name="home_registered_on">Registrato il</string>
 </resources>

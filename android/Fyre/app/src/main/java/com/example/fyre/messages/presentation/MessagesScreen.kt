@@ -7,7 +7,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.fyre.R
 import com.example.fyre.account.model.ChatCustomizationSettings
 import com.example.fyre.account.model.NotificationSettings
 import com.example.fyre.core.notifications.NotificationChannels
@@ -25,6 +27,7 @@ fun MessagesScreen(
     onOpenThread: (String) -> Unit = {},
     onBackToInbox: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val viewModel: MessagesViewModel = viewModel()
     val threads by viewModel.threads.collectAsState()
     val selectedThreadId by viewModel.selectedThreadId.collectAsState()
@@ -60,9 +63,14 @@ fun MessagesScreen(
 
         val latestUnreadThread = threads.firstOrNull { it.unreadCount > 0 }
         notificationGateway?.showLocalNotification(
-            title = if (unreadTotal == 1) "1 nuovo messaggio" else "$unreadTotal nuovi messaggi",
-            body = latestUnreadThread?.let { "${it.displayName}: ${it.lastMessage}" }
-                ?: "Apri la chat per leggerli",
+            title = if (unreadTotal == 1) {
+                context.getString(R.string.messages_new_message_one)
+            } else {
+                context.getString(R.string.messages_new_messages_many, unreadTotal)
+            },
+            body = latestUnreadThread?.let {
+                context.getString(R.string.messages_notification_body, it.displayName, it.lastMessage)
+            } ?: context.getString(R.string.messages_notification_fallback),
             channelId = NotificationChannels.MESSAGES
         )
         lastNotifiedUnreadCount = unreadTotal

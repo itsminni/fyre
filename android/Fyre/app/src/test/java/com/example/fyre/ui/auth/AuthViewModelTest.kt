@@ -11,6 +11,26 @@ import org.junit.Test
 class AuthViewModelTest {
 
     @Test
+    fun login_with_blank_email_sets_email_error() {
+        val viewModel = AuthViewModel(FakeAuthRepository())
+        viewModel.updatePassword("Password1")
+
+        viewModel.login()
+
+        assertEquals("Inserisci l'email", viewModel.emailError.value)
+    }
+
+    @Test
+    fun login_with_blank_password_sets_password_error() {
+        val viewModel = AuthViewModel(FakeAuthRepository())
+        viewModel.updateEmail("mario@example.com")
+
+        viewModel.login()
+
+        assertEquals("Inserisci la password", viewModel.passwordError.value)
+    }
+
+    @Test
     fun restore_session_loads_user_from_saved_email() {
         val repository = FakeAuthRepository()
         val registerVm = AuthViewModel(repository)
@@ -91,6 +111,43 @@ class AuthViewModelTest {
         assertTrue(viewModel.hasCompletedProfile())
         assertTrue(viewModel.currentUser.value?.hasCompleteProfile() == true)
         assertTrue(viewModel.profileError.value == null)
+    }
+
+    @Test
+    fun save_profile_setup_requires_minimum_username_length() {
+        val viewModel = AuthViewModel(FakeAuthRepository())
+
+        viewModel.updateDisplayName("Mario Rossi")
+        viewModel.updateEmail("mario@example.com")
+        viewModel.updatePassword("Password1")
+        viewModel.updateConfirmPassword("Password1")
+        viewModel.setTermsAccepted(true)
+        viewModel.register()
+
+        viewModel.updateProfileFirstName("Mario")
+        viewModel.updateProfileLastName("Rossi")
+        viewModel.updateProfileUsername("mr")
+        viewModel.updateProfileCity("Milano")
+        viewModel.updateProfileBirthDate("01/01/2000")
+        viewModel.updateProfileAvatarUri("content://avatar/mock.png")
+
+        assertFalse(viewModel.saveProfileSetup())
+        assertEquals("Username minimo 3 caratteri", viewModel.profileError.value)
+    }
+
+    @Test
+    fun save_profile_setup_without_session_returns_error() {
+        val viewModel = AuthViewModel(FakeAuthRepository())
+
+        viewModel.updateProfileFirstName("Mario")
+        viewModel.updateProfileLastName("Rossi")
+        viewModel.updateProfileUsername("mariorossi")
+        viewModel.updateProfileCity("Milano")
+        viewModel.updateProfileBirthDate("01/01/2000")
+        viewModel.updateProfileAvatarUri("content://avatar/mock.png")
+
+        assertFalse(viewModel.saveProfileSetup())
+        assertEquals("Sessione utente non disponibile", viewModel.profileError.value)
     }
 }
 

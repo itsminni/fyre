@@ -27,10 +27,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.fyre.R
 import com.example.fyre.ui.auth.AuthViewModel
 import com.example.fyre.ui.components.FyreButton
 import com.example.fyre.ui.components.FyreTextField
@@ -70,7 +72,7 @@ fun ProfileCompletionScreen(
         verticalArrangement = Arrangement.Top
     ) {
         Text(
-            text = "Completa il tuo profilo",
+            text = stringResource(R.string.profile_completion_title),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
@@ -79,7 +81,7 @@ fun ProfileCompletionScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text = "Questi dati sono locali/mock e servono a sbloccare la main app.",
+            text = stringResource(R.string.profile_completion_subtitle),
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
@@ -98,16 +100,16 @@ fun ProfileCompletionScreen(
             if (!avatarUri.isNullOrBlank()) {
                 AsyncImage(
                     model = avatarUri,
-                    contentDescription = "Avatar profilo",
+                    contentDescription = stringResource(R.string.profile_completion_avatar_cd),
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                Text("Avatar")
+                Text(stringResource(R.string.common_avatar))
             }
         }
 
         Text(
-            text = "Tocca per scegliere un'immagine",
+            text = stringResource(R.string.profile_completion_pick_avatar_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 8.dp)
@@ -118,7 +120,7 @@ fun ProfileCompletionScreen(
         FyreTextField(
             value = firstName,
             onValueChange = viewModel::updateProfileFirstName,
-            label = "Nome"
+            label = stringResource(R.string.common_name)
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -126,7 +128,7 @@ fun ProfileCompletionScreen(
         FyreTextField(
             value = lastName,
             onValueChange = viewModel::updateProfileLastName,
-            label = "Cognome"
+            label = stringResource(R.string.common_last_name)
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -134,7 +136,7 @@ fun ProfileCompletionScreen(
         FyreTextField(
             value = username,
             onValueChange = viewModel::updateProfileUsername,
-            label = "Username"
+            label = stringResource(R.string.common_username)
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -142,7 +144,7 @@ fun ProfileCompletionScreen(
         FyreTextField(
             value = city,
             onValueChange = viewModel::updateProfileCity,
-            label = "Citta"
+            label = stringResource(R.string.common_city)
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -150,8 +152,8 @@ fun ProfileCompletionScreen(
         FyreTextField(
             value = birthDate,
             onValueChange = viewModel::updateProfileBirthDate,
-            label = "Data nascita",
-            placeholder = "GG/MM/AAAA"
+            label = stringResource(R.string.profile_completion_birth_date),
+            placeholder = stringResource(R.string.profile_completion_birth_date_placeholder)
         )
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -159,9 +161,9 @@ fun ProfileCompletionScreen(
         FyreTextField(
             value = bio,
             onValueChange = viewModel::updateProfileBio,
-            label = "Bio",
+            label = stringResource(R.string.common_bio),
             singleLine = false,
-            placeholder = "Raccontati in poche righe"
+            placeholder = stringResource(R.string.profile_completion_bio_placeholder)
         )
 
         if (profileError != null) {
@@ -176,7 +178,11 @@ fun ProfileCompletionScreen(
         Spacer(modifier = Modifier.height(20.dp))
 
         FyreButton(
-            text = if (isLoading) "Salvataggio..." else "Completa profilo",
+            text = if (isLoading) {
+                stringResource(R.string.profile_completion_loading)
+            } else {
+                stringResource(R.string.profile_completion_cta)
+            },
             onClick = {
                 if (viewModel.saveProfileSetup()) {
                     onCompleteProfile()
@@ -194,7 +200,7 @@ fun ProfileCompletionScreen(
             if (isLoading) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
-                Text("Logout")
+                Text(stringResource(R.string.common_logout))
             }
         }
     }

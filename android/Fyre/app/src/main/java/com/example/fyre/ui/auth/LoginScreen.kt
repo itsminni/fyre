@@ -33,9 +33,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.fyre.R
 import com.example.fyre.ui.components.FyreButton
 import com.example.fyre.ui.components.FyrePasswordField
 import com.example.fyre.ui.components.FyreTextField
@@ -58,6 +60,8 @@ fun LoginScreen(
     onNavigateToRegister: () -> Unit,
     onLoginSuccess: () -> Unit
 ) {
+    val appName = stringResource(R.string.app_name)
+
     // Raccoglie lo stato dal ViewModel
     val email by viewModel.email.collectAsState()
     val password by viewModel.password.collectAsState()
@@ -104,7 +108,7 @@ fun LoginScreen(
 
             // Nome dell'app
             Text(
-                text = "Fyre",
+                text = appName,
                 style = MaterialTheme.typography.displayLarge,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold
@@ -112,7 +116,7 @@ fun LoginScreen(
 
             // Sottotitolo
             Text(
-                text = "Accedi al tuo account",
+                text = stringResource(R.string.auth_login_subtitle),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
             )
@@ -140,14 +144,14 @@ fun LoginScreen(
                     FyreTextField(
                         value = email,
                         onValueChange = { viewModel.updateEmail(it) },
-                        label = "Email",
-                        placeholder = "mario.rossi@email.com",
+                        label = stringResource(R.string.common_email),
+                        placeholder = stringResource(R.string.auth_login_email_placeholder),
                         isError = emailError != null,
                         supportingText = emailError,
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Email,
-                                contentDescription = "Email",
+                                contentDescription = stringResource(R.string.common_email),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -157,13 +161,13 @@ fun LoginScreen(
                     FyrePasswordField(
                         value = password,
                         onValueChange = { viewModel.updatePassword(it) },
-                        label = "Password",
+                        label = stringResource(R.string.common_password),
                         isError = passwordError != null,
                         supportingText = passwordError,
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Outlined.Lock,
-                                contentDescription = "Password",
+                                contentDescription = stringResource(R.string.common_password),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -190,7 +194,11 @@ fun LoginScreen(
 
                     // --- Bottone Login ---
                     FyreButton(
-                        text = if (isLoading) "Accesso..." else "Accedi",
+                        text = if (isLoading) {
+                            stringResource(R.string.auth_login_loading)
+                        } else {
+                            stringResource(R.string.welcome_cta_login)
+                        },
                         onClick = { viewModel.login() },
                         isLoading = isLoading
                     )
@@ -204,7 +212,7 @@ fun LoginScreen(
             // ============================================================
             TextButton(onClick = onNavigateToRegister) {
                 Text(
-                    text = "Non hai un account? Registrati",
+                    text = stringResource(R.string.auth_login_register_prompt),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold
@@ -224,7 +232,7 @@ fun LoginScreen(
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Torna indietro",
+                contentDescription = stringResource(R.string.common_back),
                 tint = MaterialTheme.colorScheme.onBackground
             )
         }

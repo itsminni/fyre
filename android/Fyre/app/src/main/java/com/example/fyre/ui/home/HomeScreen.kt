@@ -26,26 +26,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.fyre.R
 import com.example.fyre.ui.auth.AuthViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-/**
- * Schermata Home — mostrata dopo un login/registrazione riuscita.
- *
- * Mostra un saluto personalizzato con il nome dell'utente,
- * un avatar con le iniziali e un bottone per il logout.
- *
- * @param viewModel ViewModel con i dati dell'utente loggato
- * @param onLogout Callback eseguita quando l'utente preme il bottone logout
- */
 @Composable
 fun HomeScreen(
     viewModel: AuthViewModel,
     onLogout: () -> Unit
 ) {
-    // Raccoglie i dati dell'utente loggato
     val currentUser by viewModel.currentUser.collectAsState()
 
     Box(
@@ -60,9 +55,6 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // ============================================================
-            // Avatar con le iniziali dell'utente
-            // ============================================================
             Box(
                 modifier = Modifier
                     .size(100.dp)
@@ -70,7 +62,6 @@ fun HomeScreen(
                     .background(MaterialTheme.colorScheme.primary),
                 contentAlignment = Alignment.Center
             ) {
-                // Estrae le iniziali dal nome (es. "Mario Rossi" → "MR")
                 val initials = currentUser?.displayName
                     ?.split(" ")
                     ?.mapNotNull { it.firstOrNull()?.uppercase() }
@@ -89,11 +80,8 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // ============================================================
-            // Messaggio di benvenuto
-            // ============================================================
             Text(
-                text = "Benvenuto! 👋",
+                text = stringResource(R.string.home_welcome_title),
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.Bold
@@ -102,7 +90,7 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = currentUser?.displayName ?: "Utente",
+                text = currentUser?.displayName ?: stringResource(R.string.account_user_fallback),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold
@@ -110,9 +98,6 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // ============================================================
-            // Card con informazioni dell'account
-            // ============================================================
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
@@ -127,39 +112,32 @@ fun HomeScreen(
                         .padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Titolo della sezione
                     Text(
-                        text = "Il tuo account",
+                        text = stringResource(R.string.home_account_title),
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold
                     )
 
-                    // Email dell'utente
-                    InfoRow(label = "Email", value = currentUser?.email ?: "-")
-
-                    // Nome visualizzato
-                    InfoRow(label = "Nome", value = currentUser?.displayName ?: "-")
-
-                    // Data di registrazione
                     InfoRow(
-                        label = "Registrato il",
+                        label = stringResource(R.string.common_email),
+                        value = currentUser?.email ?: stringResource(R.string.common_dash)
+                    )
+                    InfoRow(
+                        label = stringResource(R.string.common_name),
+                        value = currentUser?.displayName ?: stringResource(R.string.common_dash)
+                    )
+                    InfoRow(
+                        label = stringResource(R.string.home_registered_on),
                         value = currentUser?.createdAt?.let { timestamp ->
-                            val date = java.text.SimpleDateFormat(
-                                "dd/MM/yyyy HH:mm",
-                                java.util.Locale.ITALY
-                            ).format(java.util.Date(timestamp))
-                            date
-                        } ?: "-"
+                            SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(Date(timestamp))
+                        } ?: stringResource(R.string.common_dash)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // ============================================================
-            // Bottone Logout
-            // ============================================================
             OutlinedButton(
                 onClick = onLogout,
                 modifier = Modifier
@@ -169,11 +147,11 @@ fun HomeScreen(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Logout,
-                    contentDescription = "Logout",
+                    contentDescription = stringResource(R.string.common_logout),
                     modifier = Modifier.padding(end = 8.dp)
                 )
                 Text(
-                    text = "Esci",
+                    text = stringResource(R.string.common_logout),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -182,23 +160,14 @@ fun HomeScreen(
     }
 }
 
-/**
- * Riga informativa con etichetta e valore.
- * Componente interno usato nella card delle informazioni dell'account.
- *
- * @param label Etichetta descrittiva (es. "Email")
- * @param value Valore da mostrare (es. "mario@email.com")
- */
 @Composable
 private fun InfoRow(label: String, value: String) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Etichetta
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
-        // Valore
         Text(
             text = value,
             style = MaterialTheme.typography.bodyLarge,
@@ -206,5 +175,3 @@ private fun InfoRow(label: String, value: String) {
         )
     }
 }
-
-

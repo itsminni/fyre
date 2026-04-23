@@ -18,12 +18,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.fyre.R
 import com.example.fyre.core.notifications.AndroidNotificationGateway
 import com.example.fyre.account.presentation.AccountScreen
 import com.example.fyre.data.local.PersistedUserSettings
@@ -35,7 +37,7 @@ import com.example.fyre.ui.auth.AuthViewModel
 
 private data class MainTab(
     val route: String,
-    val label: String,
+    val labelRes: Int,
     val icon: ImageVector
 )
 
@@ -58,10 +60,10 @@ fun AuthenticatedShell(
     }
 
     val tabs = listOf(
-        MainTab(MainRoute.Home, "Discovery", Icons.Filled.Explore),
-        MainTab(MainRoute.Messages, "Messaggi", Icons.AutoMirrored.Filled.Chat),
-        MainTab(MainRoute.Events, "Eventi", Icons.Filled.CalendarMonth),
-        MainTab(MainRoute.Account, "Account", Icons.Filled.AccountCircle)
+        MainTab(MainRoute.Home, R.string.tab_discovery, Icons.Filled.Explore),
+        MainTab(MainRoute.Messages, R.string.tab_messages, Icons.AutoMirrored.Filled.Chat),
+        MainTab(MainRoute.Events, R.string.tab_events, Icons.Filled.CalendarMonth),
+        MainTab(MainRoute.Account, R.string.tab_account, Icons.Filled.AccountCircle)
     )
 
     Scaffold(
@@ -71,6 +73,7 @@ fun AuthenticatedShell(
 
             NavigationBar {
                 tabs.forEach { tab ->
+                    val label = stringResource(tab.labelRes)
                     val isSelected = if (tab.route == MainRoute.Messages) {
                         currentRoute == MainRoute.Messages || currentRoute == MainRoute.MessagesThread
                     } else {
@@ -85,8 +88,8 @@ fun AuthenticatedShell(
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(imageVector = tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) }
+                        icon = { Icon(imageVector = tab.icon, contentDescription = label) },
+                        label = { Text(label) }
                     )
                 }
             }

@@ -35,9 +35,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.fyre.R
 import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.ChatMessage
 import com.example.fyre.messages.model.MessageAuthor
@@ -90,6 +92,8 @@ fun MessageThreadScreen(
     }
 
     val replyTarget = messages.firstOrNull { it.id == replyToMessageId }
+    val replyVoiceLabel = stringResource(R.string.messages_preview_voice)
+    val replyGenericLabel = stringResource(R.string.messages_preview_generic)
 
     Column(
         modifier = Modifier
@@ -106,7 +110,7 @@ fun MessageThreadScreen(
             IconButton(onClick = onBack) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Torna all'inbox"
+                    contentDescription = stringResource(R.string.messages_back_to_inbox_cd)
                 )
             }
             Text(
@@ -133,6 +137,8 @@ fun MessageThreadScreen(
                     isPlayingVoice = message.voiceNote?.localPath == playingPath,
                     compact = compactBubbles,
                     showTimestamp = showTimestamps,
+                    replyVoiceLabel = replyVoiceLabel,
+                    replyGenericLabel = replyGenericLabel,
                     onPlayVoice = { path ->
                         if (playingPath == path) {
                             voiceController.stopPlayback()
@@ -165,13 +171,16 @@ fun MessageThreadScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Rispondi a: ${previewForReply(replyTarget)}",
+                        text = stringResource(
+                            R.string.messages_reply_to,
+                            previewForReply(replyTarget, replyVoiceLabel, replyGenericLabel)
+                        ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedButton(onClick = onCancelReply) {
-                        Text("Annulla")
+                        Text(stringResource(R.string.common_cancel))
                     }
                 }
             }
@@ -183,9 +192,18 @@ fun MessageThreadScreen(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            AssistChip(onClick = { onSendAttachment(AttachmentType.Image) }, label = { Text("Immagine") })
-            AssistChip(onClick = { onSendAttachment(AttachmentType.Video) }, label = { Text("Video") })
-            AssistChip(onClick = { onSendAttachment(AttachmentType.File) }, label = { Text("File") })
+            AssistChip(
+                onClick = { onSendAttachment(AttachmentType.Image) },
+                label = { Text(stringResource(R.string.messages_attachment_image)) }
+            )
+            AssistChip(
+                onClick = { onSendAttachment(AttachmentType.Video) },
+                label = { Text(stringResource(R.string.messages_attachment_video)) }
+            )
+            AssistChip(
+                onClick = { onSendAttachment(AttachmentType.File) },
+                label = { Text(stringResource(R.string.messages_attachment_file)) }
+            )
             AssistChip(
                 onClick = {
                     if (isRecording) {
@@ -214,7 +232,15 @@ fun MessageThreadScreen(
                         }
                     }
                 },
-                label = { Text(if (isRecording) "Stop vocale" else "Registra") }
+                label = {
+                    Text(
+                        if (isRecording) {
+                            stringResource(R.string.messages_stop_voice)
+                        } else {
+                            stringResource(R.string.messages_record_voice)
+                        }
+                    )
+                }
             )
         }
 
@@ -229,13 +255,13 @@ fun MessageThreadScreen(
                 value = draft,
                 onValueChange = onDraftChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Scrivi un messaggio") },
+                placeholder = { Text(stringResource(R.string.messages_draft_placeholder)) },
                 maxLines = 4
             )
             IconButton(onClick = onSend) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Invia"
+                    contentDescription = stringResource(R.string.messages_send_cd)
                 )
             }
         }
@@ -249,6 +275,8 @@ private fun MessageBubble(
     isPlayingVoice: Boolean,
     compact: Boolean,
     showTimestamp: Boolean,
+    replyVoiceLabel: String,
+    replyGenericLabel: String,
     onPlayVoice: (String) -> Unit,
     onReply: () -> Unit
 ) {
@@ -286,7 +314,10 @@ private fun MessageBubble(
                 if (repliedMessage != null) {
                     Surface(shape = RoundedCornerShape(10.dp), tonalElevation = 1.dp) {
                         Text(
-                            text = "Reply: ${previewForReply(repliedMessage)}",
+                            text = stringResource(
+                                R.string.messages_reply_prefix,
+                                previewForReply(repliedMessage, replyVoiceLabel, replyGenericLabel)
+                            ),
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -304,8 +335,17 @@ private fun MessageBubble(
 
                 message.attachments.forEach { attachment ->
                     Surface(shape = RoundedCornerShape(10.dp), tonalElevation = 1.dp) {
+                        val typeLabel = when (attachment.type) {
+                            AttachmentType.Image -> stringResource(R.string.messages_attachment_image)
+                            AttachmentType.Video -> stringResource(R.string.messages_attachment_video)
+                            AttachmentType.File -> stringResource(R.string.messages_attachment_file)
+                        }
                         Text(
-                            text = "${attachment.type.name}: ${attachment.displayName}",
+                            text = stringResource(
+                                R.string.messages_attachment_item,
+                                typeLabel,
+                                attachment.displayName
+                            ),
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                         )
                     }
@@ -313,11 +353,20 @@ private fun MessageBubble(
 
                 val voice = message.voiceNote
                 if (voice != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         OutlinedButton(onClick = { onPlayVoice(voice.localPath) }) {
-                            Text(if (isPlayingVoice) "Stop" else "Play vocale")
+                            Text(
+                                if (isPlayingVoice) {
+                                    stringResource(R.string.messages_stop)
+                                } else {
+                                    stringResource(R.string.messages_play_voice)
+                                }
+                            )
                         }
-                        Text("${voice.durationSec}s")
+                        Text(stringResource(R.string.messages_voice_duration, voice.durationSec))
                     }
                 }
 
@@ -327,7 +376,7 @@ private fun MessageBubble(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedButton(onClick = onReply) {
-                        Text("Reply")
+                        Text(stringResource(R.string.messages_reply_action))
                     }
                     if (showTimestamp) {
                         Text(
@@ -342,13 +391,16 @@ private fun MessageBubble(
     }
 }
 
-private fun previewForReply(message: ChatMessage): String {
+private fun previewForReply(
+    message: ChatMessage,
+    voiceFallback: String,
+    genericFallback: String
+): String {
     if (message.text.isNotBlank()) return message.text
-    if (message.voiceNote != null) return "Messaggio vocale"
-    return message.attachments.firstOrNull()?.displayName ?: "Messaggio"
+    if (message.voiceNote != null) return voiceFallback
+    return message.attachments.firstOrNull()?.displayName ?: genericFallback
 }
 
 private fun formatMessageTimestamp(timestamp: Long): String {
     return SimpleDateFormat("HH:mm", Locale.ITALY).format(Date(timestamp))
 }
-

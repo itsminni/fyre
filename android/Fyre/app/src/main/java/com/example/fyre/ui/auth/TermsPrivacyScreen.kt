@@ -14,8 +14,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.fyre.R
 import com.example.fyre.ui.components.FyreButton
 
 @Composable
@@ -31,13 +33,13 @@ fun TermsPrivacyScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Termini e Privacy",
+            text = stringResource(R.string.terms_title),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
 
         Text(
-            text = "Versione bozza locale: continuando confermi di aver letto e compreso condizioni d'uso e informativa privacy.",
+            text = stringResource(R.string.terms_intro),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
         )
@@ -45,22 +47,22 @@ fun TermsPrivacyScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "1) Usi consentiti\nL'app e ad uso didattico. Evita contenuti illeciti o dannosi.",
+            text = stringResource(R.string.terms_section_1),
             style = MaterialTheme.typography.bodyLarge
         )
 
         Text(
-            text = "2) Dati trattati\nI dati restano in locale su questo dispositivo finche non verra integrato un backend.",
+            text = stringResource(R.string.terms_section_2),
             style = MaterialTheme.typography.bodyLarge
         )
 
         Text(
-            text = "3) Responsabilita\nLe credenziali sono gestite localmente in ambiente di sviluppo e non rappresentano un servizio di produzione.",
+            text = stringResource(R.string.terms_section_3),
             style = MaterialTheme.typography.bodyLarge
         )
 
         Text(
-            text = "4) Consenso\nPer registrarti e obbligatorio accettare Termini e Privacy.",
+            text = stringResource(R.string.terms_section_4),
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.SemiBold
         )
@@ -68,7 +70,7 @@ fun TermsPrivacyScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         FyreButton(
-            text = "Accetto e continuo",
+            text = stringResource(R.string.terms_accept_and_continue),
             onClick = onAccept,
             modifier = Modifier.fillMaxWidth()
         )
@@ -77,7 +79,7 @@ fun TermsPrivacyScreen(
             onClick = onDecline,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Annulla")
+            Text(stringResource(R.string.common_cancel))
         }
     }
 }
