@@ -1,3 +1,5 @@
+import { makeChatMessageContract } from "../../../shared/contracts/index.js";
+
 export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
@@ -123,7 +125,22 @@ export default async ({ req, res, error }) => {
       }
     }
 
-    return res.json({
+    const payload = makeChatMessageContract({
+      messageId,
+      text,
+      messageType,
+      attachmentFileId,
+      attachmentName,
+      attachmentMimeType,
+      attachmentSize,
+      attachmentWidth,
+      attachmentHeight,
+      attachmentDuration,
+      replyToMessageId,
+      createdAt: now
+    });
+
+    return res.json(payload ?? {
       messageId,
       text,
       messageType,
