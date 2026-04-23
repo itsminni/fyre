@@ -374,10 +374,11 @@ actor AppwriteService {
         // Prefer the server-side projection when available so discover can stay privacy-safe.
         if let functionId = configuration.discoverProfilesFunctionId {
             let response = try await executeUserFunction(functionId: functionId, body: [:])
-            if let profiles = response["profiles"] as? [[String: Any]] {
-                let mappedProfiles = profiles.compactMap(makeDiscoverProfileDTO(from:))
-                return mappedProfiles
+            guard let profiles = response["profiles"] as? [[String: Any]] else {
+                throw AppwriteServiceError.invalidResponse
             }
+
+            return profiles.compactMap(makeDiscoverProfileDTO(from:))
         }
 
         let currentAccountId = try await fetchCurrentAccountId(required: false)
