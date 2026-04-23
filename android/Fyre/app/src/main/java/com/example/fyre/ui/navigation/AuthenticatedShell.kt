@@ -123,7 +123,13 @@ fun AuthenticatedShell(
                     currentUserDisplayName = currentUser?.displayName
                 )
             }
-            composable(MainRoute.Account) { AccountScreen(onLogout = onLogout) }
+            composable(MainRoute.Account) {
+                AccountScreen(
+                    onLogout = onLogout,
+                    currentUserEmail = currentUser?.email,
+                    currentUserDisplayName = currentUser?.displayName
+                )
+            }
         }
     }
 }
