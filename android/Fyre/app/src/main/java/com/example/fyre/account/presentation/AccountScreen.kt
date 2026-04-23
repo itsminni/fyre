@@ -94,7 +94,8 @@ fun AccountScreen(
             state = state,
             onBack = vm::backToHub,
             onSetThemeMode = vm::setThemeMode,
-            onUpdate = vm::updateAppearanceSettings
+            onUpdate = vm::updateAppearanceSettings,
+            onUpdateChatCustomization = vm::updateChatCustomizationSettings
         )
 
         AccountSection.EventHistory -> EventHistorySection(
@@ -332,9 +333,11 @@ private fun AppearanceSection(
     state: AccountUiState,
     onBack: () -> Unit,
     onSetThemeMode: (ThemeMode) -> Unit,
-    onUpdate: (com.example.fyre.account.model.AppearanceSettings) -> Unit
+    onUpdate: (com.example.fyre.account.model.AppearanceSettings) -> Unit,
+    onUpdateChatCustomization: (com.example.fyre.account.model.ChatCustomizationSettings) -> Unit
 ) {
     val appearance = state.appearanceSettings
+    val chat = state.chatCustomizationSettings
 
     SectionScaffold(title = "Aspetto", onBack = onBack) {
         Text(text = "Tema", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -359,6 +362,18 @@ private fun AppearanceSection(
             label = "Modalita compatta",
             checked = appearance.compactMode,
             onCheckedChange = { onUpdate(appearance.copy(compactMode = it)) }
+        )
+
+        Text(text = "Chat", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        SettingSwitchRow(
+            label = "Bubble compatte",
+            checked = chat.compactBubbles,
+            onCheckedChange = { onUpdateChatCustomization(chat.copy(compactBubbles = it)) }
+        )
+        SettingSwitchRow(
+            label = "Mostra orario messaggi",
+            checked = chat.showTimestamps,
+            onCheckedChange = { onUpdateChatCustomization(chat.copy(showTimestamps = it)) }
         )
         state.localStatusMessage?.let {
             Text(text = it, style = MaterialTheme.typography.labelMedium)

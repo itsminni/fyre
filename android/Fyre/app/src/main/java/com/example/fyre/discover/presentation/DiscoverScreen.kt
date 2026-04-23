@@ -51,6 +51,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.fyre.account.model.DiscoveryPreferences
+import com.example.fyre.account.model.NotificationSettings
+import com.example.fyre.core.notifications.NotificationChannels
+import com.example.fyre.core.notifications.NotificationGateway
 import com.example.fyre.discover.data.MockDiscoveryProfiles
 import com.example.fyre.discover.data.MockMatchEngine
 import com.example.fyre.discover.model.DiscoveryProfile
@@ -61,6 +65,9 @@ import kotlinx.coroutines.delay
 @Composable
 fun DiscoverScreen(
     profiles: List<DiscoveryProfile> = MockDiscoveryProfiles.items,
+    discoveryPreferences: DiscoveryPreferences = DiscoveryPreferences(),
+    notificationSettings: NotificationSettings = NotificationSettings(),
+    notificationGateway: NotificationGateway? = null,
     onOpenThread: (String) -> Unit = {}
 ) {
     var currentIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -68,8 +75,17 @@ fun DiscoverScreen(
     var pendingDecision by remember { mutableStateOf<SwipeDecision?>(null) }
     var matchPayload by remember { mutableStateOf<MockMatchEngine.MatchPayload?>(null) }
 
-    val currentProfile = profiles.getOrNull(currentIndex)
-    val nextProfile = profiles.getOrNull(currentIndex + 1)
+    val filteredProfiles = profiles.filter { profile ->
+        val ageOk = profile.age in discoveryPreferences.minAge..discoveryPreferences.maxAge
+        val distanceOk = profile.distanceKm <= discoveryPreferences.maxDistanceKm
+        val intentOk = discoveryPreferences.intent == "Tutti" ||
+            profile.intent.equals(discoveryPreferences.intent, ignoreCase = true)
+        val verifiedOk = !discoveryPreferences.showOnlyVerified || profile.isVerified
+        ageOk && distanceOk && intentOk && verifiedOk
+    }
+
+    val currentProfile = filteredProfiles.getOrNull(currentIndex)
+    val nextProfile = filteredProfiles.getOrNull(currentIndex + 1)
     val swipeThreshold = 160f
 
     val animatedOffsetX by animateFloatAsState(
@@ -92,9 +108,27 @@ fun DiscoverScreen(
             matchPayload = MockMatchEngine.evaluateLike(profile)
         }
 
-        currentIndex = (currentIndex + 1).coerceAtMost(profiles.size)
+        currentIndex = (currentIndex + 1).coerceAtMost(filteredProfiles.size)
         dragOffsetX = 0f
         pendingDecision = null
+    }
+
+    LaunchedEffect(filteredProfiles.size) {
+        if (currentIndex >= filteredProfiles.size) {
+            currentIndex = 0
+        }
+    }
+
+    LaunchedEffect(matchPayload?.threadId) {
+        val payload = matchPayload ?: return@LaunchedEffect
+        if (!notificationSettings.pushEnabled || !notificationSettings.matchNotifications) return@LaunchedEffect
+
+        val matchedProfile = filteredProfiles.firstOrNull { it.id == payload.profileId }
+        notificationGateway?.showLocalNotification(
+            title = "Nuovo match",
+            body = matchedProfile?.let { "Hai fatto match con ${it.name}" } ?: "Hai un nuovo match",
+            channelId = NotificationChannels.MATCHES
+        )
     }
 
     fun triggerDecision(decision: SwipeDecision) {
@@ -115,7 +149,7 @@ fun DiscoverScreen(
         )
 
         if (currentProfile == null) {
-            EmptyDiscoveryState()
+            EmptyDiscoveryState(hasActiveFilters = filteredProfiles.isEmpty() && profiles.isNotEmpty())
             return@Column
         }
 
@@ -228,7 +262,7 @@ fun DiscoverScreen(
                 )
             }
             Text(
-                text = "${currentIndex + 1}/${profiles.size}",
+                text = "${(currentIndex + 1).coerceAtMost(filteredProfiles.size.coerceAtLeast(1))}/${filteredProfiles.size}",
                 style = MaterialTheme.typography.labelLarge
             )
             IconButton(onClick = { triggerDecision(SwipeDecision.Like) }) {
@@ -307,6 +341,13 @@ private fun DiscoveryCard(
                     fontWeight = FontWeight.SemiBold
                 )
 
+                if (profile.isVerified) {
+                    AssistChip(
+                        onClick = { },
+                        label = { Text("Profilo verificato", fontSize = 12.sp) }
+                    )
+                }
+
                 Text(
                     text = "Interessi",
                     style = MaterialTheme.typography.labelLarge,
@@ -341,13 +382,17 @@ private fun TagList(tags: List<String>) {
 }
 
 @Composable
-private fun EmptyDiscoveryState() {
+private fun EmptyDiscoveryState(hasActiveFilters: Boolean) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "Hai finito i profili disponibili. Torna piu tardi.",
+            text = if (hasActiveFilters) {
+                "Nessun profilo compatibile con i filtri correnti."
+            } else {
+                "Hai finito i profili disponibili. Torna piu tardi."
+            },
             style = MaterialTheme.typography.bodyLarge
         )
     }

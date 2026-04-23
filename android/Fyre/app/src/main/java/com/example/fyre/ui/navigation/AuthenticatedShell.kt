@@ -13,16 +13,21 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.fyre.core.notifications.AndroidNotificationGateway
 import com.example.fyre.account.presentation.AccountScreen
+import com.example.fyre.data.local.PersistedUserSettings
+import com.example.fyre.data.local.UserSettingsDataStore
 import com.example.fyre.discover.presentation.DiscoverScreen
 import com.example.fyre.events.presentation.EventsScreen
 import com.example.fyre.messages.presentation.MessagesScreen
@@ -41,6 +46,17 @@ fun AuthenticatedShell(
 ) {
     val navController = rememberNavController()
     val currentUser by authViewModel.currentUser.collectAsState()
+    val context = LocalContext.current
+    val settingsDataStore = remember(context.applicationContext) {
+        UserSettingsDataStore(context.applicationContext)
+    }
+    val persistedSettings by settingsDataStore.settings.collectAsState(
+        initial = PersistedUserSettings()
+    )
+    val notificationGateway = remember(context.applicationContext) {
+        AndroidNotificationGateway(context.applicationContext)
+    }
+
     val tabs = listOf(
         MainTab(MainRoute.Home, "Discovery", Icons.Filled.Explore),
         MainTab(MainRoute.Messages, "Messaggi", Icons.AutoMirrored.Filled.Chat),
@@ -83,6 +99,9 @@ fun AuthenticatedShell(
         ) {
             composable(MainRoute.Home) {
                 DiscoverScreen(
+                    discoveryPreferences = persistedSettings.discoveryPreferences,
+                    notificationSettings = persistedSettings.notificationSettings,
+                    notificationGateway = notificationGateway,
                     onOpenThread = { threadId ->
                         navController.navigate(MainRoute.messagesThread(threadId))
                     }
@@ -91,6 +110,9 @@ fun AuthenticatedShell(
             // Manteniamo la route legacy per compatibilita con eventuali deep link interni.
             composable(MainRoute.Discover) {
                 DiscoverScreen(
+                    discoveryPreferences = persistedSettings.discoveryPreferences,
+                    notificationSettings = persistedSettings.notificationSettings,
+                    notificationGateway = notificationGateway,
                     onOpenThread = { threadId ->
                         navController.navigate(MainRoute.messagesThread(threadId))
                     }
@@ -98,6 +120,9 @@ fun AuthenticatedShell(
             }
             composable(MainRoute.Messages) {
                 MessagesScreen(
+                    chatSettings = persistedSettings.chatCustomizationSettings,
+                    notificationSettings = persistedSettings.notificationSettings,
+                    notificationGateway = notificationGateway,
                     onOpenThread = { threadId ->
                         navController.navigate(MainRoute.messagesThread(threadId))
                     }
@@ -109,6 +134,9 @@ fun AuthenticatedShell(
             ) { backStackEntry ->
                 MessagesScreen(
                     openThreadId = backStackEntry.arguments?.getString(MainRoute.ThreadIdArg),
+                    chatSettings = persistedSettings.chatCustomizationSettings,
+                    notificationSettings = persistedSettings.notificationSettings,
+                    notificationGateway = notificationGateway,
                     onOpenThread = { threadId ->
                         navController.navigate(MainRoute.messagesThread(threadId))
                     },
@@ -120,7 +148,9 @@ fun AuthenticatedShell(
             composable(MainRoute.Events) {
                 EventsScreen(
                     currentUserEmail = currentUser?.email,
-                    currentUserDisplayName = currentUser?.displayName
+                    currentUserDisplayName = currentUser?.displayName,
+                    notificationSettings = persistedSettings.notificationSettings,
+                    notificationGateway = notificationGateway
                 )
             }
             composable(MainRoute.Account) {

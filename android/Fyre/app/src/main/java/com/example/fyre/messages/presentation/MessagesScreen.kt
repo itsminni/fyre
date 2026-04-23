@@ -4,7 +4,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.fyre.account.model.ChatCustomizationSettings
+import com.example.fyre.account.model.NotificationSettings
+import com.example.fyre.core.notifications.NotificationChannels
+import com.example.fyre.core.notifications.NotificationGateway
 
 /**
  * Entry point della feature Messaggi.
@@ -12,6 +19,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @Composable
 fun MessagesScreen(
     openThreadId: String? = null,
+    chatSettings: ChatCustomizationSettings = ChatCustomizationSettings(),
+    notificationSettings: NotificationSettings = NotificationSettings(),
+    notificationGateway: NotificationGateway? = null,
     onOpenThread: (String) -> Unit = {},
     onBackToInbox: () -> Unit = {}
 ) {
@@ -21,6 +31,7 @@ fun MessagesScreen(
     val messages by viewModel.messages.collectAsState()
     val draft by viewModel.draft.collectAsState()
     val replyToMessageId by viewModel.replyToMessageId.collectAsState()
+    var lastNotifiedUnreadCount by rememberSaveable { mutableIntStateOf(-1) }
 
     LaunchedEffect(openThreadId) {
         if (openThreadId.isNullOrBlank()) {
@@ -28,6 +39,33 @@ fun MessagesScreen(
         } else {
             viewModel.openThread(openThreadId)
         }
+    }
+
+    LaunchedEffect(
+        threads,
+        selectedThreadId,
+        notificationSettings.pushEnabled,
+        notificationSettings.messageNotifications
+    ) {
+        if (selectedThreadId != null) return@LaunchedEffect
+
+        val unreadTotal = threads.sumOf { it.unreadCount }
+        if (unreadTotal <= 0) {
+            lastNotifiedUnreadCount = 0
+            return@LaunchedEffect
+        }
+
+        val canNotify = notificationSettings.pushEnabled && notificationSettings.messageNotifications
+        if (!canNotify || unreadTotal == lastNotifiedUnreadCount) return@LaunchedEffect
+
+        val latestUnreadThread = threads.firstOrNull { it.unreadCount > 0 }
+        notificationGateway?.showLocalNotification(
+            title = if (unreadTotal == 1) "1 nuovo messaggio" else "$unreadTotal nuovi messaggi",
+            body = latestUnreadThread?.let { "${it.displayName}: ${it.lastMessage}" }
+                ?: "Apri la chat per leggerli",
+            channelId = NotificationChannels.MESSAGES
+        )
+        lastNotifiedUnreadCount = unreadTotal
     }
 
     if (selectedThreadId == null) {
@@ -58,6 +96,8 @@ fun MessagesScreen(
         onCancelReply = { viewModel.setReplyToMessage(null) },
         onSendAttachment = viewModel::sendMockAttachment,
         onSendVoice = viewModel::sendVoiceMessage,
+        compactBubbles = chatSettings.compactBubbles,
+        showTimestamps = chatSettings.showTimestamps,
         onBack = onBackToInbox
     )
 }

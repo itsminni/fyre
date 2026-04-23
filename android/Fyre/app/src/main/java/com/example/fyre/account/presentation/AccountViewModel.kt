@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.fyre.account.model.AccountSection
 import com.example.fyre.account.model.AccountUiState
 import com.example.fyre.account.model.AppearanceSettings
+import com.example.fyre.account.model.ChatCustomizationSettings
 import com.example.fyre.account.model.DiscoveryPreferences
 import com.example.fyre.account.model.EventHistoryItem
 import com.example.fyre.account.model.EventHistoryStatus
@@ -95,6 +96,18 @@ class AccountViewModel(
         userSettingsDataStore?.let { dataStore ->
             viewModelScope.launch {
                 dataStore.updateNotificationSettings(update)
+            }
+        }
+    }
+
+    fun updateChatCustomizationSettings(update: ChatCustomizationSettings) {
+        _uiState.value = _uiState.value.copy(
+            chatCustomizationSettings = update,
+            localStatusMessage = "Personalizzazione chat salvata in locale"
+        )
+        userSettingsDataStore?.let { dataStore ->
+            viewModelScope.launch {
+                dataStore.updateChatCustomization(update)
             }
         }
     }

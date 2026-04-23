@@ -63,6 +63,8 @@ fun MessageThreadScreen(
     onCancelReply: () -> Unit,
     onSendAttachment: (AttachmentType) -> Unit,
     onSendVoice: (String, Int) -> Unit,
+    compactBubbles: Boolean = false,
+    showTimestamps: Boolean = true,
     onBack: () -> Unit
 ) {
     val listState = rememberLazyListState()
@@ -120,7 +122,7 @@ fun MessageThreadScreen(
                 .weight(1f)
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(if (compactBubbles) 4.dp else 8.dp)
         ) {
             itemsIndexed(messages, key = { _, message -> message.id }) { _, message ->
                 MessageBubble(
@@ -129,6 +131,8 @@ fun MessageThreadScreen(
                         messages.firstOrNull { it.id == replyId }
                     },
                     isPlayingVoice = message.voiceNote?.localPath == playingPath,
+                    compact = compactBubbles,
+                    showTimestamp = showTimestamps,
                     onPlayVoice = { path ->
                         if (playingPath == path) {
                             voiceController.stopPlayback()
@@ -243,6 +247,8 @@ private fun MessageBubble(
     message: ChatMessage,
     repliedMessage: ChatMessage?,
     isPlayingVoice: Boolean,
+    compact: Boolean,
+    showTimestamp: Boolean,
     onPlayVoice: (String) -> Unit,
     onReply: () -> Unit
 ) {
@@ -266,12 +272,15 @@ private fun MessageBubble(
             shape = RoundedCornerShape(16.dp),
             color = bubbleColor,
             tonalElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth(0.78f)
+            modifier = Modifier.fillMaxWidth(if (compact) 0.64f else 0.78f)
         ) {
             Column(
                 modifier = Modifier
                     .background(bubbleColor)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(
+                        horizontal = if (compact) 10.dp else 12.dp,
+                        vertical = if (compact) 6.dp else 8.dp
+                    ),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 if (repliedMessage != null) {
@@ -320,11 +329,13 @@ private fun MessageBubble(
                     OutlinedButton(onClick = onReply) {
                         Text("Reply")
                     }
-                    Text(
-                        text = formatMessageTimestamp(message.timestamp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = textColor.copy(alpha = 0.75f)
-                    )
+                    if (showTimestamp) {
+                        Text(
+                            text = formatMessageTimestamp(message.timestamp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = textColor.copy(alpha = 0.75f)
+                        )
+                    }
                 }
             }
         }

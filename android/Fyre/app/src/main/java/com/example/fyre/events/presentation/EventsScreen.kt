@@ -17,16 +17,25 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.fyre.account.model.NotificationSettings
+import com.example.fyre.core.notifications.EventReminderScheduler
+import com.example.fyre.core.notifications.NotificationChannels
+import com.example.fyre.core.notifications.NotificationGateway
 import com.example.fyre.events.model.EventItem
+import com.example.fyre.events.model.EventUserState
 
 @Composable
 fun EventsScreen(
     currentUserEmail: String? = null,
-    currentUserDisplayName: String? = null
+    currentUserDisplayName: String? = null,
+    notificationSettings: NotificationSettings = NotificationSettings(),
+    notificationGateway: NotificationGateway? = null
 ) {
+    val context = LocalContext.current
     val userId = remember(currentUserEmail) {
         currentUserEmail?.trim()?.lowercase().takeUnless { it.isNullOrBlank() } ?: "user_default"
     }
@@ -62,7 +71,24 @@ fun EventsScreen(
             canCancel = viewModel.canCancelSelected(),
             canWaitlist = viewModel.canWaitlistSelected(),
             onBack = { viewModel.closeEventDetail() },
-            onJoin = { viewModel.joinSelected() },
+            onJoin = {
+                viewModel.joinSelected()
+                val updatedSelected = viewModel.selectedEvent()
+                val shouldNotify = notificationSettings.pushEnabled && notificationSettings.eventReminders
+                if (updatedSelected != null && shouldNotify && updatedSelected.userState == EventUserState.Registered) {
+                    EventReminderScheduler.scheduleSimulatedReminder(
+                        context = context,
+                        eventId = updatedSelected.id,
+                        eventTitle = updatedSelected.title,
+                        eventDate = updatedSelected.dateText
+                    )
+                    notificationGateway?.showLocalNotification(
+                        title = "Reminder impostato",
+                        body = "Ti ricorderemo ${updatedSelected.title}",
+                        channelId = NotificationChannels.EVENTS
+                    )
+                }
+            },
             onCancel = { viewModel.cancelSelected() },
             onWaitlist = { viewModel.waitlistSelected() },
             onAdminUpdateEvent = { title, dateText, place, description, deadlineText, capacity, rules ->

@@ -8,6 +8,7 @@ data class DiscoveryProfile(
     val id: String,
     val name: String,
     val age: Int,
+    val isVerified: Boolean,
     val city: String,
     val distanceKm: Int,
     val bio: String,

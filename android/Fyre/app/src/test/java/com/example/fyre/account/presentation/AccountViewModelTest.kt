@@ -85,5 +85,24 @@ class AccountViewModelTest {
         assertEquals("Roma", state.profileDraft.city)
         assertEquals("Profilo aggiornato localmente", state.localStatusMessage)
     }
+
+    @Test
+    fun update_chat_customization_updates_ui_state() {
+        val viewModel = AccountViewModel(
+            initialEmail = "mario@example.com",
+            initialDisplayName = "Mario Rossi"
+        )
+
+        viewModel.updateChatCustomizationSettings(
+            viewModel.uiState.value.chatCustomizationSettings.copy(
+                compactBubbles = true,
+                showTimestamps = false
+            )
+        )
+
+        val chat = viewModel.uiState.value.chatCustomizationSettings
+        assertTrue(chat.compactBubbles)
+        assertFalse(chat.showTimestamps)
+    }
 }
 

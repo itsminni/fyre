@@ -4,10 +4,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.runtime.LaunchedEffect
+import com.example.fyre.account.model.ThemeMode
+import com.example.fyre.core.notifications.AndroidNotificationGateway
+import com.example.fyre.data.local.PersistedUserSettings
 import com.example.fyre.data.local.SessionDataStore
+import com.example.fyre.data.local.UserSettingsDataStore
 import com.example.fyre.data.repository.UserRepository
 import com.example.fyre.ui.auth.AuthViewModel
 import com.example.fyre.ui.auth.AuthViewModelFactory
@@ -38,9 +45,24 @@ class MainActivity : ComponentActivity() {
         // (applicationContext vive per tutta la durata dell'app, evita memory leak)
         val userRepository = UserRepository(applicationContext)
         val sessionDataStore = SessionDataStore(applicationContext)
+        val userSettingsDataStore = UserSettingsDataStore(applicationContext)
+        val notificationGateway = AndroidNotificationGateway(applicationContext)
+        notificationGateway.createChannels()
 
         setContent {
-            FyreTheme {
+            val persistedSettings by userSettingsDataStore.settings.collectAsState(
+                initial = PersistedUserSettings()
+            )
+            val darkTheme = when (persistedSettings.themeMode) {
+                ThemeMode.System -> isSystemInDarkTheme()
+                ThemeMode.Light -> false
+                ThemeMode.Dark -> true
+            }
+
+            FyreTheme(
+                darkTheme = darkTheme,
+                dynamicColor = persistedSettings.dynamicColor
+            ) {
                 // Controller di navigazione — gestisce lo stack delle schermate
                 val navController = rememberNavController()
 
