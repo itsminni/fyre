@@ -11,8 +11,11 @@ import {
   PersistedAppState,
   RealtimeConnectionState,
   RelationshipState,
+  User,
+  UserOrientation,
   UserGender
 } from '../types/models';
+import { normalizeUser } from '../types/models';
 import {
   createDefaultMainEventConfig,
   createDefaultMainEventInfo,
@@ -20,7 +23,14 @@ import {
   createMockThreads
 } from '../data/mockData';
 
-const STORAGE_KEY = 'fyre_web_state_v1';
+const STORAGE_KEY = 'fyre_web_state';
+const LEGACY_STORAGE_KEY = 'fyre_web_state_v1';
+const STORAGE_VERSION = 2;
+
+interface PersistedStateEnvelope {
+  version: number;
+  state: unknown;
+}
 
 const defaultSettings: AppSettings = {
   themeMode: 'system',
@@ -69,34 +79,168 @@ export function loadPersistedState(): PersistedAppState {
     return fallbackState;
   }
 
-  const rawValue = window.localStorage.getItem(STORAGE_KEY);
+  const rawValue =
+    window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
   if (!rawValue) {
     return fallbackState;
   }
 
   try {
-    const parsed = JSON.parse(rawValue) as Partial<PersistedAppState>;
+    const parsed = JSON.parse(rawValue) as Partial<PersistedAppState> | PersistedStateEnvelope;
+    const candidateState = unwrapPersistedState(parsed);
+    if (!candidateState) {
+      return fallbackState;
+    }
 
     return {
-      users: Array.isArray(parsed.users) ? parsed.users : fallbackState.users,
+      users: sanitizeUsers(candidateState.users),
       currentUserEmail:
-        typeof parsed.currentUserEmail === 'string' || parsed.currentUserEmail === null
-          ? parsed.currentUserEmail
+        typeof candidateState.currentUserEmail === 'string' || candidateState.currentUserEmail === null
+          ? candidateState.currentUserEmail
           : fallbackState.currentUserEmail,
-      realtimeState: sanitizeRealtimeState(parsed.realtimeState, fallbackState.realtimeState),
-      notifications: sanitizeNotifications(parsed.notifications),
-      mainEventConfig: sanitizeMainEventConfig(parsed.mainEventConfig, fallbackState.mainEventConfig),
-      mainEventInfo: sanitizeMainEventInfo(parsed.mainEventInfo, fallbackState.mainEventInfo),
-      mainEventState: sanitizeMainEventState(parsed.mainEventState, fallbackState.mainEventState),
-      threads: sanitizeThreads(parsed.threads, fallbackState.threads),
+      realtimeState: sanitizeRealtimeState(candidateState.realtimeState, fallbackState.realtimeState),
+      notifications: sanitizeNotifications(candidateState.notifications),
+      mainEventConfig: sanitizeMainEventConfig(candidateState.mainEventConfig, fallbackState.mainEventConfig),
+      mainEventInfo: sanitizeMainEventInfo(candidateState.mainEventInfo, fallbackState.mainEventInfo),
+      mainEventState: sanitizeMainEventState(candidateState.mainEventState, fallbackState.mainEventState),
+      threads: sanitizeThreads(candidateState.threads, fallbackState.threads),
       settings: {
         ...defaultSettings,
-        ...(parsed.settings ?? {})
+        ...(isRecord(candidateState.settings) ? candidateState.settings : {})
       }
     };
   } catch {
     return fallbackState;
   }
+}
+
+function unwrapPersistedState(
+  value: Partial<PersistedAppState> | PersistedStateEnvelope
+): Partial<PersistedAppState> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const maybeVersion = record.version;
+  const maybeState = record.state;
+
+  if (typeof maybeVersion === 'number') {
+    return isRecord(maybeState) ? (maybeState as Partial<PersistedAppState>) : null;
+  }
+
+  return value as Partial<PersistedAppState>;
+}
+
+function sanitizeUsers(value: unknown): User[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((user) => sanitizeUser(user))
+    .filter((user): user is User => user !== null);
+}
+
+function sanitizeUser(value: unknown): User | null {
+  if (!isRecord(value) || typeof value.email !== 'string') {
+    return null;
+  }
+
+  const showMe = sanitizeShowMe(value.showMe);
+
+  return normalizeUser({
+    email: value.email,
+    password: typeof value.password === 'string' ? value.password : '',
+    appwriteUserId: typeof value.appwriteUserId === 'string' ? value.appwriteUserId : undefined,
+    firstName: typeof value.firstName === 'string' ? value.firstName : undefined,
+    lastName: typeof value.lastName === 'string' ? value.lastName : undefined,
+    city: typeof value.city === 'string' ? value.city : undefined,
+    cityLat: typeof value.cityLat === 'number' ? value.cityLat : undefined,
+    cityLng: typeof value.cityLng === 'number' ? value.cityLng : undefined,
+    latitude: typeof value.latitude === 'number' ? value.latitude : undefined,
+    longitude: typeof value.longitude === 'number' ? value.longitude : undefined,
+    birthDate: typeof value.birthDate === 'string' ? value.birthDate : undefined,
+    gender: sanitizeUserGender(value.gender),
+    orientation: sanitizeUserOrientation(value.orientation),
+    showMe,
+    preferredGenders: sanitizePreferredGenders(value.preferredGenders),
+    smokes: typeof value.smokes === 'boolean' ? value.smokes : undefined,
+    drinks: typeof value.drinks === 'boolean' ? value.drinks : undefined,
+    bio: typeof value.bio === 'string' ? value.bio : undefined,
+    minPreferredAge: typeof value.minPreferredAge === 'number' ? value.minPreferredAge : undefined,
+    maxPreferredAge: typeof value.maxPreferredAge === 'number' ? value.maxPreferredAge : undefined,
+    ageRangeMin: typeof value.ageRangeMin === 'number' ? value.ageRangeMin : undefined,
+    ageRangeMax: typeof value.ageRangeMax === 'number' ? value.ageRangeMax : undefined,
+    maxDistanceKm: typeof value.maxDistanceKm === 'number' ? value.maxDistanceKm : undefined,
+    intent: sanitizeMatchIntent(value.intent),
+    hobbies: typeof value.hobbies === 'string' ? value.hobbies : undefined,
+    passions: typeof value.passions === 'string' ? value.passions : undefined,
+    lookingFor: typeof value.lookingFor === 'string' ? value.lookingFor : undefined,
+    instagram: typeof value.instagram === 'string' ? value.instagram : undefined,
+    instagramTag: typeof value.instagramTag === 'string' ? value.instagramTag : undefined,
+    telegram: typeof value.telegram === 'string' ? value.telegram : undefined,
+    spotifyTag: typeof value.spotifyTag === 'string' ? value.spotifyTag : undefined,
+    website: typeof value.website === 'string' ? value.website : undefined,
+    favoriteSong: typeof value.favoriteSong === 'string' ? value.favoriteSong : undefined,
+    favoriteMovie: typeof value.favoriteMovie === 'string' ? value.favoriteMovie : undefined,
+    avatarFileId: typeof value.avatarFileId === 'string' ? value.avatarFileId : undefined,
+    profileImageData: typeof value.profileImageData === 'string' ? value.profileImageData : undefined
+  });
+}
+
+function sanitizeShowMe(value: unknown): User['showMe'] {
+  if (value === 'men' || value === 'women' || value === 'everyone') {
+    return value;
+  }
+  return 'everyone';
+}
+
+function sanitizeUserGender(value: unknown): UserGender | undefined {
+  if (value === 'male' || value === 'female' || value === 'nonBinary' || value === 'other') {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizePreferredGenders(value: unknown): UserGender[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const sanitized = value.filter(
+    (gender): gender is UserGender =>
+      gender === 'male' || gender === 'female' || gender === 'nonBinary' || gender === 'other'
+  );
+
+  return sanitized.length > 0 ? sanitized : undefined;
+}
+
+function sanitizeUserOrientation(value: unknown): UserOrientation | undefined {
+  if (
+    value === 'straight' ||
+    value === 'gay' ||
+    value === 'lesbian' ||
+    value === 'bisexual' ||
+    value === 'pansexual' ||
+    value === 'other'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function sanitizeMatchIntent(value: unknown): User['intent'] | undefined {
+  if (
+    value === 'relationship' ||
+    value === 'friendship' ||
+    value === 'casual' ||
+    value === 'networking' ||
+    value === 'notSure'
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 function sanitizeMainEventState(
@@ -422,5 +566,10 @@ export function persistState(value: PersistedAppState): void {
     return;
   }
 
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+  const payload: PersistedStateEnvelope = {
+    version: STORAGE_VERSION,
+    state: value
+  };
+
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 }
