@@ -40,6 +40,8 @@
 "home.swipe.error" = "Impossibile aggiornare lo swipe adesso. Riprova.";
 "home.swipe.pendingMatch" = "Like inviato. La chat si apre quando il like e reciproco.";
 "home.commonInterests.empty" = "Nuova energia, ancora nessun interesse in comune.";
+"match.banner.title" = "Match con %@";
+"match.banner.subtitle" = "Tocca per aprire la chat";
 
 "tab.home" = "Home";
 "tab.messages" = "Messaggi";
@@ -176,6 +178,10 @@
 "profile.photo.primaryBadge" = "Prima";
 "profile.photo.remove" = "Rimuovi foto";
 "profile.photo.galleryEmpty" = "Aggiungi foto rettangolari per la discovery fullscreen.";
+"profile.photo.crop.title" = "Centra avatar";
+"profile.photo.crop.reset" = "Reimposta";
+"profile.photo.crop.invalid" = "Impossibile leggere questa foto.";
+"profile.photo.crop.zoom" = "Zoom foto";
 "profile.firstName" = "Nome";
 "profile.lastName" = "Cognome";
 "profile.city" = "Città";

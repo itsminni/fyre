@@ -7,6 +7,7 @@
 
 import SwiftUI
 import PhotosUI
+import UIKit
 
 struct ProfileSetupView: View {
     @Environment(UserStore.self) private var store
@@ -30,6 +31,7 @@ struct ProfileSetupView: View {
     @State private var drinks = false
     @State private var pickedPhotoItem: PhotosPickerItem?
     @State private var pickedAdditionalPhotoItems: [PhotosPickerItem] = []
+    @State private var pendingAvatarCrop: PendingProfileAvatarCrop?
     @State private var errorMessage: String?
     @State private var isSaving = false
     @State private var showEventRemovalAlert = false
@@ -189,9 +191,12 @@ struct ProfileSetupView: View {
             }
             .task(id: pickedPhotoItem) {
                 guard let pickedPhotoItem else { return }
-                if let data = try? await pickedPhotoItem.loadTransferable(type: Data.self) {
-                    errorMessage = await store.updateProfileImage(data)
+                if let crop = await loadPendingProfileAvatarCrop(from: pickedPhotoItem) {
+                    pendingAvatarCrop = crop
+                } else {
+                    errorMessage = L10n.tr("profile.photo.crop.invalid")
                 }
+                self.pickedPhotoItem = nil
             }
             .onChange(of: pickedAdditionalPhotoItems) { _, newItems in
                 guard !newItems.isEmpty else { return }
@@ -204,6 +209,20 @@ struct ProfileSetupView: View {
             }
             .onAppear {
                 hydrateFromCurrentUserIfNeeded()
+            }
+            .sheet(item: $pendingAvatarCrop) { crop in
+                ProfileAvatarCropSheet(
+                    image: crop.image,
+                    onCancel: {
+                        pendingAvatarCrop = nil
+                    },
+                    onComplete: { data in
+                        pendingAvatarCrop = nil
+                        Task { @MainActor in
+                            errorMessage = await store.updateProfileImage(data)
+                        }
+                    }
+                )
             }
         }
     }
@@ -569,5 +588,320 @@ struct ProfileSetupView: View {
             bio
         ].allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         && !orderedPreferredGenders.isEmpty
+    }
+}
+
+struct PendingProfileAvatarCrop: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
+@MainActor
+func loadPendingProfileAvatarCrop(from item: PhotosPickerItem) async -> PendingProfileAvatarCrop? {
+    guard let data = try? await item.loadTransferable(type: Data.self),
+          let image = UIImage(data: data)?.normalizedForProfileAvatarCrop()
+    else {
+        return nil
+    }
+
+    return PendingProfileAvatarCrop(image: image)
+}
+
+struct ProfileAvatarCropSheet: View {
+    let image: UIImage
+    let onCancel: () -> Void
+    let onComplete: (Data) -> Void
+
+    @State private var scale: CGFloat = 1.08
+    @State private var lastScale: CGFloat = 1.08
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    private let minimumScale: CGFloat = 1.08
+    private let maximumScale: CGFloat = 4
+    private let outputSide: CGFloat = 1024
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 22) {
+                Spacer(minLength: 10)
+
+                cropStage(side: cropSide)
+
+                zoomControl(side: cropSide)
+
+                Button {
+                    resetCrop()
+                } label: {
+                    Label(L10n.tr("profile.photo.crop.reset"), systemImage: "arrow.counterclockwise")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+
+                Spacer(minLength: 12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 24)
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle(L10n.tr("profile.photo.crop.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.tr("common.cancel")) {
+                        onCancel()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(L10n.tr("common.done")) {
+                        guard let data = croppedAvatarData(side: cropSide) else { return }
+                        onComplete(data)
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private var cropSide: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        guard screenWidth.isFinite, screenWidth > 0 else { return 320 }
+        return min(max(screenWidth - 48, 240), 360)
+    }
+
+    private func cropStage(side: CGFloat) -> some View {
+        let displayedSize = displayedImageSize(side: side, scale: scale)
+
+        return ZStack {
+            Color.black
+
+            Image(uiImage: image)
+                .resizable()
+                .frame(width: displayedSize.width, height: displayedSize.height)
+                .offset(offset)
+                .accessibilityHidden(true)
+
+            Circle()
+                .stroke(.white, lineWidth: 2)
+                .shadow(color: .black.opacity(0.28), radius: 8, y: 2)
+
+            Circle()
+                .stroke(.black.opacity(0.18), lineWidth: 1)
+                .padding(2)
+        }
+        .frame(width: side, height: side)
+        .clipShape(Rectangle())
+        .overlay {
+            Rectangle()
+                .stroke(Color.primary.opacity(0.10), lineWidth: 1)
+        }
+        .contentShape(Rectangle())
+        .highPriorityGesture(dragGesture(side: side))
+        .simultaneousGesture(magnificationGesture(side: side))
+        .onAppear {
+            scale = clampedScale(scale)
+            lastScale = scale
+            offset = clampedOffset(offset, side: side, scale: scale)
+            lastOffset = offset
+        }
+    }
+
+    private func zoomControl(side: CGFloat) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "minus.magnifyingglass")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Slider(
+                value: Binding(
+                    get: { Double(scale) },
+                    set: { newValue in
+                        let nextScale = clampedScale(CGFloat(newValue))
+                        scale = nextScale
+                        offset = clampedOffset(offset, side: side, scale: nextScale)
+                        lastScale = nextScale
+                        lastOffset = offset
+                    }
+                ),
+                in: Double(minimumScale)...Double(maximumScale)
+            )
+            .tint(.orange)
+            .accessibilityLabel(L10n.tr("profile.photo.crop.zoom"))
+
+            Image(systemName: "plus.magnifyingglass")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 6)
+    }
+
+    private func dragGesture(side: CGFloat) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                let proposed = CGSize(
+                    width: lastOffset.width + value.translation.width,
+                    height: lastOffset.height + value.translation.height
+                )
+                offset = clampedOffset(proposed, side: side, scale: scale)
+            }
+            .onEnded { _ in
+                offset = clampedOffset(offset, side: side, scale: scale)
+                lastOffset = offset
+            }
+    }
+
+    private func magnificationGesture(side: CGFloat) -> some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = clampedScale(lastScale * value)
+                offset = clampedOffset(offset, side: side, scale: scale)
+            }
+            .onEnded { _ in
+                scale = clampedScale(scale)
+                offset = clampedOffset(offset, side: side, scale: scale)
+                lastScale = scale
+                lastOffset = offset
+            }
+    }
+
+    private func resetCrop() {
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+            scale = minimumScale
+            lastScale = minimumScale
+            offset = .zero
+            lastOffset = .zero
+        }
+    }
+
+    private func displayedImageSize(side: CGFloat, scale: CGFloat) -> CGSize {
+        let resolvedScale = imageBaseScale(side: side) * clampedScale(scale)
+        return CGSize(
+            width: max(1, image.size.width * resolvedScale),
+            height: max(1, image.size.height * resolvedScale)
+        )
+    }
+
+    private func imageBaseScale(side: CGFloat) -> CGFloat {
+        guard image.size.width.isFinite,
+              image.size.height.isFinite,
+              image.size.width > 0,
+              image.size.height > 0,
+              side.isFinite,
+              side > 0
+        else {
+            return 1
+        }
+
+        return max(side / image.size.width, side / image.size.height)
+    }
+
+    private func clampedScale(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return minimumScale }
+        return min(max(value, minimumScale), maximumScale)
+    }
+
+    private func clampedOffset(_ value: CGSize, side: CGFloat, scale: CGFloat) -> CGSize {
+        let displayedSize = displayedImageSize(side: side, scale: scale)
+        let maxX = max(0, (displayedSize.width - side) / 2)
+        let maxY = max(0, (displayedSize.height - side) / 2)
+
+        return CGSize(
+            width: min(max(safeFinite(value.width), -maxX), maxX),
+            height: min(max(safeFinite(value.height), -maxY), maxY)
+        )
+    }
+
+    private func croppedAvatarData(side: CGFloat) -> Data? {
+        guard let cgImage = image.cgImage,
+              image.size.width.isFinite,
+              image.size.height.isFinite,
+              image.size.width > 0,
+              image.size.height > 0,
+              side.isFinite,
+              side > 0
+        else {
+            return nil
+        }
+
+        let effectiveScale = imageBaseScale(side: side) * clampedScale(scale)
+        guard effectiveScale.isFinite, effectiveScale > 0 else { return nil }
+
+        let displayedSize = displayedImageSize(side: side, scale: scale)
+        let imageOriginX = ((side - displayedSize.width) / 2) + offset.width
+        let imageOriginY = ((side - displayedSize.height) / 2) + offset.height
+        let cropRectInImagePoints = CGRect(
+            x: -imageOriginX / effectiveScale,
+            y: -imageOriginY / effectiveScale,
+            width: side / effectiveScale,
+            height: side / effectiveScale
+        )
+
+        let pixelScaleX = CGFloat(cgImage.width) / image.size.width
+        let pixelScaleY = CGFloat(cgImage.height) / image.size.height
+        var cropRect = CGRect(
+            x: cropRectInImagePoints.origin.x * pixelScaleX,
+            y: cropRectInImagePoints.origin.y * pixelScaleY,
+            width: cropRectInImagePoints.width * pixelScaleX,
+            height: cropRectInImagePoints.height * pixelScaleY
+        ).integral
+
+        let imageBounds = CGRect(
+            x: 0,
+            y: 0,
+            width: CGFloat(cgImage.width),
+            height: CGFloat(cgImage.height)
+        )
+        cropRect = cropRect.intersection(imageBounds)
+        guard cropRect.width > 1,
+              cropRect.height > 1,
+              let croppedImage = cgImage.cropping(to: cropRect)
+        else {
+            return nil
+        }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(
+            size: CGSize(width: outputSide, height: outputSide),
+            format: format
+        )
+        let renderedImage = renderer.image { _ in
+            UIImage(cgImage: croppedImage, scale: 1, orientation: .up)
+                .draw(in: CGRect(x: 0, y: 0, width: outputSide, height: outputSide))
+        }
+        return renderedImage.jpegData(compressionQuality: 0.92)
+    }
+
+    private func safeFinite(_ value: CGFloat) -> CGFloat {
+        value.isFinite ? value : 0
+    }
+}
+
+private extension UIImage {
+    func normalizedForProfileAvatarCrop() -> UIImage? {
+        guard size.width.isFinite,
+              size.height.isFinite,
+              size.width > 0,
+              size.height > 0
+        else {
+            return nil
+        }
+
+        if imageOrientation == .up, cgImage != nil {
+            return self
+        }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
     }
 }

@@ -111,6 +111,7 @@ struct AccountView: View {
     @State private var securityMessage: String?
     @State private var pickedPhotoItem: PhotosPickerItem?
     @State private var pickedAdditionalPhotoItems: [PhotosPickerItem] = []
+    @State private var pendingAvatarCrop: PendingProfileAvatarCrop?
     @State private var pendingChatBackgroundPreview: PendingChatBackgroundPreview?
     @State private var chatBackgroundStyleSelection = ChatBackgroundStyle.defaultDark.rawValue
     @State private var chatBackgroundSettingsMessage: String?
@@ -152,18 +153,13 @@ struct AccountView: View {
             }
             .task(id: pickedPhotoItem) {
                 guard let pickedPhotoItem else { return }
-                if let data = try? await pickedPhotoItem.loadTransferable(type: Data.self) {
-                    // Avatar uploads are handled separately so autosaving text fields never reuploads the image.
-                    let result = await store.updateProfileImage(data)
-                    if let result {
-                        profileMessage = result
-                        profileMessageIsError = true
-                    } else {
-                        profileMessage = nil
-                        profileMessageIsError = false
-                        fillFromUser()
-                    }
+                if let crop = await loadPendingProfileAvatarCrop(from: pickedPhotoItem) {
+                    pendingAvatarCrop = crop
+                } else {
+                    profileMessage = L10n.tr("profile.photo.crop.invalid")
+                    profileMessageIsError = true
                 }
+                self.pickedPhotoItem = nil
             }
             .onChange(of: pickedAdditionalPhotoItems) { _, newItems in
                 guard !newItems.isEmpty else { return }
@@ -206,6 +202,20 @@ struct AccountView: View {
                 }
             } message: {
                 Text(L10n.tr("profile.eventsRemoval.warning.message"))
+            }
+            .sheet(item: $pendingAvatarCrop) { crop in
+                ProfileAvatarCropSheet(
+                    image: crop.image,
+                    onCancel: {
+                        pendingAvatarCrop = nil
+                    },
+                    onComplete: { data in
+                        pendingAvatarCrop = nil
+                        Task { @MainActor in
+                            await saveCroppedProfileAvatar(data)
+                        }
+                    }
+                )
             }
             .fullScreenCover(item: $pendingChatBackgroundPreview) { preview in
                 ChatBackgroundConfirmationView(
@@ -890,6 +900,20 @@ struct AccountView: View {
 
     private var currentProfilePhotoDataItems: [Data] {
         store.currentUser?.resolvedProfilePhotoDataItems ?? []
+    }
+
+    @MainActor
+    private func saveCroppedProfileAvatar(_ data: Data) async {
+        // Avatar uploads are handled separately so autosaving text fields never reuploads the image.
+        let result = await store.updateProfileImage(data)
+        if let result {
+            profileMessage = result
+            profileMessageIsError = true
+        } else {
+            profileMessage = nil
+            profileMessageIsError = false
+            fillFromUser()
+        }
     }
 
     private var profilePhotoGalleryEditor: some View {

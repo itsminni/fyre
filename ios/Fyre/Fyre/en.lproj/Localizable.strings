@@ -39,6 +39,8 @@
 "home.skip.accessibility" = "Skip";
 "home.swipe.error" = "Unable to update the swipe right now. Please try again.";
 "home.commonInterests.empty" = "Fresh energy, no shared tags yet.";
+"match.banner.title" = "Match with %@";
+"match.banner.subtitle" = "Tap to open the chat";
 
 "tab.home" = "Home";
 "tab.messages" = "Messages";
@@ -175,6 +177,10 @@
 "profile.photo.primaryBadge" = "First";
 "profile.photo.remove" = "Remove photo";
 "profile.photo.galleryEmpty" = "Add rectangular photos for fullscreen discovery.";
+"profile.photo.crop.title" = "Position avatar";
+"profile.photo.crop.reset" = "Reset";
+"profile.photo.crop.invalid" = "Unable to read this photo.";
+"profile.photo.crop.zoom" = "Photo zoom";
 "profile.firstName" = "First name";
 "profile.lastName" = "Last name";
 "profile.city" = "City";
