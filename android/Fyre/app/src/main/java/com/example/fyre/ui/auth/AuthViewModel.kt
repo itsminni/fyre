@@ -3,10 +3,17 @@ package com.example.fyre.ui.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.fyre.data.model.ProfileFieldValues
 import com.example.fyre.data.model.User
 import com.example.fyre.data.model.UserProfile
 import com.example.fyre.data.model.hasCompleteProfile
 import com.example.fyre.data.repository.AuthRepository
+import java.time.Instant
+import java.time.LocalDate
+import java.time.Period
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,7 +48,7 @@ sealed class AuthState {
  * Contiene lo stato dei campi di input e la logica di validazione.
  * Comunica con il [AuthRepository] per le operazioni di autenticazione.
  *
- * @property repository Repository locale/fake per auth
+ * @property repository Repository backend per auth
  */
 class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
@@ -63,11 +70,11 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         const val TermsRequired = "Devi accettare Termini e Privacy per continuare"
 
         const val ProfileFirstNameRequired = "Inserisci il nome"
-        const val ProfileLastNameRequired = "Inserisci il cognome"
-        const val ProfileUsernameMinLength = "Username minimo 3 caratteri"
         const val ProfileCityRequired = "Inserisci la citta"
         const val ProfileBirthDateRequired = "Inserisci la data di nascita"
-        const val ProfileAvatarRequired = "Seleziona un avatar"
+        const val ProfileInvalidAge = "Devi avere almeno 18 anni"
+        const val ProfileBioRequired = "Inserisci una bio"
+        const val ProfilePreferredGendersRequired = "Seleziona almeno una preferenza di genere"
         const val ProfileSessionUnavailable = "Sessione utente non disponibile"
         const val ProfileSaveError = "Errore salvataggio profilo"
     }
@@ -134,6 +141,45 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
     private val _profileAvatarUri = MutableStateFlow<String?>(null)
     val profileAvatarUri: StateFlow<String?> = _profileAvatarUri.asStateFlow()
+
+    private val _profilePhotoUris = MutableStateFlow<List<String>>(emptyList())
+    val profilePhotoUris: StateFlow<List<String>> = _profilePhotoUris.asStateFlow()
+
+    private val _profileGender = MutableStateFlow(ProfileFieldValues.GenderMale)
+    val profileGender: StateFlow<String> = _profileGender.asStateFlow()
+
+    private val _profileOrientation = MutableStateFlow(ProfileFieldValues.OrientationStraight)
+    val profileOrientation: StateFlow<String> = _profileOrientation.asStateFlow()
+
+    private val _profileIntent = MutableStateFlow(ProfileFieldValues.IntentRelationship)
+    val profileIntent: StateFlow<String> = _profileIntent.asStateFlow()
+
+    private val _profileInterests = MutableStateFlow("")
+    val profileInterests: StateFlow<String> = _profileInterests.asStateFlow()
+
+    private val _profileInstagramTag = MutableStateFlow("")
+    val profileInstagramTag: StateFlow<String> = _profileInstagramTag.asStateFlow()
+
+    private val _profileSpotifyTag = MutableStateFlow("")
+    val profileSpotifyTag: StateFlow<String> = _profileSpotifyTag.asStateFlow()
+
+    private val _profilePreferredGenders = MutableStateFlow(ProfileFieldValues.DefaultPreferredGenders)
+    val profilePreferredGenders: StateFlow<List<String>> = _profilePreferredGenders.asStateFlow()
+
+    private val _profileMinPreferredAge = MutableStateFlow("20")
+    val profileMinPreferredAge: StateFlow<String> = _profileMinPreferredAge.asStateFlow()
+
+    private val _profileMaxPreferredAge = MutableStateFlow("32")
+    val profileMaxPreferredAge: StateFlow<String> = _profileMaxPreferredAge.asStateFlow()
+
+    private val _profileMaxDistanceKm = MutableStateFlow("50")
+    val profileMaxDistanceKm: StateFlow<String> = _profileMaxDistanceKm.asStateFlow()
+
+    private val _profileSmokes = MutableStateFlow(false)
+    val profileSmokes: StateFlow<Boolean> = _profileSmokes.asStateFlow()
+
+    private val _profileDrinks = MutableStateFlow(false)
+    val profileDrinks: StateFlow<Boolean> = _profileDrinks.asStateFlow()
 
     private val _profileError = MutableStateFlow<String?>(null)
     val profileError: StateFlow<String?> = _profileError.asStateFlow()
@@ -211,10 +257,107 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
     fun updateProfileBio(value: String) {
         _profileBio.value = value
+        _profileError.value = null
     }
 
     fun updateProfileAvatarUri(value: String?) {
         _profileAvatarUri.value = value
+        _profileError.value = null
+    }
+
+    fun addProfilePhotoUris(values: List<String>) {
+        val next = (_profilePhotoUris.value + values)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(MaxProfilePhotoCount)
+        _profilePhotoUris.value = next
+        _profileError.value = null
+    }
+
+    fun removeProfilePhotoAt(index: Int) {
+        val current = _profilePhotoUris.value
+        if (index !in current.indices) return
+
+        _profilePhotoUris.value = current.toMutableList().apply { removeAt(index) }
+        _profileError.value = null
+    }
+
+    fun moveProfilePhoto(index: Int, delta: Int) {
+        val target = index + delta
+        val current = _profilePhotoUris.value
+        if (index !in current.indices || target !in current.indices) return
+
+        _profilePhotoUris.value = current.toMutableList().apply {
+            val moving = removeAt(index)
+            add(target, moving)
+        }
+        _profileError.value = null
+    }
+
+    fun updateProfileGender(value: String) {
+        _profileGender.value = value.ifBlank { ProfileFieldValues.GenderMale }
+        _profileError.value = null
+    }
+
+    fun updateProfileOrientation(value: String) {
+        _profileOrientation.value = value.ifBlank { ProfileFieldValues.OrientationStraight }
+        _profileError.value = null
+    }
+
+    fun updateProfileIntent(value: String) {
+        _profileIntent.value = value.ifBlank { ProfileFieldValues.IntentRelationship }
+        _profileError.value = null
+    }
+
+    fun updateProfileInterests(value: String) {
+        _profileInterests.value = value
+        _profileError.value = null
+    }
+
+    fun updateProfileInstagramTag(value: String) {
+        _profileInstagramTag.value = value
+        _profileError.value = null
+    }
+
+    fun updateProfileSpotifyTag(value: String) {
+        _profileSpotifyTag.value = value
+        _profileError.value = null
+    }
+
+    fun setProfilePreferredGender(value: String, selected: Boolean) {
+        val current = _profilePreferredGenders.value.toMutableList()
+        if (selected && value !in current) {
+            current += value
+        } else if (!selected) {
+            current -= value
+        }
+        _profilePreferredGenders.value = ProfileFieldValues.DefaultPreferredGenders.filter { it in current }
+        _profileError.value = null
+    }
+
+    fun updateProfileMinPreferredAge(value: String) {
+        _profileMinPreferredAge.value = value.filter { it.isDigit() }
+        _profileError.value = null
+    }
+
+    fun updateProfileMaxPreferredAge(value: String) {
+        _profileMaxPreferredAge.value = value.filter { it.isDigit() }
+        _profileError.value = null
+    }
+
+    fun updateProfileMaxDistanceKm(value: String) {
+        _profileMaxDistanceKm.value = value.filter { it.isDigit() }
+        _profileError.value = null
+    }
+
+    fun updateProfileSmokes(value: Boolean) {
+        _profileSmokes.value = value
+        _profileError.value = null
+    }
+
+    fun updateProfileDrinks(value: Boolean) {
+        _profileDrinks.value = value
         _profileError.value = null
     }
 
@@ -227,6 +370,19 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _profileBirthDate.value = profile.birthDate
         _profileBio.value = profile.bio
         _profileAvatarUri.value = profile.avatarUri
+        _profilePhotoUris.value = profile.profilePhotoUris.take(MaxProfilePhotoCount)
+        _profileGender.value = profile.gender.ifBlank { ProfileFieldValues.GenderMale }
+        _profileOrientation.value = profile.orientation.ifBlank { ProfileFieldValues.OrientationStraight }
+        _profileIntent.value = profile.intent.ifBlank { ProfileFieldValues.IntentRelationship }
+        _profileInterests.value = profile.interests
+        _profileInstagramTag.value = profile.instagramTag.orEmpty()
+        _profileSpotifyTag.value = profile.spotifyTag.orEmpty()
+        _profilePreferredGenders.value = normalizedPreferredGenders(profile.preferredGenders)
+        _profileMinPreferredAge.value = profile.minPreferredAge.toString()
+        _profileMaxPreferredAge.value = profile.maxPreferredAge.toString()
+        _profileMaxDistanceKm.value = profile.maxDistanceKm?.toString().orEmpty()
+        _profileSmokes.value = profile.smokes
+        _profileDrinks.value = profile.drinks
     }
 
     // ============================================================
@@ -394,8 +550,14 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
     fun hasCompletedProfile(): Boolean = _currentUser.value?.hasCompleteProfile() == true
 
+    fun applyUpdatedUser(user: User) {
+        _currentUser.value = user
+        _authState.value = AuthState.Idle
+        _globalError.value = null
+    }
+
     /**
-     * Ripristina una sessione locale tramite email salvata su storage.
+     * Ripristina la sessione backend usando l'email salvata solo come controllo di coerenza.
      * @return true se il profilo viene trovato e caricato, false altrimenti.
      */
     suspend fun restoreSession(email: String?): Boolean {
@@ -423,14 +585,29 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
             return
         }
 
-        val profile = UserProfile(
+        val minPreferredAge = resolvedMinPreferredAge()
+        val maxPreferredAge = resolvedMaxPreferredAge(minPreferredAge)
+        val profile = (current.profile ?: UserProfile()).copy(
             firstName = _profileFirstName.value.trim(),
             lastName = _profileLastName.value.trim(),
-            username = _profileUsername.value.trim(),
+            username = _profileUsername.value.trim().ifBlank { derivedUsername(current) },
             city = _profileCity.value.trim(),
             birthDate = _profileBirthDate.value.trim(),
+            gender = _profileGender.value,
+            orientation = _profileOrientation.value,
             bio = _profileBio.value.trim(),
-            avatarUri = _profileAvatarUri.value
+            intent = _profileIntent.value,
+            interests = _profileInterests.value.trim(),
+            instagramTag = normalizedSocialTag(_profileInstagramTag.value),
+            spotifyTag = normalizedSocialTag(_profileSpotifyTag.value),
+            preferredGenders = normalizedPreferredGenders(_profilePreferredGenders.value),
+            minPreferredAge = minPreferredAge,
+            maxPreferredAge = maxPreferredAge,
+            maxDistanceKm = resolvedMaxDistanceKm(),
+            smokes = _profileSmokes.value,
+            drinks = _profileDrinks.value,
+            avatarUri = _profileAvatarUri.value,
+            profilePhotoUris = _profilePhotoUris.value.take(MaxProfilePhotoCount)
         )
 
         _isLoading.value = true
@@ -506,18 +683,106 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _profileBirthDate.value = ""
         _profileBio.value = ""
         _profileAvatarUri.value = null
+        _profilePhotoUris.value = emptyList()
+        _profileGender.value = ProfileFieldValues.GenderMale
+        _profileOrientation.value = ProfileFieldValues.OrientationStraight
+        _profileIntent.value = ProfileFieldValues.IntentRelationship
+        _profileInterests.value = ""
+        _profileInstagramTag.value = ""
+        _profileSpotifyTag.value = ""
+        _profilePreferredGenders.value = ProfileFieldValues.DefaultPreferredGenders
+        _profileMinPreferredAge.value = "20"
+        _profileMaxPreferredAge.value = "32"
+        _profileMaxDistanceKm.value = "50"
+        _profileSmokes.value = false
+        _profileDrinks.value = false
         _profileError.value = null
         _profileSaveCompleted.value = false
     }
 
     private fun validateProfileDraft(): String? {
         if (_profileFirstName.value.isBlank()) return ValidationMessages.ProfileFirstNameRequired
-        if (_profileLastName.value.isBlank()) return ValidationMessages.ProfileLastNameRequired
-        if (_profileUsername.value.trim().length < 3) return ValidationMessages.ProfileUsernameMinLength
         if (_profileCity.value.isBlank()) return ValidationMessages.ProfileCityRequired
         if (_profileBirthDate.value.isBlank()) return ValidationMessages.ProfileBirthDateRequired
-        if (_profileAvatarUri.value.isNullOrBlank()) return ValidationMessages.ProfileAvatarRequired
+        val age = ageFromBirthDate(_profileBirthDate.value)
+            ?: return ValidationMessages.ProfileInvalidAge
+        if (age < 18) return ValidationMessages.ProfileInvalidAge
+        if (_profileBio.value.isBlank()) return ValidationMessages.ProfileBioRequired
+        if (_profilePreferredGenders.value.none { it.isNotBlank() }) {
+            return ValidationMessages.ProfilePreferredGendersRequired
+        }
         return null
+    }
+
+    private fun resolvedMinPreferredAge(): Int {
+        return _profileMinPreferredAge.value.toIntOrNull()?.coerceIn(18, 98) ?: 20
+    }
+
+    private fun resolvedMaxPreferredAge(minPreferredAge: Int): Int {
+        val minimum = maxOf(minPreferredAge + 1, 19)
+        return (_profileMaxPreferredAge.value.toIntOrNull() ?: 32).coerceIn(minimum, 99)
+    }
+
+    private fun resolvedMaxDistanceKm(): Int? {
+        return _profileMaxDistanceKm.value.toIntOrNull()?.coerceAtLeast(5)
+    }
+
+    private fun normalizedPreferredGenders(values: List<String>): List<String> {
+        val normalizedValues = values.map { value ->
+            if (value.equals("nonbinary", ignoreCase = true)) {
+                ProfileFieldValues.GenderNonBinary
+            } else {
+                value
+            }
+        }
+        return ProfileFieldValues.DefaultPreferredGenders.filter { it in normalizedValues }.ifEmpty {
+            ProfileFieldValues.DefaultPreferredGenders
+        }
+    }
+
+    private fun normalizedSocialTag(value: String?): String? {
+        val trimmed = value?.trim().orEmpty()
+        if (trimmed.isBlank()) return null
+
+        val withoutAtPrefix = trimmed.dropWhile { it == '@' }
+        val withoutWhitespace = withoutAtPrefix.replace(Regex("\\s+"), "")
+        val withoutAt = withoutWhitespace.replace("@", "")
+        return withoutAt.take(64).takeIf { it.isNotBlank() }
+    }
+
+    private fun derivedUsername(user: User): String {
+        val base = listOf(_profileFirstName.value, _profileLastName.value)
+            .joinToString(" ")
+            .trim()
+            .ifBlank { user.displayName }
+            .ifBlank { user.email.substringBefore("@") }
+        return base.lowercase().replace(Regex("\\s+"), "")
+    }
+
+    private fun ageFromBirthDate(value: String): Int? {
+        val birthDate = parseBirthDate(value) ?: return null
+        return Period.between(birthDate, LocalDate.now(ZoneOffset.UTC)).years
+    }
+
+    private fun parseBirthDate(value: String): LocalDate? {
+        val trimmed = value.trim()
+        if (trimmed.isBlank()) return null
+
+        return runCatching {
+            LocalDate.parse(trimmed, DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+        }.recoverCatching {
+            LocalDate.parse(trimmed, DateTimeFormatter.ISO_LOCAL_DATE)
+        }.recoverCatching { error ->
+            if (error is DateTimeParseException) {
+                Instant.parse(trimmed).atZone(ZoneOffset.UTC).toLocalDate()
+            } else {
+                throw error
+            }
+        }.getOrNull()
+    }
+
+    private companion object {
+        private const val MaxProfilePhotoCount = 6
     }
 }
 

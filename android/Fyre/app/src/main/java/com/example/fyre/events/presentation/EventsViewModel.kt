@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.fyre.events.data.EventsRepository
-import com.example.fyre.events.data.MockEventsDataRepository
 import com.example.fyre.events.model.EventItem
 import com.example.fyre.events.model.EventUserState
 import com.example.fyre.events.model.RegistrationStatus
@@ -16,11 +15,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class EventsViewModel(
-    private val repository: EventsRepository = MockEventsDataRepository(),
+    private val repository: EventsRepository,
     private val currentUserId: String = DEFAULT_USER_ID,
     private val currentUserDisplayName: String = DEFAULT_USER_NAME,
     private val currentUserEmail: String? = null,
-    autoSimulateMetrics: Boolean = true
+    autoRefreshEvents: Boolean = true
 ) : ViewModel() {
     companion object {
         private const val DEFAULT_USER_ID = "user_default"
@@ -33,8 +32,8 @@ class EventsViewModel(
     private val _selectedEventId = MutableStateFlow<String?>(null)
     val selectedEventId: StateFlow<String?> = _selectedEventId.asStateFlow()
 
-    private val _isAdminInMock = MutableStateFlow(repository.isAdminEmail(currentUserEmail))
-    val isAdminInMock: StateFlow<Boolean> = _isAdminInMock.asStateFlow()
+    private val _isAdmin = MutableStateFlow(repository.isAdminEmail(currentUserEmail))
+    val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -44,11 +43,10 @@ class EventsViewModel(
 
     init {
         refresh()
-        if (autoSimulateMetrics) {
+        if (autoRefreshEvents) {
             viewModelScope.launch {
                 while (isActive) {
-                    delay(3000)
-                    repository.simulateMetricsTick(null)
+                    delay(15000)
                     refresh()
                 }
             }
@@ -57,10 +55,7 @@ class EventsViewModel(
 
     fun openEvent(eventId: String) {
         _selectedEventId.value = eventId
-        viewModelScope.launch {
-            repository.simulateMetricsTick(eventId)
-            refresh()
-        }
+        refresh()
     }
 
     fun closeEventDetail() {
@@ -138,7 +133,7 @@ class EventsViewModel(
         rules: List<String>
     ): Boolean {
         val eventId = _selectedEventId.value ?: return false
-        if (!_isAdminInMock.value) return false
+        if (!_isAdmin.value) return false
 
         _isLoading.value = true
         _errorMessage.value = null
@@ -164,7 +159,7 @@ class EventsViewModel(
 
     fun adminSetParticipantStatus(participantId: String, status: RegistrationStatus): Boolean {
         val eventId = _selectedEventId.value ?: return false
-        if (!_isAdminInMock.value) return false
+        if (!_isAdmin.value) return false
 
         _isLoading.value = true
         _errorMessage.value = null
@@ -183,7 +178,7 @@ class EventsViewModel(
         return true
     }
 
-    fun canShowAdminSection(): Boolean = _isAdminInMock.value
+    fun canShowAdminSection(): Boolean = _isAdmin.value
 
     fun canJoinSelected(): Boolean {
         return when (selectedEvent()?.userState) {
@@ -214,12 +209,9 @@ class EventsViewModel(
         return _events.value.firstOrNull { it.id == eventId }
     }
 
-    fun tickSelectedMetrics() {
-        val eventId = _selectedEventId.value ?: return
-        viewModelScope.launch {
-            repository.simulateMetricsTick(eventId)
-            refresh()
-        }
+    fun refreshSelectedEvent() {
+        if (_selectedEventId.value == null) return
+        refresh()
     }
 
     fun clearError() {
@@ -237,7 +229,7 @@ class EventsViewModel(
             result.fold(
                 onSuccess = { loadedEvents ->
                     _events.value = loadedEvents
-                    _isAdminInMock.value = loadedEvents.any { event ->
+                    _isAdmin.value = loadedEvents.any { event ->
                         event.userRole.name.contains("Admin", ignoreCase = true)
                     } || repository.isAdminEmail(currentUserEmail)
                 },
@@ -250,7 +242,7 @@ class EventsViewModel(
 }
 
 class EventsViewModelFactory(
-    private val repository: EventsRepository = MockEventsDataRepository(),
+    private val repository: EventsRepository,
     private val currentUserId: String,
     private val currentUserDisplayName: String,
     private val currentUserEmail: String?
@@ -263,7 +255,7 @@ class EventsViewModelFactory(
                 currentUserId = currentUserId,
                 currentUserDisplayName = currentUserDisplayName,
                 currentUserEmail = currentUserEmail,
-                autoSimulateMetrics = true
+                autoRefreshEvents = true
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

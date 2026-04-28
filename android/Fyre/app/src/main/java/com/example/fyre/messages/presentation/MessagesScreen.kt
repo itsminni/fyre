@@ -114,14 +114,22 @@ fun MessagesScreen(
         messages = messages,
         draft = draft,
         replyToMessageId = replyToMessageId,
+        errorMessage = errorMessage,
         onDraftChange = viewModel::updateDraft,
         onSend = viewModel::sendCurrentMessage,
         onReply = { messageId -> viewModel.setReplyToMessage(messageId) },
         onCancelReply = { viewModel.setReplyToMessage(null) },
-        onSendAttachment = viewModel::sendAttachment,
+        onSendAttachment = { attachment ->
+            viewModel.sendAttachment(
+                type = attachment.type,
+                displayName = attachment.displayName,
+                localUri = attachment.localUri,
+                mimeType = attachment.mimeType
+            )
+        },
         onSendVoice = viewModel::sendVoiceMessage,
-        compactBubbles = chatSettings.compactBubbles,
-        showTimestamps = chatSettings.showTimestamps,
+        onRelationshipAction = viewModel::updateRelationship,
+        chatSettings = chatSettings,
         onBack = onBackToInbox
     )
 }

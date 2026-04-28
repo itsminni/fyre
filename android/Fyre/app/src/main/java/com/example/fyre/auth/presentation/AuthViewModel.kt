@@ -3,7 +3,7 @@ package com.example.fyre.auth.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.example.fyre.data.model.User
-import com.example.fyre.data.repository.UserRepository
+import com.example.fyre.data.repository.AuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,11 +36,11 @@ sealed class AuthState {
  * ViewModel che gestisce la logica di login e registrazione.
  *
  * Contiene lo stato dei campi di input e la logica di validazione.
- * Comunica con il [UserRepository] per le operazioni CRUD sugli utenti.
+ * Comunica con il [AuthRepository] per le operazioni backend sugli utenti.
  *
  * @property repository Il repository per l'accesso ai dati degli utenti
  */
-class AuthViewModel(private val repository: UserRepository) : ViewModel() {
+class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
     // --- Stato dell'autenticazione ---
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
@@ -244,7 +244,7 @@ class AuthViewModel(private val repository: UserRepository) : ViewModel() {
  * Senza librerie di Dependency Injection (Hilt/Koin), usiamo questa factory manuale.
  */
 class AuthViewModelFactory(
-    private val repository: UserRepository
+    private val repository: AuthRepository
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {

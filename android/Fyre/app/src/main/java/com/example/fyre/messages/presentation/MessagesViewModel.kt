@@ -4,19 +4,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.fyre.messages.data.MessagesRepository
-import com.example.fyre.messages.data.MockMessagesDataRepository
 import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.ChatMessage
 import com.example.fyre.messages.model.MessageAuthor
+import com.example.fyre.messages.model.MessageAttachment
 import com.example.fyre.messages.model.MessageSyncStatus
 import com.example.fyre.messages.model.MessageThread
+import com.example.fyre.messages.model.RelationshipAction
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class MessagesViewModel(
-    private val repository: MessagesRepository = MockMessagesDataRepository()
+    private val repository: MessagesRepository
 ) : ViewModel() {
 
     private val _threads = MutableStateFlow<List<MessageThread>>(emptyList())
@@ -120,20 +121,27 @@ class MessagesViewModel(
         }
     }
 
-    fun sendAttachment(type: AttachmentType) {
+    fun sendAttachment(
+        type: AttachmentType,
+        displayName: String,
+        localUri: String,
+        mimeType: String
+    ) {
         val threadId = _selectedThreadId.value ?: return
-        val timestamp = System.currentTimeMillis()
-
-        val (name, uri, mime) = when (type) {
-            AttachmentType.Image -> Triple("img_$timestamp.jpg", "local://image/$timestamp", "image/jpeg")
-            AttachmentType.Video -> Triple("video_$timestamp.mp4", "local://video/$timestamp", "video/mp4")
-            AttachmentType.File -> Triple("doc_$timestamp.pdf", "local://file/$timestamp", "application/pdf")
-        }
-
         val optimistic = optimisticMessage(
             threadId = threadId,
             text = "",
             replyToMessageId = _replyToMessageId.value
+        ).copy(
+            attachments = listOf(
+                MessageAttachment(
+                    id = "local_attachment_${System.currentTimeMillis()}",
+                    type = type,
+                    displayName = displayName,
+                    localUri = localUri,
+                    mimeType = mimeType
+                )
+            )
         )
         appendOptimisticMessage(optimistic)
         _replyToMessageId.value = null
@@ -144,9 +152,9 @@ class MessagesViewModel(
             val result = repository.sendAttachmentMessage(
                 threadId = threadId,
                 type = type,
-                displayName = name,
-                localUri = uri,
-                mimeType = mime,
+                displayName = displayName,
+                localUri = localUri,
+                mimeType = mimeType,
                 replyToMessageId = optimistic.replyToMessageId
             )
             result.fold(
@@ -196,6 +204,29 @@ class MessagesViewModel(
         }
     }
 
+    fun updateRelationship(action: RelationshipAction) {
+        val threadId = _selectedThreadId.value ?: return
+
+        _isLoading.value = true
+        _errorMessage.value = null
+        viewModelScope.launch {
+            val result = repository.updateRelationship(threadId, action)
+            result.fold(
+                onSuccess = {
+                    _threads.value = _threads.value.filterNot { it.id == threadId }
+                    _selectedThreadId.value = null
+                    _messages.value = emptyList()
+                    _draft.value = ""
+                    _replyToMessageId.value = null
+                },
+                onFailure = { throwable ->
+                    _errorMessage.value = throwable.message ?: "Azione chat non riuscita"
+                }
+            )
+            _isLoading.value = false
+        }
+    }
+
     fun clearError() {
         _errorMessage.value = null
     }
@@ -232,7 +263,7 @@ class MessagesViewModel(
             author = MessageAuthor.Me,
             text = text,
             timestamp = now,
-            isRead = true,
+            isRead = false,
             replyToMessageId = replyToMessageId,
             syncStatus = MessageSyncStatus.LocalOnly
         )

@@ -7,19 +7,23 @@ import com.example.fyre.data.appwrite.AppwriteConfigurationException
 import com.example.fyre.data.appwrite.AppwriteGateway
 import com.example.fyre.data.appwrite.asDoubleOrNull
 import com.example.fyre.data.appwrite.arrayOrEmpty
+import com.example.fyre.data.appwrite.booleanOrNull
 import com.example.fyre.data.appwrite.intOrNull
 import com.example.fyre.data.appwrite.stringOrNull
 import com.example.fyre.data.model.User
 import com.example.fyre.data.model.UserProfile
+import com.google.gson.JsonNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class AppwriteAuthRepository(
-    context: Context,
-    configuration: AppwriteConfiguration
+    private val gateway: AppwriteGateway
 ) : AuthRepository {
 
-    private val gateway = AppwriteGateway(context, configuration)
+    constructor(
+        context: Context,
+        configuration: AppwriteConfiguration
+    ) : this(AppwriteGateway(context, configuration))
 
     override suspend fun findUserByEmail(email: String): User? {
         val account = gateway.fetchCurrentAccount(required = false) ?: return null
@@ -85,41 +89,64 @@ class AppwriteAuthRepository(
 
             val existingProfile = gateway.fetchProfileRow(accountId)
             val existingAvatarFileId = existingProfile?.stringOrNull("avatarFileId")
-            val uploadedAvatarFileId = if (!profile.avatarUri.isNullOrBlank() &&
-                !profile.avatarUri.startsWith("http://") &&
-                !profile.avatarUri.startsWith("https://")
-            ) {
+            val existingPhotoFileIds = existingProfile?.arrayOrEmpty("photoFileIds")
+                ?.mapNotNull { element ->
+                    if (element.isJsonPrimitive && element.asJsonPrimitive.isString) {
+                        element.asString
+                    } else {
+                        null
+                    }
+                }
+                ?.filter { it.isNotBlank() }
+                .orEmpty()
+
+            val uploadedAvatarFileId = if (!profile.avatarUri.isNullOrBlank() && !isRemoteUri(profile.avatarUri)) {
                 gateway.uploadAvatarFromUri(profile.avatarUri)
             } else {
                 null
             }
 
-            val avatarFileId = uploadedAvatarFileId ?: existingAvatarFileId
+            val avatarFileId = uploadedAvatarFileId
+                ?: profile.avatarUri?.takeIf(::isRemoteUri)?.let(gateway::storageFileIdFromUrl)
+                ?: existingAvatarFileId
+            val profilePhotoFileIds = resolveProfilePhotoFileIds(profile, existingPhotoFileIds)
+            val minPreferredAge = profile.minPreferredAge.coerceIn(18, 98)
+            val maxPreferredAge = profile.maxPreferredAge.coerceIn(
+                minimumValue = maxOf(minPreferredAge + 1, 19),
+                maximumValue = 99
+            )
             val payload = com.google.gson.JsonObject().apply {
                 addProperty("userId", accountId)
                 addProperty("email", normalizedEmail)
                 addProperty("firstName", profile.firstName.trim())
                 addProperty("lastName", profile.lastName.trim())
-                addProperty("username", profile.username.trim())
                 addProperty("city", profile.city.trim())
                 addProperty("birthDate", gateway.normalizeBirthDate(profile.birthDate))
                 addProperty("bio", profile.bio.trim())
-                addProperty("gender", profile.gender.ifBlank { "male" })
+                addProperty("gender", backendGenderValue(profile.gender.ifBlank { "male" }))
                 addProperty("orientation", profile.orientation.ifBlank { "straight" })
-                add("preferredGenders", com.example.fyre.data.appwrite.toJsonArray(profile.preferredGenders))
-                addProperty("minPreferredAge", profile.minPreferredAge.coerceAtLeast(18))
-                addProperty("maxPreferredAge", profile.maxPreferredAge.coerceAtLeast(profile.minPreferredAge + 1))
-                addProperty("maxDistanceKm", profile.maxDistanceKm.coerceAtLeast(5))
+                add(
+                    "preferredGenders",
+                    com.example.fyre.data.appwrite.toJsonArray(profile.preferredGenders.map(::backendGenderValue))
+                )
+                addProperty("minPreferredAge", minPreferredAge)
+                addProperty("maxPreferredAge", maxPreferredAge)
+                if (profile.maxDistanceKm == null) {
+                    add("maxDistanceKm", JsonNull.INSTANCE)
+                } else {
+                    addProperty("maxDistanceKm", profile.maxDistanceKm.coerceAtLeast(5))
+                }
                 addProperty("latitude", profile.latitude)
                 addProperty("longitude", profile.longitude)
+                addProperty("smokes", profile.smokes)
+                addProperty("drinks", profile.drinks)
+                addProperty("intent", profile.intent.ifBlank { "relationship" })
                 addProperty("interests", profile.interests.trim())
-                addProperty("instagramTag", profile.instagramTag?.trim())
-                addProperty("spotifyTag", profile.spotifyTag?.trim())
+                addProperty("instagramTag", normalizedSocialTag(profile.instagramTag))
+                addProperty("spotifyTag", normalizedSocialTag(profile.spotifyTag))
                 addProperty("avatarFileId", avatarFileId)
-                add("photoFileIds", com.example.fyre.data.appwrite.toJsonArray(listOfNotNull(avatarFileId)))
+                add("photoFileIds", com.example.fyre.data.appwrite.toJsonArray(profilePhotoFileIds))
                 addProperty("profileReady", profile.isComplete())
-                addProperty("presenceUpdatedAt", gateway.nowIso())
-                addProperty("lastSeenAt", gateway.nowIso())
             }
 
             if (existingProfile == null) {
@@ -201,25 +228,29 @@ class AppwriteAuthRepository(
                 birthDate = it.stringOrNull("birthDate").orEmpty(),
                 bio = it.stringOrNull("bio").orEmpty(),
                 avatarUri = gateway.avatarUrl(avatarFileId),
-                gender = it.stringOrNull("gender") ?: "male",
+                gender = profileGenderValue(it.stringOrNull("gender") ?: "male"),
                 orientation = it.stringOrNull("orientation") ?: "straight",
                 preferredGenders = it.arrayOrEmpty("preferredGenders")
                     .mapNotNull { element ->
                         if (element.isJsonPrimitive && element.asJsonPrimitive.isString) {
-                            element.asString
+                            profileGenderValue(element.asString)
                         } else {
                             null
                         }
                     }
-                    .ifEmpty { listOf("male", "female", "nonbinary", "other") },
+                    .ifEmpty { listOf("male", "female", "nonBinary", "other") },
                 minPreferredAge = it.intOrNull("minPreferredAge") ?: 18,
                 maxPreferredAge = it.intOrNull("maxPreferredAge") ?: 35,
-                maxDistanceKm = it.intOrNull("maxDistanceKm") ?: 50,
+                maxDistanceKm = it.intOrNull("maxDistanceKm"),
                 latitude = it["latitude"]?.asDoubleOrNull() ?: 44.6979,
                 longitude = it["longitude"]?.asDoubleOrNull() ?: 10.6313,
+                smokes = it.booleanOrNull("smokes") ?: false,
+                drinks = it.booleanOrNull("drinks") ?: false,
+                intent = it.stringOrNull("intent") ?: "relationship",
                 interests = it.stringOrNull("interests").orEmpty(),
                 instagramTag = it.stringOrNull("instagramTag"),
-                spotifyTag = it.stringOrNull("spotifyTag")
+                spotifyTag = it.stringOrNull("spotifyTag"),
+                profilePhotoUris = photoFileIds.mapNotNull(gateway::avatarUrl)
             )
         }
 
@@ -232,5 +263,59 @@ class AppwriteAuthRepository(
             avatarFileId = avatarFileId,
             photoFileIds = photoFileIds
         )
+    }
+
+    private suspend fun resolveProfilePhotoFileIds(
+        profile: UserProfile,
+        existingPhotoFileIds: List<String>
+    ): List<String> {
+        if (profile.profilePhotoUris.isEmpty()) {
+            return existingPhotoFileIds.take(MaxProfilePhotoCount)
+        }
+
+        return profile.profilePhotoUris
+            .take(MaxProfilePhotoCount)
+            .mapNotNull { uri ->
+                if (isRemoteUri(uri)) {
+                    gateway.storageFileIdFromUrl(uri)
+                        ?: existingPhotoFileIds.firstOrNull { existingFileId -> gateway.avatarUrl(existingFileId) == uri }
+                } else {
+                    gateway.uploadProfilePhotoFromUri(uri)
+                }
+            }
+    }
+
+    private fun isRemoteUri(value: String): Boolean {
+        return value.startsWith("http://") || value.startsWith("https://")
+    }
+
+    private fun normalizedSocialTag(value: String?): String? {
+        val trimmed = value?.trim().orEmpty()
+        if (trimmed.isBlank()) return null
+
+        val withoutAtPrefix = trimmed.dropWhile { it == '@' }
+        val withoutWhitespace = withoutAtPrefix.replace(Regex("\\s+"), "")
+        val withoutAt = withoutWhitespace.replace("@", "")
+        return withoutAt.take(64).takeIf { it.isNotBlank() }
+    }
+
+    private fun backendGenderValue(value: String): String {
+        return if (value.equals("nonbinary", ignoreCase = true)) {
+            "nonbinary"
+        } else {
+            value
+        }
+    }
+
+    private fun profileGenderValue(value: String): String {
+        return if (value.equals("nonbinary", ignoreCase = true)) {
+            "nonBinary"
+        } else {
+            value
+        }
+    }
+
+    private companion object {
+        private const val MaxProfilePhotoCount = 6
     }
 }

@@ -13,6 +13,7 @@ import com.example.fyre.messages.model.MessageAttachment
 import com.example.fyre.messages.model.MessageAuthor
 import com.example.fyre.messages.model.MessageSyncStatus
 import com.example.fyre.messages.model.MessageThread
+import com.example.fyre.messages.model.RelationshipAction
 import com.example.fyre.messages.model.VoiceNote
 import com.google.gson.JsonObject
 
@@ -23,8 +24,8 @@ class AppwriteMessagesRepository(
 
     override suspend fun getThreads(): Result<List<MessageThread>> {
         return runCatching {
-            val currentUserId = gateway.fetchCurrentAccountId(required = false)
-                ?: return@runCatching emptyList()
+            val currentUserId = gateway.fetchCurrentAccountId(required = true)
+                ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
 
             val participantRows = gateway.listRows(
                 tableId = configuration.threadParticipantsTableId,
@@ -44,8 +45,17 @@ class AppwriteMessagesRepository(
 
     override suspend fun getMessages(threadId: String): Result<List<ChatMessage>> {
         return runCatching {
-            val currentUserId = gateway.fetchCurrentAccountId(required = false)
-                ?: return@runCatching emptyList()
+            val currentUserId = gateway.fetchCurrentAccountId(required = true)
+                ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
+
+            val participantRows = gateway.listRows(
+                tableId = configuration.threadParticipantsTableId,
+                queries = listOf(gateway.queryEqual("threadId", listOf(threadId)))
+            )
+            val otherReadAt = participantRows
+                .filter { row -> row.stringOrNull("userId") != currentUserId }
+                .mapNotNull { row -> parseTimestamp(row.stringOrNull("lastReadAt")) }
+                .maxOrNull()
 
             val rows = gateway.listRows(
                 tableId = configuration.messagesTableId,
@@ -59,7 +69,8 @@ class AppwriteMessagesRepository(
                 mapRowToMessage(
                     row = row,
                     currentUserId = currentUserId,
-                    threadId = threadId
+                    threadId = threadId,
+                    otherReadAt = otherReadAt
                 )
             }
 
@@ -74,15 +85,7 @@ class AppwriteMessagesRepository(
                 ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
 
             fetchThreadPreview(threadId, currentUserId)
-                ?: MessageThread(
-                    id = threadId,
-                    avatarLabel = "?",
-                    displayName = "Thread",
-                    lastMessage = "Inizia la conversazione",
-                    lastTimestamp = System.currentTimeMillis(),
-                    unreadCount = 0,
-                    backendThreadId = threadId
-                )
+                ?: throw AppwriteConfigurationException("Thread non trovato nel database")
         }
     }
 
@@ -227,7 +230,8 @@ class AppwriteMessagesRepository(
 
     override suspend fun markAsRead(threadId: String): Result<Unit> {
         return runCatching {
-            val currentUserId = gateway.fetchCurrentAccountId(required = false) ?: return@runCatching
+            val currentUserId = gateway.fetchCurrentAccountId(required = true)
+                ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
 
             val participants = gateway.listRows(
                 tableId = configuration.threadParticipantsTableId,
@@ -253,6 +257,22 @@ class AppwriteMessagesRepository(
                     addProperty("notificationsEnabled", row.booleanOrNull("notificationsEnabled") ?: true)
                 }
             )
+        }
+    }
+
+    override suspend fun updateRelationship(threadId: String, action: RelationshipAction): Result<Unit> {
+        return runCatching {
+            val functionId = configuration.manageRelationshipFunctionId
+                ?: throw AppwriteConfigurationException("Funzione relazione Appwrite non configurata")
+
+            gateway.executeFunction(
+                functionId = functionId,
+                payload = mapOf(
+                    "threadId" to threadId,
+                    "action" to action.apiValue
+                )
+            )
+            Unit
         }
     }
 
@@ -325,7 +345,8 @@ class AppwriteMessagesRepository(
     private fun mapRowToMessage(
         row: JsonObject,
         currentUserId: String,
-        threadId: String
+        threadId: String,
+        otherReadAt: Long?
     ): ChatMessage? {
         val messageId = row.stringOrNull("\$id") ?: return null
         val senderId = row.stringOrNull("senderUserId")
@@ -361,15 +382,18 @@ class AppwriteMessagesRepository(
             }
         }
 
+        val timestamp = parseTimestamp(row.stringOrNull("createdAt"))
+            ?: parseTimestamp(row.stringOrNull("\$createdAt"))
+            ?: System.currentTimeMillis()
+        val isMine = senderId == currentUserId
+
         return ChatMessage(
             id = messageId,
             threadId = threadId,
-            author = if (senderId == currentUserId) MessageAuthor.Me else MessageAuthor.Other,
+            author = if (isMine) MessageAuthor.Me else MessageAuthor.Other,
             text = row.stringOrNull("text") ?: "",
-            timestamp = parseTimestamp(row.stringOrNull("createdAt"))
-                ?: parseTimestamp(row.stringOrNull("\$createdAt"))
-                ?: System.currentTimeMillis(),
-            isRead = true,
+            timestamp = timestamp,
+            isRead = if (isMine) otherReadAt != null && timestamp <= otherReadAt else true,
             replyToMessageId = row.stringOrNull("replyToMessageId"),
             attachments = attachments,
             voiceNote = voiceNote,
@@ -421,7 +445,7 @@ class AppwriteMessagesRepository(
             text = response.stringOrNull("text") ?: fallbackText,
             timestamp = parseTimestamp(response.stringOrNull("createdAt"))
                 ?: System.currentTimeMillis(),
-            isRead = true,
+            isRead = false,
             replyToMessageId = response.stringOrNull("replyToMessageId") ?: replyToMessageId,
             attachments = attachments,
             voiceNote = voiceNote,

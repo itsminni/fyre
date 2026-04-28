@@ -3,6 +3,7 @@ package com.example.fyre.messages.data
 import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.ChatMessage
 import com.example.fyre.messages.model.MessageThread
+import com.example.fyre.messages.model.RelationshipAction
 
 interface MessagesRepository {
     suspend fun getThreads(): Result<List<MessageThread>>
@@ -34,4 +35,6 @@ interface MessagesRepository {
     ): Result<ChatMessage>
 
     suspend fun markAsRead(threadId: String): Result<Unit>
+
+    suspend fun updateRelationship(threadId: String, action: RelationshipAction): Result<Unit>
 }

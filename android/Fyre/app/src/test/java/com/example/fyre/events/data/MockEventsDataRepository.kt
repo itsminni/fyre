@@ -86,8 +86,4 @@ class MockEventsDataRepository : EventsRepository {
         return MockEventsRepository.isAdminEmail(email)
     }
 
-    override suspend fun simulateMetricsTick(eventId: String?): Result<Unit> {
-        MockEventsRepository.simulateMetricsTick(eventId)
-        return Result.success(Unit)
-    }
 }

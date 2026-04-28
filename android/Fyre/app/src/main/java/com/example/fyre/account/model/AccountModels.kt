@@ -2,9 +2,10 @@ package com.example.fyre.account.model
 
 import androidx.annotation.StringRes
 import com.example.fyre.R
+import com.example.fyre.data.model.ProfileFieldValues
 
 enum class AccountSection(@param:StringRes val titleRes: Int) {
-    EditProfile(R.string.account_section_edit_profile),
+    EditProfile(R.string.account_menu_account),
     DiscoveryPreferences(R.string.account_section_discovery_preferences),
     Notifications(R.string.account_section_notifications),
     Security(R.string.account_section_security),
@@ -17,7 +18,22 @@ data class ProfileDraft(
     val lastName: String = "",
     val username: String = "",
     val city: String = "",
-    val bio: String = ""
+    val birthDate: String = "",
+    val gender: String = ProfileFieldValues.GenderMale,
+    val orientation: String = ProfileFieldValues.OrientationStraight,
+    val bio: String = "",
+    val intent: String = ProfileFieldValues.IntentRelationship,
+    val interests: String = "",
+    val instagramTag: String = "",
+    val spotifyTag: String = "",
+    val preferredGenders: List<String> = ProfileFieldValues.DefaultPreferredGenders,
+    val minPreferredAge: Int = 20,
+    val maxPreferredAge: Int = 32,
+    val maxDistanceKm: Int? = 50,
+    val smokes: Boolean = false,
+    val drinks: Boolean = false,
+    val avatarUri: String? = null,
+    val profilePhotoUris: List<String> = emptyList()
 )
 
 data class DiscoveryPreferences(
@@ -25,7 +41,13 @@ data class DiscoveryPreferences(
     val maxAge: Int = 35,
     val maxDistanceKm: Int = 30,
     val showOnlyVerified: Boolean = false,
-    val intent: String = "Tutti"
+    val intent: String = "Tutti",
+    val showAge: Boolean = true,
+    val showDistance: Boolean = true,
+    val showIntent: Boolean = true,
+    val showInterests: Boolean = true,
+    val showInstagramTag: Boolean = true,
+    val showSpotifyTag: Boolean = true
 )
 
 data class NotificationSettings(
@@ -36,9 +58,37 @@ data class NotificationSettings(
     val marketingUpdates: Boolean = false
 )
 
+enum class ChatBackgroundStyle {
+    DefaultDark,
+    Graphite,
+    Ember,
+    Ocean,
+    Forest,
+    CustomGradient
+}
+
+enum class ChatBubblePalette {
+    Default,
+    Coral,
+    Ocean,
+    Violet,
+    Emerald,
+    Graphite
+}
+
 data class ChatCustomizationSettings(
     val compactBubbles: Boolean = false,
-    val showTimestamps: Boolean = true
+    val showTimestamps: Boolean = true,
+    val backgroundStyle: ChatBackgroundStyle = ChatBackgroundStyle.DefaultDark,
+    val backgroundBrightness: Float = 0f,
+    val backgroundColor1Hex: String = "#3F4755",
+    val backgroundColor2Hex: String = "#8B7A74",
+    val backgroundColor3Hex: String = "#B9A89B",
+    val outgoingBubblePalette: ChatBubblePalette = ChatBubblePalette.Default,
+    val incomingBubblePalette: ChatBubblePalette = ChatBubblePalette.Default,
+    val sendButtonColor1Hex: String = "#FF9A00",
+    val sendButtonColor2Hex: String = "#FF8A1F",
+    val sendButtonColor3Hex: String = "#E14D33"
 )
 
 data class SecuritySettings(
@@ -61,6 +111,7 @@ data class AppearanceSettings(
 )
 
 enum class EventHistoryStatus {
+    Registered,
     Attended,
     Cancelled,
     Waitlisted
@@ -85,6 +136,7 @@ data class AccountUiState(
     val securitySettings: SecuritySettings = SecuritySettings(),
     val appearanceSettings: AppearanceSettings = AppearanceSettings(),
     val eventHistory: List<EventHistoryItem> = emptyList(),
-    val localStatusMessage: String? = null
+    val statusMessage: String? = null,
+    val isSavingProfile: Boolean = false
 )
 

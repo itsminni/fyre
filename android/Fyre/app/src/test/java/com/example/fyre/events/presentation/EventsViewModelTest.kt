@@ -1,5 +1,6 @@
 package com.example.fyre.events.presentation
 
+import com.example.fyre.events.data.MockEventsDataRepository
 import com.example.fyre.events.data.MockEventsRepository
 import com.example.fyre.events.model.EventUserState
 import com.example.fyre.events.model.RegistrationStatus
@@ -23,6 +24,14 @@ class EventsViewModelTest {
 
     private val dispatcher = UnconfinedTestDispatcher()
 
+    private fun viewModel(currentUserEmail: String? = null): EventsViewModel {
+        return EventsViewModel(
+            repository = MockEventsDataRepository(),
+            currentUserEmail = currentUserEmail,
+            autoRefreshEvents = false
+        )
+    }
+
     @Before
     fun setup() {
         Dispatchers.setMain(dispatcher)
@@ -36,7 +45,7 @@ class EventsViewModelTest {
 
     @Test
     fun open_event_selects_detail_item() = runTest {
-        val viewModel = EventsViewModel(autoSimulateMetrics = false)
+        val viewModel = viewModel()
         advanceUntilIdle()
 
         viewModel.openEvent("ev2")
@@ -49,7 +58,7 @@ class EventsViewModelTest {
 
     @Test
     fun update_registration_for_selected_changes_status() = runTest {
-        val viewModel = EventsViewModel(autoSimulateMetrics = false)
+        val viewModel = viewModel()
         advanceUntilIdle()
         viewModel.openEvent("ev1")
         advanceUntilIdle()
@@ -63,7 +72,7 @@ class EventsViewModelTest {
 
     @Test
     fun join_and_cancel_update_user_state() = runTest {
-        val viewModel = EventsViewModel(autoSimulateMetrics = false)
+        val viewModel = viewModel()
         advanceUntilIdle()
         viewModel.openEvent("ev2")
         advanceUntilIdle()
@@ -79,7 +88,7 @@ class EventsViewModelTest {
 
     @Test
     fun waitlist_selected_sets_waitlist_state() = runTest {
-        val viewModel = EventsViewModel(autoSimulateMetrics = false)
+        val viewModel = viewModel()
         advanceUntilIdle()
         viewModel.openEvent("ev3")
         advanceUntilIdle()
@@ -92,10 +101,7 @@ class EventsViewModelTest {
 
     @Test
     fun admin_controls_are_disabled_for_non_admin_user() = runTest {
-        val viewModel = EventsViewModel(
-            currentUserEmail = "user@example.com",
-            autoSimulateMetrics = false
-        )
+        val viewModel = viewModel(currentUserEmail = "user@example.com")
         advanceUntilIdle()
         viewModel.openEvent("ev1")
         advanceUntilIdle()
@@ -117,10 +123,7 @@ class EventsViewModelTest {
 
     @Test
     fun admin_controls_are_enabled_for_admin_user() = runTest {
-        val viewModel = EventsViewModel(
-            currentUserEmail = "admin@example.com",
-            autoSimulateMetrics = false
-        )
+        val viewModel = viewModel(currentUserEmail = "admin@example.com")
         advanceUntilIdle()
         viewModel.openEvent("ev1")
         advanceUntilIdle()

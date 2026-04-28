@@ -113,7 +113,7 @@ class AuthViewModelTest {
     }
 
     @Test
-    fun save_profile_setup_requires_avatar_and_marks_profile_complete() = runTest {
+    fun save_profile_setup_requires_ios_fields_and_marks_profile_complete() = runTest {
         val viewModel = AuthViewModel(FakeAuthRepository())
 
         viewModel.updateDisplayName("Mario Rossi")
@@ -126,15 +126,27 @@ class AuthViewModelTest {
 
         viewModel.updateProfileFirstName("Mario")
         viewModel.updateProfileLastName("Rossi")
-        viewModel.updateProfileUsername("mariorossi")
         viewModel.updateProfileCity("Milano")
         viewModel.updateProfileBirthDate("01/01/2000")
 
         viewModel.saveProfileSetup()
         advanceUntilIdle()
-        assertEquals("Seleziona un avatar", viewModel.profileError.value)
+        assertEquals("Inserisci una bio", viewModel.profileError.value)
 
+        viewModel.updateProfileBio("Ciao, sono Mario")
         viewModel.updateProfileAvatarUri("content://avatar/mock.png")
+        viewModel.addProfilePhotoUris(
+            listOf(
+                "content://gallery/one.png",
+                "content://gallery/two.png"
+            )
+        )
+        viewModel.updateProfileIntent("friendship")
+        viewModel.updateProfileInterests("musica, cinema")
+        viewModel.updateProfileInstagramTag("@mario")
+        viewModel.updateProfileSpotifyTag("@mario_music")
+        viewModel.updateProfileSmokes(false)
+        viewModel.updateProfileDrinks(true)
 
         viewModel.saveProfileSetup()
         advanceUntilIdle()
@@ -142,10 +154,16 @@ class AuthViewModelTest {
         assertTrue(viewModel.hasCompletedProfile())
         assertTrue(viewModel.currentUser.value?.hasCompleteProfile() == true)
         assertTrue(viewModel.profileError.value == null)
+        val profile = viewModel.currentUser.value?.profile
+        assertEquals("friendship", profile?.intent)
+        assertEquals("mario", profile?.instagramTag)
+        assertEquals("mario_music", profile?.spotifyTag)
+        assertEquals(2, profile?.profilePhotoUris?.size)
+        assertTrue(profile?.drinks == true)
     }
 
     @Test
-    fun save_profile_setup_requires_minimum_username_length() = runTest {
+    fun save_profile_setup_requires_at_least_one_preferred_gender() = runTest {
         val viewModel = AuthViewModel(FakeAuthRepository())
 
         viewModel.updateDisplayName("Mario Rossi")
@@ -158,15 +176,17 @@ class AuthViewModelTest {
 
         viewModel.updateProfileFirstName("Mario")
         viewModel.updateProfileLastName("Rossi")
-        viewModel.updateProfileUsername("mr")
         viewModel.updateProfileCity("Milano")
         viewModel.updateProfileBirthDate("01/01/2000")
-        viewModel.updateProfileAvatarUri("content://avatar/mock.png")
+        viewModel.updateProfileBio("Ciao, sono Mario")
+        listOf("male", "female", "nonBinary", "other").forEach {
+            viewModel.setProfilePreferredGender(it, false)
+        }
 
         viewModel.saveProfileSetup()
         advanceUntilIdle()
         assertFalse(viewModel.profileSaveCompleted.value)
-        assertEquals("Username minimo 3 caratteri", viewModel.profileError.value)
+        assertEquals("Seleziona almeno una preferenza di genere", viewModel.profileError.value)
     }
 
     @Test
@@ -175,10 +195,9 @@ class AuthViewModelTest {
 
         viewModel.updateProfileFirstName("Mario")
         viewModel.updateProfileLastName("Rossi")
-        viewModel.updateProfileUsername("mariorossi")
         viewModel.updateProfileCity("Milano")
         viewModel.updateProfileBirthDate("01/01/2000")
-        viewModel.updateProfileAvatarUri("content://avatar/mock.png")
+        viewModel.updateProfileBio("Ciao, sono Mario")
 
         viewModel.saveProfileSetup()
         advanceUntilIdle()

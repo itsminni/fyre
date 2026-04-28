@@ -33,7 +33,8 @@ class AppwriteEventsRepository(
         email: String?
     ): Result<List<EventItem>> {
         return runCatching {
-            val currentUserId = gateway.fetchCurrentAccountId(required = false) ?: userId
+            val currentUserId = gateway.fetchCurrentAccountId(required = true)
+                ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
             val currentUserEmail = email?.trim()?.lowercase()
 
             val eventRows = gateway.listRows(
@@ -178,12 +179,7 @@ class AppwriteEventsRepository(
     }
 
     override fun isAdminEmail(email: String?): Boolean {
-        val normalized = email?.trim()?.lowercase() ?: return false
-        return normalized.contains("admin")
-    }
-
-    override suspend fun simulateMetricsTick(eventId: String?): Result<Unit> {
-        return Result.success(Unit)
+        return false
     }
 
     private suspend fun mapEventRow(
@@ -290,10 +286,9 @@ class AppwriteEventsRepository(
         val adminEmails = parseCsv(eventRow.stringOrNull("adminEmails")).map { it.lowercase() }
 
         val isAdmin = adminUserIds.contains(currentUserId) ||
-            (!currentUserEmail.isNullOrBlank() && adminEmails.contains(currentUserEmail)) ||
-            currentUserEmail?.contains("admin") == true
+            (!currentUserEmail.isNullOrBlank() && adminEmails.contains(currentUserEmail))
 
-        return if (isAdmin) EventUserRole.AdminMock else EventUserRole.Participant
+        return if (isAdmin) EventUserRole.Admin else EventUserRole.Participant
     }
 
     private fun parseRules(value: JsonElement?): List<String> {

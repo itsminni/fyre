@@ -1,14 +1,20 @@
 package com.example.fyre.events.presentation
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,6 +23,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +42,7 @@ import com.example.fyre.events.model.EventUserState
 
 @Composable
 fun EventsScreen(
+    currentUserId: String? = null,
     currentUserEmail: String? = null,
     currentUserDisplayName: String? = null,
     notificationSettings: NotificationSettings = NotificationSettings(),
@@ -42,8 +52,10 @@ fun EventsScreen(
     val appGraph = remember(context.applicationContext) {
         AppGraphProvider.get(context.applicationContext)
     }
-    val userId = remember(currentUserEmail) {
-        currentUserEmail?.trim()?.lowercase().takeUnless { it.isNullOrBlank() } ?: "user_default"
+    val userId = remember(currentUserId, currentUserEmail) {
+        currentUserId?.trim().takeUnless { it.isNullOrBlank() }
+            ?: currentUserEmail?.trim()?.lowercase().takeUnless { it.isNullOrBlank() }
+            ?: "user_default"
     }
     val displayName = remember(currentUserDisplayName) {
         currentUserDisplayName?.trim().takeUnless { it.isNullOrBlank() } ?: "Utente"
@@ -60,13 +72,13 @@ fun EventsScreen(
 
     val events by viewModel.events.collectAsState()
     val selectedEventId by viewModel.selectedEventId.collectAsState()
-    val isAdminInMock by viewModel.isAdminInMock.collectAsState()
+    val isAdmin by viewModel.isAdmin.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
     LaunchedEffect(selectedEventId) {
         if (selectedEventId != null) {
-            viewModel.tickSelectedMetrics()
+            viewModel.refreshSelectedEvent()
         }
     }
 
@@ -74,7 +86,7 @@ fun EventsScreen(
     if (selected != null) {
         EventDetailScreen(
             event = selected,
-            isAdminInMock = isAdminInMock,
+            isAdmin = isAdmin,
             userStateLabel = viewModel.currentUserEventStateLabel(),
             canJoin = viewModel.canJoinSelected(),
             canCancel = viewModel.canCancelSelected(),
@@ -164,54 +176,89 @@ private fun EventsListScreen(
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(events, key = { it.id }) { event ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { onOpenEvent(event.id) }
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = event.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(text = event.dateText, style = MaterialTheme.typography.bodyMedium)
-                        Text(text = event.place, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = stringResource(R.string.events_user_state, event.userState.name),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = stringResource(
-                                R.string.events_capacity_deadline,
-                                event.registeredCount,
-                                event.capacity,
-                                event.deadlineText
-                            ),
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = stringResource(R.string.events_metric_online, event.liveMetrics.viewersOnline),
-                                style = MaterialTheme.typography.labelSmall
+                EventPreviewCard(event = event, onClick = { onOpenEvent(event.id) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventPreviewCard(
+    event: EventItem,
+    onClick: () -> Unit
+) {
+    val progress = (event.registeredCount.toFloat() / event.capacity.coerceAtLeast(1)).coerceIn(0f, 1f)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(190.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color(0xFFFFA43A),
+                                Color(0xFFEC5935),
+                                Color(0xFF301513)
                             )
-                            Text(
-                                text = stringResource(R.string.events_metric_checkin, event.liveMetrics.checkIns),
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                            Text(
-                                text = stringResource(
-                                    R.string.events_metric_chat_per_min,
-                                    event.liveMetrics.chatPerMinute
-                                ),
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-                    }
+                        )
+                    )
+                    .padding(18.dp),
+                contentAlignment = Alignment.BottomStart
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(stringResource(R.string.events_user_state, event.userState.name)) }
+                    )
+                    Text(
+                        text = event.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = event.dateText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(text = event.place, style = MaterialTheme.typography.bodyMedium)
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = stringResource(
+                        R.string.events_capacity_deadline,
+                        event.registeredCount,
+                        event.capacity,
+                        event.deadlineText
+                    ),
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(stringResource(R.string.events_metric_online, event.liveMetrics.viewersOnline)) }
+                    )
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(stringResource(R.string.events_metric_checkin, event.liveMetrics.checkIns)) }
+                    )
                 }
             }
         }

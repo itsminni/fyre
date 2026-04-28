@@ -56,7 +56,7 @@ fun NavGraph(
         return
     }
 
-    // Root navigation guidata dallo stato logico locale/mock della sessione.
+    // Root navigation guidata dallo stato logico della sessione backend.
     LaunchedEffect(sessionState, currentRoute) {
         when (sessionState) {
             AppSessionState.Loading -> Unit

@@ -165,7 +165,7 @@ object MockEventsRepository {
             else -> EventUserState.NotRegistered
         }
         val userRole = if (isAdminEmail(email)) {
-            EventUserRole.AdminMock
+            EventUserRole.Admin
         } else {
             EventUserRole.Participant
         }

@@ -95,7 +95,7 @@ class MockEventsRepositoryTest {
             email = "user@example.com"
         )
 
-        assertEquals(EventUserRole.AdminMock, adminEvent?.userRole)
+        assertEquals(EventUserRole.Admin, adminEvent?.userRole)
         assertEquals(EventUserRole.Participant, normalEvent?.userRole)
     }
 

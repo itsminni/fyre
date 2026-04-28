@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.fyre.account.model.ChatCustomizationSettings
+import com.example.fyre.account.model.ChatBackgroundStyle
+import com.example.fyre.account.model.ChatBubblePalette
 import com.example.fyre.account.model.DiscoveryPreferences
 import com.example.fyre.account.model.NotificationSettings
 import com.example.fyre.account.model.ThemeMode
@@ -41,9 +43,25 @@ class UserSettingsDataStore(private val context: Context) {
         val DISCOVERY_MAX_DISTANCE = intPreferencesKey("discovery_max_distance_km")
         val DISCOVERY_VERIFIED_ONLY = booleanPreferencesKey("discovery_verified_only")
         val DISCOVERY_INTENT = stringPreferencesKey("discovery_intent")
+        val DISCOVERY_SHOW_AGE = booleanPreferencesKey("discovery_show_age")
+        val DISCOVERY_SHOW_DISTANCE = booleanPreferencesKey("discovery_show_distance")
+        val DISCOVERY_SHOW_INTENT = booleanPreferencesKey("discovery_show_intent")
+        val DISCOVERY_SHOW_INTERESTS = booleanPreferencesKey("discovery_show_interests")
+        val DISCOVERY_SHOW_INSTAGRAM = booleanPreferencesKey("discovery_show_instagram")
+        val DISCOVERY_SHOW_SPOTIFY = booleanPreferencesKey("discovery_show_spotify")
 
         val CHAT_COMPACT = booleanPreferencesKey("chat_compact")
         val CHAT_SHOW_TIMESTAMPS = booleanPreferencesKey("chat_show_timestamps")
+        val CHAT_BACKGROUND_STYLE = stringPreferencesKey("chat_background_style")
+        val CHAT_BACKGROUND_BRIGHTNESS = intPreferencesKey("chat_background_brightness")
+        val CHAT_BACKGROUND_COLOR_1 = stringPreferencesKey("chat_background_color_1")
+        val CHAT_BACKGROUND_COLOR_2 = stringPreferencesKey("chat_background_color_2")
+        val CHAT_BACKGROUND_COLOR_3 = stringPreferencesKey("chat_background_color_3")
+        val CHAT_OUTGOING_BUBBLE = stringPreferencesKey("chat_outgoing_bubble")
+        val CHAT_INCOMING_BUBBLE = stringPreferencesKey("chat_incoming_bubble")
+        val CHAT_SEND_COLOR_1 = stringPreferencesKey("chat_send_color_1")
+        val CHAT_SEND_COLOR_2 = stringPreferencesKey("chat_send_color_2")
+        val CHAT_SEND_COLOR_3 = stringPreferencesKey("chat_send_color_3")
 
         val NOTIF_PUSH_ENABLED = booleanPreferencesKey("notif_push_enabled")
         val NOTIF_MATCH_ENABLED = booleanPreferencesKey("notif_match_enabled")
@@ -65,11 +83,33 @@ class UserSettingsDataStore(private val context: Context) {
                     maxAge = prefs[DISCOVERY_MAX_AGE] ?: 35,
                     maxDistanceKm = prefs[DISCOVERY_MAX_DISTANCE] ?: 30,
                     showOnlyVerified = prefs[DISCOVERY_VERIFIED_ONLY] ?: false,
-                    intent = prefs[DISCOVERY_INTENT] ?: "Tutti"
+                    intent = prefs[DISCOVERY_INTENT] ?: "Tutti",
+                    showAge = prefs[DISCOVERY_SHOW_AGE] ?: true,
+                    showDistance = prefs[DISCOVERY_SHOW_DISTANCE] ?: true,
+                    showIntent = prefs[DISCOVERY_SHOW_INTENT] ?: true,
+                    showInterests = prefs[DISCOVERY_SHOW_INTERESTS] ?: true,
+                    showInstagramTag = prefs[DISCOVERY_SHOW_INSTAGRAM] ?: true,
+                    showSpotifyTag = prefs[DISCOVERY_SHOW_SPOTIFY] ?: true
                 ),
                 chatCustomizationSettings = ChatCustomizationSettings(
                     compactBubbles = prefs[CHAT_COMPACT] ?: false,
-                    showTimestamps = prefs[CHAT_SHOW_TIMESTAMPS] ?: true
+                    showTimestamps = prefs[CHAT_SHOW_TIMESTAMPS] ?: true,
+                    backgroundStyle = prefs[CHAT_BACKGROUND_STYLE]
+                        ?.let { stored -> ChatBackgroundStyle.entries.firstOrNull { it.name == stored } }
+                        ?: ChatBackgroundStyle.DefaultDark,
+                    backgroundBrightness = ((prefs[CHAT_BACKGROUND_BRIGHTNESS] ?: 0).coerceIn(-100, 100)) / 100f,
+                    backgroundColor1Hex = prefs[CHAT_BACKGROUND_COLOR_1] ?: "#3F4755",
+                    backgroundColor2Hex = prefs[CHAT_BACKGROUND_COLOR_2] ?: "#8B7A74",
+                    backgroundColor3Hex = prefs[CHAT_BACKGROUND_COLOR_3] ?: "#B9A89B",
+                    outgoingBubblePalette = prefs[CHAT_OUTGOING_BUBBLE]
+                        ?.let { stored -> ChatBubblePalette.entries.firstOrNull { it.name == stored } }
+                        ?: ChatBubblePalette.Default,
+                    incomingBubblePalette = prefs[CHAT_INCOMING_BUBBLE]
+                        ?.let { stored -> ChatBubblePalette.entries.firstOrNull { it.name == stored } }
+                        ?: ChatBubblePalette.Default,
+                    sendButtonColor1Hex = prefs[CHAT_SEND_COLOR_1] ?: "#FF9A00",
+                    sendButtonColor2Hex = prefs[CHAT_SEND_COLOR_2] ?: "#FF8A1F",
+                    sendButtonColor3Hex = prefs[CHAT_SEND_COLOR_3] ?: "#E14D33"
                 ),
                 notificationSettings = NotificationSettings(
                     pushEnabled = prefs[NOTIF_PUSH_ENABLED] ?: true,
@@ -95,6 +135,12 @@ class UserSettingsDataStore(private val context: Context) {
             prefs[DISCOVERY_MAX_DISTANCE] = preferences.maxDistanceKm
             prefs[DISCOVERY_VERIFIED_ONLY] = preferences.showOnlyVerified
             prefs[DISCOVERY_INTENT] = preferences.intent
+            prefs[DISCOVERY_SHOW_AGE] = preferences.showAge
+            prefs[DISCOVERY_SHOW_DISTANCE] = preferences.showDistance
+            prefs[DISCOVERY_SHOW_INTENT] = preferences.showIntent
+            prefs[DISCOVERY_SHOW_INTERESTS] = preferences.showInterests
+            prefs[DISCOVERY_SHOW_INSTAGRAM] = preferences.showInstagramTag
+            prefs[DISCOVERY_SHOW_SPOTIFY] = preferences.showSpotifyTag
         }
     }
 
@@ -102,6 +148,16 @@ class UserSettingsDataStore(private val context: Context) {
         context.userSettingsDataStore.edit { prefs ->
             prefs[CHAT_COMPACT] = settings.compactBubbles
             prefs[CHAT_SHOW_TIMESTAMPS] = settings.showTimestamps
+            prefs[CHAT_BACKGROUND_STYLE] = settings.backgroundStyle.name
+            prefs[CHAT_BACKGROUND_BRIGHTNESS] = (settings.backgroundBrightness.coerceIn(-1f, 1f) * 100).toInt()
+            prefs[CHAT_BACKGROUND_COLOR_1] = settings.backgroundColor1Hex
+            prefs[CHAT_BACKGROUND_COLOR_2] = settings.backgroundColor2Hex
+            prefs[CHAT_BACKGROUND_COLOR_3] = settings.backgroundColor3Hex
+            prefs[CHAT_OUTGOING_BUBBLE] = settings.outgoingBubblePalette.name
+            prefs[CHAT_INCOMING_BUBBLE] = settings.incomingBubblePalette.name
+            prefs[CHAT_SEND_COLOR_1] = settings.sendButtonColor1Hex
+            prefs[CHAT_SEND_COLOR_2] = settings.sendButtonColor2Hex
+            prefs[CHAT_SEND_COLOR_3] = settings.sendButtonColor3Hex
         }
     }
 

@@ -4,7 +4,7 @@ import com.example.fyre.data.model.User
 import com.example.fyre.data.model.UserProfile
 
 /**
- * Contratto repository per autenticazione locale/fake.
+ * Contratto repository per autenticazione e profilo utente.
  */
 interface AuthRepository {
     suspend fun findUserByEmail(email: String): User?

@@ -34,6 +34,4 @@ interface EventsRepository {
     ): Result<Unit>
 
     fun isAdminEmail(email: String?): Boolean
-
-    suspend fun simulateMetricsTick(eventId: String?): Result<Unit>
 }

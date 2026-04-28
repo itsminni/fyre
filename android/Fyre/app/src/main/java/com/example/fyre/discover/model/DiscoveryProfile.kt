@@ -1,8 +1,7 @@
 package com.example.fyre.discover.model
 
 /**
- * Modello locale per la card di discovery.
- * Nessuna chiamata backend: i dati vengono mockati in app.
+ * Modello UI per una card di discovery proveniente da Appwrite.
  */
 data class DiscoveryProfile(
     val id: String,
@@ -14,6 +13,10 @@ data class DiscoveryProfile(
     val bio: String,
     val intent: String,
     val interests: List<String>,
-    val socialTags: List<String>
+    val socialTags: List<String>,
+    val photoUrls: List<String> = emptyList(),
+    val compatibilityScore: Int = 82,
+    val smokes: Boolean? = null,
+    val drinks: Boolean? = null
 )
 

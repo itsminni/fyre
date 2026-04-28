@@ -8,6 +8,8 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -156,6 +158,29 @@ class AppwriteHttpClient(
         return decodeExecutionResponse(lastExecution)
     }
 
+    suspend fun executeFunctionDirectly(functionUrl: String, payload: Map<String, Any?>): JsonObject {
+        val directUrl = normalizedFunctionUrl(functionUrl)
+        val jwt = post(
+            path = "/account/jwts",
+            body = jsonObject("duration" to 900)
+        ).stringOrNull("jwt")
+            ?: throw AppwriteDecodingException(
+                IllegalStateException("Missing Appwrite function JWT")
+            )
+
+        return withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url(directUrl)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .header("x-appwrite-user-jwt", jwt)
+                .post(gson.toJson(payload).toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            executeRequest(request, expectedStatusCodes = emptySet())
+        }
+    }
+
     fun clearSession() {
         cookieJar.clear()
     }
@@ -277,6 +302,24 @@ class AppwriteHttpClient(
         } catch (_: Throwable) {
             JsonObject().apply { addProperty("message", raw) }
         }
+    }
+
+    private fun normalizedFunctionUrl(rawUrl: String): HttpUrl {
+        val withScheme = if (rawUrl.contains("://")) {
+            rawUrl
+        } else {
+            "https://$rawUrl"
+        }
+        val httpUrl = withScheme.toHttpUrlOrNull()
+            ?: throw AppwriteConfigurationException("Dominio funzione Appwrite non valido")
+
+        if (httpUrl.queryParameter("type") != null) {
+            return httpUrl
+        }
+
+        return httpUrl.newBuilder()
+            .addQueryParameter("type", "json")
+            .build()
     }
 
     private fun normalizedEndpoint(): String {

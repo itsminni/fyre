@@ -1,20 +1,26 @@
 package com.example.fyre.events.presentation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -26,6 +32,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -37,7 +45,7 @@ import com.example.fyre.events.model.RegistrationStatus
 @Composable
 fun EventDetailScreen(
     event: EventItem,
-    isAdminInMock: Boolean,
+    isAdmin: Boolean,
     userStateLabel: String,
     canJoin: Boolean,
     canCancel: Boolean,
@@ -64,6 +72,7 @@ fun EventDetailScreen(
     var editDeadline by remember(event.id) { mutableStateOf(event.deadlineText) }
     var editCapacity by remember(event.id) { mutableStateOf(event.capacity.toString()) }
     var editRulesText by remember(event.id) { mutableStateOf(event.rules.joinToString("\n")) }
+    val progress = (event.registeredCount.toFloat() / event.capacity.coerceAtLeast(1)).coerceIn(0f, 1f)
 
     Column(
         modifier = Modifier
@@ -88,6 +97,66 @@ fun EventDetailScreen(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0xFFFFA43A),
+                                    Color(0xFFEC5935),
+                                    Color(0xFF2A1110)
+                                )
+                            )
+                        )
+                        .padding(18.dp),
+                    contentAlignment = Alignment.BottomStart
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(userStateLabel) }
+                        )
+                        Text(
+                            text = event.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = event.dateText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    DetailRow(label = stringResource(R.string.events_detail_label_place), value = event.place)
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                    DetailRow(
+                        label = stringResource(R.string.events_detail_label_capacity),
+                        value = stringResource(
+                            R.string.events_detail_capacity_value,
+                            event.registeredCount,
+                            event.capacity
+                        )
+                    )
+                }
+            }
         }
 
         DetailRow(label = stringResource(R.string.events_detail_label_date), value = event.dateText)
@@ -161,7 +230,7 @@ fun EventDetailScreen(
             }
         }
 
-        if (isAdminInMock) {
+        if (isAdmin) {
             Text(
                 text = stringResource(R.string.events_detail_section_admin),
                 style = MaterialTheme.typography.titleMedium,

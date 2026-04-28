@@ -9,7 +9,7 @@ enum class RegistrationStatus {
 
 enum class EventUserRole {
     Participant,
-    AdminMock
+    Admin
 }
 
 enum class EventUserState {

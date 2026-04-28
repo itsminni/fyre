@@ -4,8 +4,8 @@ import android.media.MediaPlayer
 import android.media.MediaRecorder
 
 /**
- * Gestione locale di registrazione e playback vocale per la chat.
- * Implementazione locale/mock, pronta per sostituzione con gateway backend.
+ * Gestione di registrazione e playback vocale per la chat.
+ * Il file audio viene caricato dal repository messaggi dopo la registrazione.
  */
 class LocalVoiceNoteController {
     private var recorder: MediaRecorder? = null

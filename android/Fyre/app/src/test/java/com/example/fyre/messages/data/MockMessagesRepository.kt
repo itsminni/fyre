@@ -5,6 +5,7 @@ import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.MessageAuthor
 import com.example.fyre.messages.model.MessageAttachment
 import com.example.fyre.messages.model.MessageThread
+import com.example.fyre.messages.model.RelationshipAction
 import com.example.fyre.messages.model.VoiceNote
 
 /**
@@ -193,6 +194,13 @@ object MockMessagesRepository {
         val index = threads.indexOfFirst { it.id == threadId }
         if (index >= 0) {
             threads[index] = threads[index].copy(unreadCount = 0)
+        }
+    }
+
+    fun updateRelationship(threadId: String, action: RelationshipAction) {
+        threads.removeAll { it.id == threadId }
+        if (action == RelationshipAction.Unmatch || action == RelationshipAction.Block) {
+            messagesByThread.remove(threadId)
         }
     }
 

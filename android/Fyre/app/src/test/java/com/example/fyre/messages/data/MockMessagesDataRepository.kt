@@ -2,6 +2,7 @@ package com.example.fyre.messages.data
 
 import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.ChatMessage
+import com.example.fyre.messages.model.RelationshipAction
 import com.example.fyre.messages.model.MessageThread
 
 class MockMessagesDataRepository : MessagesRepository {
@@ -70,6 +71,11 @@ class MockMessagesDataRepository : MessagesRepository {
 
     override suspend fun markAsRead(threadId: String): Result<Unit> {
         MockMessagesRepository.markAsRead(threadId)
+        return Result.success(Unit)
+    }
+
+    override suspend fun updateRelationship(threadId: String, action: RelationshipAction): Result<Unit> {
+        MockMessagesRepository.updateRelationship(threadId, action)
         return Result.success(Unit)
     }
 }

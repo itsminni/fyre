@@ -15,24 +15,31 @@ import com.example.fyre.account.model.ProfileDraft
 import com.example.fyre.account.model.SecuritySettings
 import com.example.fyre.account.model.ThemeMode
 import com.example.fyre.data.local.UserSettingsDataStore
-import kotlinx.coroutines.flow.collect
+import com.example.fyre.data.model.ProfileFieldValues
+import com.example.fyre.data.model.User
+import com.example.fyre.data.model.UserProfile
+import com.example.fyre.data.repository.AuthRepository
+import com.example.fyre.events.data.EventsRepository
+import com.example.fyre.events.model.EventUserState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class AccountViewModel(
-    initialEmail: String?,
-    initialDisplayName: String?,
-    private val userSettingsDataStore: UserSettingsDataStore? = null
+    initialUser: User?,
+    private val authRepository: AuthRepository? = null,
+    private val eventsRepository: EventsRepository? = null,
+    private val userSettingsDataStore: UserSettingsDataStore? = null,
+    private val onUserUpdated: (User) -> Unit = {}
 ) : ViewModel() {
+    private var currentUser: User? = initialUser
 
     private val _uiState = MutableStateFlow(
         AccountUiState(
-            email = initialEmail.orEmpty(),
-            displayName = initialDisplayName.orEmpty(),
-            profileDraft = profileDraftFromDisplayName(initialDisplayName),
-            eventHistory = localEventHistorySeed()
+            email = initialUser?.email.orEmpty(),
+            displayName = initialUser?.displayName.orEmpty(),
+            profileDraft = profileDraftFromUser(initialUser)
         )
     )
     val uiState: StateFlow<AccountUiState> = _uiState.asStateFlow()
@@ -54,32 +61,92 @@ class AccountViewModel(
                 }
             }
         }
+        loadEventHistoryFromDatabase()
     }
 
     fun openSection(section: AccountSection) {
-        _uiState.value = _uiState.value.copy(selectedSection = section, localStatusMessage = null)
+        _uiState.value = _uiState.value.copy(selectedSection = section, statusMessage = null)
     }
 
     fun backToHub() {
-        _uiState.value = _uiState.value.copy(selectedSection = null, localStatusMessage = null)
+        _uiState.value = _uiState.value.copy(selectedSection = null, statusMessage = null)
     }
 
-    fun updateProfile(update: ProfileDraft) {
-        val computedDisplayName = listOf(update.firstName.trim(), update.lastName.trim())
-            .filter { it.isNotBlank() }
-            .joinToString(" ")
-
+    fun updateProfileDraft(update: ProfileDraft) {
         _uiState.value = _uiState.value.copy(
-            displayName = computedDisplayName.ifBlank { _uiState.value.displayName },
             profileDraft = update,
-            localStatusMessage = "Profilo aggiornato localmente"
+            statusMessage = null
         )
+    }
+
+    fun saveProfile() {
+        val repository = authRepository ?: run {
+            _uiState.value = _uiState.value.copy(statusMessage = "Repository profilo Appwrite non configurato")
+            return
+        }
+        val user = currentUser ?: run {
+            _uiState.value = _uiState.value.copy(statusMessage = "Sessione utente non disponibile")
+            return
+        }
+        val draft = _uiState.value.profileDraft
+        val minPreferredAge = draft.minPreferredAge.coerceIn(18, 98)
+        val maxPreferredAge = draft.maxPreferredAge.coerceIn(
+            minimumValue = maxOf(minPreferredAge + 1, 19),
+            maximumValue = 99
+        )
+        val profile = (user.profile ?: UserProfile()).copy(
+            firstName = draft.firstName.trim(),
+            lastName = draft.lastName.trim(),
+            username = draft.username.trim(),
+            city = draft.city.trim(),
+            birthDate = draft.birthDate.trim(),
+            gender = draft.gender.ifBlank { ProfileFieldValues.GenderMale },
+            orientation = draft.orientation.ifBlank { ProfileFieldValues.OrientationStraight },
+            bio = draft.bio.trim(),
+            intent = draft.intent.ifBlank { ProfileFieldValues.IntentRelationship },
+            interests = draft.interests.trim(),
+            instagramTag = draft.instagramTag.trim().ifBlank { null },
+            spotifyTag = draft.spotifyTag.trim().ifBlank { null },
+            preferredGenders = normalizedPreferredGenders(draft.preferredGenders),
+            minPreferredAge = minPreferredAge,
+            maxPreferredAge = maxPreferredAge,
+            maxDistanceKm = draft.maxDistanceKm?.coerceAtLeast(5),
+            smokes = draft.smokes,
+            drinks = draft.drinks,
+            avatarUri = draft.avatarUri,
+            profilePhotoUris = draft.profilePhotoUris.take(MaxProfilePhotoCount)
+        )
+
+        _uiState.value = _uiState.value.copy(isSavingProfile = true, statusMessage = null)
+        viewModelScope.launch {
+            val result = repository.updateUserProfile(user.email, profile)
+            result.fold(
+                onSuccess = { updatedUser ->
+                    currentUser = updatedUser
+                    onUserUpdated(updatedUser)
+                    _uiState.value = _uiState.value.copy(
+                        email = updatedUser.email,
+                        displayName = updatedUser.displayName,
+                        profileDraft = profileDraftFromUser(updatedUser),
+                        isSavingProfile = false,
+                        statusMessage = "Profilo aggiornato su database"
+                    )
+                    loadEventHistoryFromDatabase()
+                },
+                onFailure = { throwable ->
+                    _uiState.value = _uiState.value.copy(
+                        isSavingProfile = false,
+                        statusMessage = throwable.message ?: "Aggiornamento profilo non riuscito"
+                    )
+                }
+            )
+        }
     }
 
     fun updateDiscoveryPreferences(update: DiscoveryPreferences) {
         _uiState.value = _uiState.value.copy(
             discoveryPreferences = update,
-            localStatusMessage = "Preferenze discovery salvate in locale"
+            statusMessage = "Preferenze discovery salvate sul dispositivo"
         )
         userSettingsDataStore?.let { dataStore ->
             viewModelScope.launch {
@@ -91,7 +158,7 @@ class AccountViewModel(
     fun updateNotificationSettings(update: NotificationSettings) {
         _uiState.value = _uiState.value.copy(
             notificationSettings = update,
-            localStatusMessage = "Notifiche aggiornate in locale"
+            statusMessage = "Notifiche aggiornate sul dispositivo"
         )
         userSettingsDataStore?.let { dataStore ->
             viewModelScope.launch {
@@ -103,7 +170,7 @@ class AccountViewModel(
     fun updateChatCustomizationSettings(update: ChatCustomizationSettings) {
         _uiState.value = _uiState.value.copy(
             chatCustomizationSettings = update,
-            localStatusMessage = "Personalizzazione chat salvata in locale"
+            statusMessage = "Personalizzazione chat salvata sul dispositivo"
         )
         userSettingsDataStore?.let { dataStore ->
             viewModelScope.launch {
@@ -115,14 +182,14 @@ class AccountViewModel(
     fun updateSecuritySettings(update: SecuritySettings) {
         _uiState.value = _uiState.value.copy(
             securitySettings = update,
-            localStatusMessage = "Impostazioni sicurezza aggiornate in locale"
+            statusMessage = "Impostazioni sicurezza aggiornate sul dispositivo"
         )
     }
 
     fun updateAppearanceSettings(update: AppearanceSettings) {
         _uiState.value = _uiState.value.copy(
             appearanceSettings = update,
-            localStatusMessage = "Aspetto aggiornato in locale"
+            statusMessage = "Aspetto aggiornato sul dispositivo"
         )
         userSettingsDataStore?.let { dataStore ->
             viewModelScope.launch {
@@ -139,61 +206,116 @@ class AccountViewModel(
         updateAppearanceSettings(current.copy(themeMode = mode))
     }
 
-    private fun profileDraftFromDisplayName(displayName: String?): ProfileDraft {
-        val safeName = displayName.orEmpty().trim()
+    private fun profileDraftFromUser(user: User?): ProfileDraft {
+        val profile = user?.profile
+        if (profile != null) {
+            return ProfileDraft(
+                firstName = profile.firstName,
+                lastName = profile.lastName,
+                username = profile.username,
+                city = profile.city,
+                birthDate = profile.birthDate,
+                gender = normalizedProfileGender(profile.gender),
+                orientation = profile.orientation,
+                bio = profile.bio,
+                intent = profile.intent,
+                interests = profile.interests,
+                instagramTag = profile.instagramTag.orEmpty(),
+                spotifyTag = profile.spotifyTag.orEmpty(),
+                preferredGenders = normalizedPreferredGenders(profile.preferredGenders),
+                minPreferredAge = profile.minPreferredAge,
+                maxPreferredAge = profile.maxPreferredAge,
+                maxDistanceKm = profile.maxDistanceKm,
+                smokes = profile.smokes,
+                drinks = profile.drinks,
+                avatarUri = profile.avatarUri,
+                profilePhotoUris = profile.profilePhotoUris.take(MaxProfilePhotoCount)
+            )
+        }
+
+        val safeName = user?.displayName.orEmpty().trim()
         if (safeName.isBlank()) return ProfileDraft()
 
         val parts = safeName.split(" ").filter { it.isNotBlank() }
-        val firstName = parts.firstOrNull().orEmpty()
-        val lastName = parts.drop(1).joinToString(" ")
-        val username = safeName.lowercase().replace(" ", "")
-
         return ProfileDraft(
-            firstName = firstName,
-            lastName = lastName,
-            username = username
+            firstName = parts.firstOrNull().orEmpty(),
+            lastName = parts.drop(1).joinToString(" "),
+            username = safeName.lowercase().replace(" ", "")
         )
     }
 
-    private fun localEventHistorySeed(): List<EventHistoryItem> {
-        return listOf(
-            EventHistoryItem(
-                id = "h1",
-                title = "Aperitivo Tech Milano",
-                dateText = "24/04/2026 19:30",
-                place = "Navigli, Milano",
-                status = EventHistoryStatus.Attended
-            ),
-            EventHistoryItem(
-                id = "h2",
-                title = "Sunset Rooftop Party",
-                dateText = "27/04/2026 18:00",
-                place = "Porta Nuova, Milano",
-                status = EventHistoryStatus.Cancelled
-            ),
-            EventHistoryItem(
-                id = "h3",
-                title = "Hiking Day Lago di Como",
-                dateText = "01/05/2026 08:30",
-                place = "Como",
-                status = EventHistoryStatus.Waitlisted
+    private fun normalizedPreferredGenders(values: List<String>): List<String> {
+        val normalized = values.map(::normalizedProfileGender)
+        return ProfileFieldValues.DefaultPreferredGenders
+            .filter { it in normalized }
+            .ifEmpty { ProfileFieldValues.DefaultPreferredGenders }
+    }
+
+    private fun normalizedProfileGender(value: String): String {
+        return if (value.equals("nonbinary", ignoreCase = true)) {
+            ProfileFieldValues.GenderNonBinary
+        } else {
+            value
+        }
+    }
+
+    private fun loadEventHistoryFromDatabase() {
+        val repository = eventsRepository ?: return
+        val user = currentUser ?: return
+
+        viewModelScope.launch {
+            val result = repository.getEventsForUser(
+                userId = user.appwriteUserId ?: user.email,
+                displayName = user.displayName,
+                email = user.email
             )
-        )
+            result.onSuccess { loadedEvents ->
+                val history = loadedEvents.mapNotNull { event ->
+                    val status = when (event.userState) {
+                        EventUserState.Registered -> EventHistoryStatus.Registered
+                        EventUserState.Waitlist -> EventHistoryStatus.Waitlisted
+                        EventUserState.NotRegistered,
+                        EventUserState.Closed -> return@mapNotNull null
+                    }
+                    EventHistoryItem(
+                        id = event.id,
+                        title = event.title,
+                        dateText = event.dateText,
+                        place = event.place,
+                        status = status
+                    )
+                }
+                _uiState.value = _uiState.value.copy(eventHistory = history)
+            }.onFailure { throwable ->
+                _uiState.value = _uiState.value.copy(
+                    eventHistory = emptyList(),
+                    statusMessage = throwable.message ?: "Impossibile caricare gli eventi dal database"
+                )
+            }
+        }
+    }
+
+    private companion object {
+        private const val MaxProfilePhotoCount = 6
     }
 }
 
 class AccountViewModelFactory(
-    private val initialEmail: String?,
-    private val initialDisplayName: String?,
-    private val userSettingsDataStore: UserSettingsDataStore? = null
+    private val initialUser: User?,
+    private val authRepository: AuthRepository? = null,
+    private val eventsRepository: EventsRepository? = null,
+    private val userSettingsDataStore: UserSettingsDataStore? = null,
+    private val onUserUpdated: (User) -> Unit = {}
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(AccountViewModel::class.java)) {
             return AccountViewModel(
-                initialEmail = initialEmail,
-                initialDisplayName = initialDisplayName,
-                userSettingsDataStore = userSettingsDataStore
+                initialUser = initialUser,
+                authRepository = authRepository,
+                eventsRepository = eventsRepository,
+                userSettingsDataStore = userSettingsDataStore,
+                onUserUpdated = onUserUpdated
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

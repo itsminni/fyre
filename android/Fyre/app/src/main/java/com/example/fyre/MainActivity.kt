@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
  *
  * Punto di ingresso dell'applicazione. Inizializza:
  * - Il tema Material 3 personalizzato (FyreTheme)
- * - Il repository per la persistenza degli utenti su file JSON
+ * - I repository Appwrite per dati utente e feature principali
  * - Il ViewModel per la gestione dell'autenticazione
  * - Il grafo di navigazione tra le schermate
  */
@@ -41,8 +41,7 @@ class MainActivity : ComponentActivity() {
         // Abilita il rendering edge-to-edge (contenuto sotto status/navigation bar)
         enableEdgeToEdge()
 
-        // Inizializza il repository con il contesto dell'applicazione
-        // (applicationContext vive per tutta la durata dell'app, evita memory leak)
+        // Inizializza il grafo backend con il contesto dell'applicazione.
         val appGraph = AppGraphProvider.get(applicationContext)
         val sessionDataStore = SessionDataStore(applicationContext)
         val userSettingsDataStore = UserSettingsDataStore(applicationContext)

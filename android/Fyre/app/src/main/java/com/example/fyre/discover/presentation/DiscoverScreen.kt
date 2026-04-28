@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -60,9 +63,9 @@ import com.example.fyre.core.notifications.NotificationChannels
 import com.example.fyre.core.notifications.NotificationGateway
 import com.example.fyre.data.AppGraphProvider
 import com.example.fyre.discover.data.DiscoveryRepository
-import com.example.fyre.discover.data.MockDiscoveryProfiles
 import com.example.fyre.discover.data.SwipeOutcome
 import com.example.fyre.discover.model.DiscoveryProfile
+import coil.compose.AsyncImage
 import kotlin.math.abs
 import kotlin.math.sign
 import kotlinx.coroutines.delay
@@ -92,6 +95,8 @@ fun DiscoverScreen(
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var pendingDecision by remember { mutableStateOf<SwipeDecision?>(null) }
     var matchPayload by remember { mutableStateOf<MatchPayload?>(null) }
+    var expandedProfileId by remember { mutableStateOf<String?>(null) }
+    val activePhotoIndices = remember { mutableStateMapOf<String, Int>() }
 
     LaunchedEffect(discoveryRepository) {
         isLoading = true
@@ -100,10 +105,10 @@ fun DiscoverScreen(
         val result = discoveryRepository.loadProfiles()
         result.fold(
             onSuccess = { loadedProfiles ->
-                profiles = if (loadedProfiles.isEmpty()) MockDiscoveryProfiles.items else loadedProfiles
+                profiles = loadedProfiles
             },
             onFailure = { throwable ->
-                profiles = MockDiscoveryProfiles.items
+                profiles = emptyList()
                 globalError = throwable.message ?: "Impossibile caricare i profili discovery"
             }
         )
@@ -113,12 +118,7 @@ fun DiscoverScreen(
     }
 
     val filteredProfiles = profiles.filter { profile ->
-        val ageOk = profile.age in discoveryPreferences.minAge..discoveryPreferences.maxAge
-        val distanceOk = profile.distanceKm <= discoveryPreferences.maxDistanceKm
-        val intentOk = discoveryPreferences.intent == "Tutti" ||
-            profile.intent.equals(discoveryPreferences.intent, ignoreCase = true)
-        val verifiedOk = !discoveryPreferences.showOnlyVerified || profile.isVerified
-        ageOk && distanceOk && intentOk && verifiedOk
+        !discoveryPreferences.showOnlyVerified || profile.isVerified
     }
 
     val currentProfile = filteredProfiles.getOrNull(currentIndex)
@@ -164,6 +164,7 @@ fun DiscoverScreen(
         currentIndex = (currentIndex + 1).coerceAtMost(filteredProfiles.size)
         dragOffsetX = 0f
         pendingDecision = null
+        expandedProfileId = null
         isSubmittingDecision = false
     }
 
@@ -242,6 +243,11 @@ fun DiscoverScreen(
             if (nextProfile != null) {
                 DiscoveryCard(
                     profile = nextProfile,
+                    discoveryPreferences = discoveryPreferences,
+                    photoIndex = activePhotoIndices[nextProfile.id] ?: 0,
+                    detailsExpanded = false,
+                    onShiftPhoto = { },
+                    onToggleDetails = { },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 16.dp)
@@ -255,6 +261,19 @@ fun DiscoverScreen(
 
             DiscoveryCard(
                 profile = currentProfile,
+                discoveryPreferences = discoveryPreferences,
+                photoIndex = activePhotoIndices[currentProfile.id] ?: 0,
+                detailsExpanded = expandedProfileId == currentProfile.id,
+                onShiftPhoto = { delta ->
+                    val lastIndex = currentProfile.photoUrls.lastIndex
+                    if (lastIndex >= 0) {
+                        val currentPhoto = activePhotoIndices[currentProfile.id] ?: 0
+                        activePhotoIndices[currentProfile.id] = (currentPhoto + delta).coerceIn(0, lastIndex)
+                    }
+                },
+                onToggleDetails = {
+                    expandedProfileId = if (expandedProfileId == currentProfile.id) null else currentProfile.id
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
@@ -382,8 +401,23 @@ private enum class SwipeDecision {
 @Composable
 private fun DiscoveryCard(
     profile: DiscoveryProfile,
+    discoveryPreferences: DiscoveryPreferences,
+    photoIndex: Int,
+    detailsExpanded: Boolean,
+    onShiftPhoto: (Int) -> Unit,
+    onToggleDetails: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val safePhotoIndex = photoIndex.coerceIn(0, profile.photoUrls.lastIndex.coerceAtLeast(0))
+    val activePhotoUrl = profile.photoUrls.getOrNull(safePhotoIndex)
+    val visibleSocialTags = profile.socialTags.filter { tag ->
+        when {
+            tag.startsWith("@") -> discoveryPreferences.showInstagramTag
+            tag.contains("spotify", ignoreCase = true) -> discoveryPreferences.showSpotifyTag
+            else -> discoveryPreferences.showInstagramTag || discoveryPreferences.showSpotifyTag
+        }
+    }
+
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(24.dp),
@@ -393,24 +427,129 @@ private fun DiscoveryCard(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(190.dp)
-                    .background(
-                        brush = Brush.linearGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.75f)
+                    .height(if (detailsExpanded) 280.dp else 360.dp)
+                    .background(discoveryPhotoFallbackBrush())
+            ) {
+                if (!activePhotoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = activePhotoUrl,
+                        contentDescription = profile.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                Row(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .clickable(enabled = profile.photoUrls.size > 1) { onShiftPhoto(-1) }
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .clickable(enabled = profile.photoUrls.size > 1) { onShiftPhoto(1) }
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    androidx.compose.ui.graphics.Color.Transparent,
+                                    androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.18f),
+                                    androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.76f)
+                                )
                             )
                         )
-                    )
-                    .padding(16.dp),
-                contentAlignment = Alignment.BottomStart
-            ) {
-                Text(
-                    text = stringResource(R.string.discover_profile_name_age, profile.name, profile.age),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontWeight = FontWeight.Bold
                 )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (profile.photoUrls.size > 1) {
+                            PhotoIndicator(count = profile.photoUrls.size, activeIndex = safePhotoIndex)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            AssistChip(
+                                onClick = { },
+                                label = {
+                                    Text(
+                                        text = stringResource(
+                                            R.string.discover_compatibility,
+                                            profile.compatibilityScore
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = if (discoveryPreferences.showAge) {
+                                stringResource(R.string.discover_profile_name_age, profile.name, profile.age)
+                            } else {
+                                stringResource(R.string.discover_profile_name, profile.name)
+                            },
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = androidx.compose.ui.graphics.Color.White,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (profile.city.isNotBlank()) {
+                            Text(
+                                text = if (discoveryPreferences.showDistance) {
+                                    stringResource(
+                                        R.string.discover_profile_city_distance,
+                                        profile.city,
+                                        profile.distanceKm
+                                    )
+                                } else {
+                                    stringResource(R.string.discover_profile_city, profile.city)
+                                },
+                                color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.90f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (profile.isVerified) {
+                                AssistChip(
+                                    onClick = { },
+                                    label = { Text(stringResource(R.string.discover_verified_chip), fontSize = 12.sp) }
+                                )
+                            }
+                            if (profile.photoUrls.size > 1) {
+                                AssistChip(
+                                    onClick = { },
+                                    label = {
+                                        Text(
+                                            stringResource(
+                                                R.string.discover_photo_counter,
+                                                safePhotoIndex + 1,
+                                                profile.photoUrls.size
+                                            ),
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             Column(
@@ -419,52 +558,119 @@ private fun DiscoveryCard(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = stringResource(
-                        R.string.discover_profile_city_distance,
-                        profile.city,
-                        profile.distanceKm
-                    ),
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
-                )
-
-                Text(
-                    text = profile.bio,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Text(
-                    text = stringResource(R.string.discover_intent, profile.intent),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                if (profile.isVerified) {
-                    AssistChip(
-                        onClick = { },
-                        label = { Text(stringResource(R.string.discover_verified_chip), fontSize = 12.sp) }
+                Button(onClick = onToggleDetails, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        if (detailsExpanded) {
+                            stringResource(R.string.discover_details_close)
+                        } else {
+                            stringResource(R.string.discover_details_open)
+                        }
                     )
                 }
 
-                Text(
-                    text = stringResource(R.string.discover_interests),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-                TagList(tags = profile.interests)
+                if (detailsExpanded) {
+                    Text(
+                        text = stringResource(R.string.discover_details_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
 
-                Text(
-                    text = stringResource(R.string.discover_social_tags),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-                TagList(tags = profile.socialTags)
+                    if (profile.bio.isNotBlank()) {
+                        Text(
+                            text = stringResource(R.string.discover_details_bio),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = profile.bio,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    val detailPills = buildList {
+                        if (discoveryPreferences.showIntent && profile.intent.isNotBlank()) {
+                            add(profile.intent)
+                        }
+                        profile.smokes?.let { add(if (it) "Fumo: si" else "Fumo: no") }
+                        profile.drinks?.let { add(if (it) "Beve: si" else "Beve: no") }
+                    }
+                    if (detailPills.isNotEmpty()) {
+                        TagList(tags = detailPills)
+                    }
+
+                    if (discoveryPreferences.showInterests && profile.interests.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.discover_interests),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TagList(tags = profile.interests)
+                    }
+
+                    if (visibleSocialTags.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.discover_social_tags),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TagList(tags = visibleSocialTags)
+                    }
+                } else {
+                    Text(
+                        text = profile.bio,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    if (discoveryPreferences.showIntent) {
+                        Text(
+                            text = stringResource(R.string.discover_intent, profile.intent),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    if (discoveryPreferences.showInterests) {
+                        TagList(tags = profile.interests.take(4))
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun PhotoIndicator(count: Int, activeIndex: Int) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        repeat(count) { index ->
+            Box(
+                modifier = Modifier
+                    .weight(if (index == activeIndex) 1.6f else 1f)
+                    .height(4.dp)
+                    .background(
+                        color = androidx.compose.ui.graphics.Color.White.copy(
+                            alpha = if (index == activeIndex) 0.95f else 0.36f
+                        ),
+                        shape = RoundedCornerShape(99.dp)
+                    )
+            )
+        }
+    }
+}
+
+@Composable
+private fun discoveryPhotoFallbackBrush(): Brush {
+    return Brush.linearGradient(
+        listOf(
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+            MaterialTheme.colorScheme.secondary.copy(alpha = 0.72f),
+            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.62f)
+        )
+    )
 }
 
 @Composable

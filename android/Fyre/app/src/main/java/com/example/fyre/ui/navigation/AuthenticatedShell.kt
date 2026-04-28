@@ -150,6 +150,7 @@ fun AuthenticatedShell(
             }
             composable(MainRoute.Events) {
                 EventsScreen(
+                    currentUserId = currentUser?.appwriteUserId,
                     currentUserEmail = currentUser?.email,
                     currentUserDisplayName = currentUser?.displayName,
                     notificationSettings = persistedSettings.notificationSettings,
@@ -159,8 +160,8 @@ fun AuthenticatedShell(
             composable(MainRoute.Account) {
                 AccountScreen(
                     onLogout = onLogout,
-                    currentUserEmail = currentUser?.email,
-                    currentUserDisplayName = currentUser?.displayName
+                    currentUser = currentUser,
+                    onUserUpdated = authViewModel::applyUpdatedUser
                 )
             }
         }

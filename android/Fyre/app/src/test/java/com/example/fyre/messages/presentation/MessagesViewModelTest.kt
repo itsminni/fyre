@@ -1,8 +1,10 @@
 package com.example.fyre.messages.presentation
 
+import com.example.fyre.messages.data.MockMessagesDataRepository
 import com.example.fyre.messages.data.MockMessagesRepository
 import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.MessageAuthor
+import com.example.fyre.messages.model.RelationshipAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -22,6 +24,10 @@ class MessagesViewModelTest {
 
     private val dispatcher = UnconfinedTestDispatcher()
 
+    private fun viewModel(): MessagesViewModel {
+        return MessagesViewModel(MockMessagesDataRepository())
+    }
+
     @Before
     fun setup() {
         Dispatchers.setMain(dispatcher)
@@ -35,7 +41,7 @@ class MessagesViewModelTest {
 
     @Test
     fun open_thread_marks_it_as_read() = runTest {
-        val viewModel = MessagesViewModel()
+        val viewModel = viewModel()
 
         viewModel.openThread("thread_p2")
         advanceUntilIdle()
@@ -46,7 +52,7 @@ class MessagesViewModelTest {
 
     @Test
     fun send_current_message_appends_message_and_clears_draft() = runTest {
-        val viewModel = MessagesViewModel()
+        val viewModel = viewModel()
         viewModel.openThread("thread_p4")
         advanceUntilIdle()
         viewModel.updateDraft("Ciao dalla test chat")
@@ -63,7 +69,7 @@ class MessagesViewModelTest {
 
     @Test
     fun send_text_with_reply_sets_reply_to_message_id() = runTest {
-        val viewModel = MessagesViewModel()
+        val viewModel = viewModel()
         viewModel.openThread("thread_p4")
         advanceUntilIdle()
         val targetId = viewModel.messages.value.first().id
@@ -80,11 +86,16 @@ class MessagesViewModelTest {
 
     @Test
     fun send_attachment_creates_attachment_message() = runTest {
-        val viewModel = MessagesViewModel()
+        val viewModel = viewModel()
         viewModel.openThread("thread_p4")
         advanceUntilIdle()
 
-        viewModel.sendAttachment(AttachmentType.File)
+        viewModel.sendAttachment(
+            type = AttachmentType.File,
+            displayName = "documento.pdf",
+            localUri = "content://documents/documento",
+            mimeType = "application/pdf"
+        )
         advanceUntilIdle()
 
         val last = viewModel.messages.value.last()
@@ -93,8 +104,28 @@ class MessagesViewModelTest {
     }
 
     @Test
+    fun send_attachment_uses_picker_metadata() = runTest {
+        val viewModel = viewModel()
+        viewModel.openThread("thread_p4")
+        advanceUntilIdle()
+
+        viewModel.sendAttachment(
+            type = AttachmentType.Image,
+            displayName = "scatto.jpg",
+            localUri = "content://media/picker/scatto",
+            mimeType = "image/jpeg"
+        )
+        advanceUntilIdle()
+
+        val attachment = viewModel.messages.value.last().attachments.first()
+        assertEquals("scatto.jpg", attachment.displayName)
+        assertEquals("content://media/picker/scatto", attachment.localUri)
+        assertEquals("image/jpeg", attachment.mimeType)
+    }
+
+    @Test
     fun send_voice_message_creates_voice_note_message() = runTest {
-        val viewModel = MessagesViewModel()
+        val viewModel = viewModel()
         viewModel.openThread("thread_p4")
         advanceUntilIdle()
 
@@ -107,7 +138,7 @@ class MessagesViewModelTest {
 
     @Test
     fun show_inbox_resets_thread_state_and_reply() = runTest {
-        val viewModel = MessagesViewModel()
+        val viewModel = viewModel()
         viewModel.openThread("thread_p4")
         advanceUntilIdle()
         val targetId = viewModel.messages.value.first().id
@@ -119,5 +150,19 @@ class MessagesViewModelTest {
         assertEquals(null, viewModel.selectedThreadId.value)
         assertTrue(viewModel.messages.value.isEmpty())
         assertEquals(null, viewModel.replyToMessageId.value)
+    }
+
+    @Test
+    fun relationship_action_removes_thread_and_returns_to_inbox() = runTest {
+        val viewModel = viewModel()
+        viewModel.openThread("thread_p4")
+        advanceUntilIdle()
+
+        viewModel.updateRelationship(RelationshipAction.Archive)
+        advanceUntilIdle()
+
+        assertEquals(null, viewModel.selectedThreadId.value)
+        assertTrue(viewModel.messages.value.isEmpty())
+        assertTrue(viewModel.threads.value.none { it.id == "thread_p4" })
     }
 }

@@ -80,6 +80,10 @@ class AppwriteGateway(
         return client.executeFunction(functionId, payload)
     }
 
+    suspend fun executeFunctionDirectly(functionUrl: String, payload: Map<String, Any?>): JsonObject {
+        return client.executeFunctionDirectly(functionUrl, payload)
+    }
+
     suspend fun getRow(tableId: String, rowId: String): JsonObject {
         return client.get("${tableRowsPath(tableId)}/$rowId")
     }
@@ -154,17 +158,25 @@ class AppwriteGateway(
     }
 
     suspend fun uploadAvatarFromUri(avatarUri: String): String? {
-        val bytes = readBinaryPayload(avatarUri)
+        return uploadImageToAvatarBucket(avatarUri, fileNamePrefix = "avatar")
+    }
+
+    suspend fun uploadProfilePhotoFromUri(photoUri: String): String? {
+        return uploadImageToAvatarBucket(photoUri, fileNamePrefix = "profile_photo")
+    }
+
+    private suspend fun uploadImageToAvatarBucket(source: String, fileNamePrefix: String): String? {
+        val bytes = readBinaryPayload(source)
         if (bytes.isEmpty()) return null
 
-        val mimeType = resolveMimeType(avatarUri, fallback = "image/jpeg")
+        val mimeType = resolveMimeType(source, fallback = "image/jpeg")
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "jpg"
         val fileId = randomIdentifier()
 
         client.uploadFile(
             bucketId = configuration.avatarsBucketId,
             fileId = fileId,
-            fileName = "avatar_${System.currentTimeMillis()}.$extension",
+            fileName = "${fileNamePrefix}_${System.currentTimeMillis()}.$extension",
             mimeType = mimeType,
             bytes = bytes
         )
@@ -271,6 +283,18 @@ class AppwriteGateway(
 
     fun storageViewUrl(bucketId: String, fileId: String): String {
         return "${normalizedEndpoint()}/storage/buckets/$bucketId/files/$fileId/view?project=${configuration.projectId}"
+    }
+
+    fun storageFileIdFromUrl(url: String): String? {
+        val marker = "/files/"
+        val markerIndex = url.indexOf(marker)
+        if (markerIndex == -1) return null
+
+        return url
+            .substring(markerIndex + marker.length)
+            .substringBefore("/")
+            .substringBefore("?")
+            .takeIf { it.isNotBlank() }
     }
 
     fun tableRowsPath(tableId: String): String {
