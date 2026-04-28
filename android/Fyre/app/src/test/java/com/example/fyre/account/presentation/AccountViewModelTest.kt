@@ -23,7 +23,6 @@ class AccountViewModelTest {
             profile = UserProfile(
                 firstName = "Mario",
                 lastName = "Rossi",
-                username = "mariorossi",
                 city = "Milano",
                 birthDate = "01/01/2000",
                 bio = "Ciao"
@@ -67,6 +66,24 @@ class AccountViewModelTest {
     }
 
     @Test
+    fun update_discovery_preferences_normalizes_age_range() {
+        val viewModel = viewModel()
+
+        viewModel.updateDiscoveryPreferences(
+            viewModel.uiState.value.discoveryPreferences.copy(
+                minAge = 120,
+                maxAge = 20,
+                maxDistanceKm = 0
+            )
+        )
+
+        val updated = viewModel.uiState.value.discoveryPreferences
+        assertEquals(98, updated.minAge)
+        assertEquals(99, updated.maxAge)
+        assertEquals(1, updated.maxDistanceKm)
+    }
+
+    @Test
     fun set_theme_mode_updates_appearance_settings() {
         val viewModel = viewModel()
 
@@ -74,6 +91,33 @@ class AccountViewModelTest {
 
         assertEquals(ThemeMode.Dark, viewModel.uiState.value.appearanceSettings.themeMode)
         assertFalse(viewModel.uiState.value.appearanceSettings.compactMode)
+    }
+
+    @Test
+    fun update_appearance_settings_keeps_compact_mode() {
+        val viewModel = viewModel()
+
+        viewModel.updateAppearanceSettings(
+            viewModel.uiState.value.appearanceSettings.copy(compactMode = true)
+        )
+
+        assertTrue(viewModel.uiState.value.appearanceSettings.compactMode)
+    }
+
+    @Test
+    fun update_security_settings_updates_ui_state() {
+        val viewModel = viewModel()
+
+        viewModel.updateSecuritySettings(
+            viewModel.uiState.value.securitySettings.copy(
+                biometricUnlock = true,
+                hideOnlineStatus = true
+            )
+        )
+
+        val security = viewModel.uiState.value.securitySettings
+        assertTrue(security.biometricUnlock)
+        assertTrue(security.hideOnlineStatus)
     }
 
     @Test

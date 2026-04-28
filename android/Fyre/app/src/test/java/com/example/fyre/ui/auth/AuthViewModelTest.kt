@@ -1,6 +1,7 @@
 package com.example.fyre.ui.auth
 
 import com.example.fyre.data.model.hasCompleteProfile
+import com.example.fyre.data.model.ProfileFieldValues
 import com.example.fyre.data.repository.FakeAuthRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -187,6 +188,23 @@ class AuthViewModelTest {
         advanceUntilIdle()
         assertFalse(viewModel.profileSaveCompleted.value)
         assertEquals("Seleziona almeno una preferenza di genere", viewModel.profileError.value)
+    }
+
+    @Test
+    fun preferred_genders_can_select_all_four_options() = runTest {
+        val viewModel = AuthViewModel(FakeAuthRepository())
+        val allOptions = ProfileFieldValues.DefaultPreferredGenders
+
+        allOptions.forEach { option ->
+            viewModel.setProfilePreferredGender(option, false)
+        }
+        assertTrue(viewModel.profilePreferredGenders.value.isEmpty())
+
+        allOptions.forEach { option ->
+            viewModel.setProfilePreferredGender(option, true)
+        }
+
+        assertEquals(allOptions, viewModel.profilePreferredGenders.value)
     }
 
     @Test

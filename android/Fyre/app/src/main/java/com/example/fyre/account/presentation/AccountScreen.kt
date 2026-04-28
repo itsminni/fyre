@@ -63,10 +63,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -128,6 +130,14 @@ private val OrientationOptions = listOf(
 )
 
 private val IntentOptions = listOf(
+    ProfileOption(ProfileFieldValues.IntentRelationship, R.string.profile_intent_relationship),
+    ProfileOption(ProfileFieldValues.IntentCasual, R.string.profile_intent_casual),
+    ProfileOption(ProfileFieldValues.IntentFriendship, R.string.profile_intent_friendship),
+    ProfileOption(ProfileFieldValues.IntentNotSure, R.string.profile_intent_not_sure)
+)
+
+private val DiscoveryIntentOptions = listOf(
+    ProfileOption("Tutti", R.string.common_all),
     ProfileOption(ProfileFieldValues.IntentRelationship, R.string.profile_intent_relationship),
     ProfileOption(ProfileFieldValues.IntentCasual, R.string.profile_intent_casual),
     ProfileOption(ProfileFieldValues.IntentFriendship, R.string.profile_intent_friendship),
@@ -1048,16 +1058,22 @@ private fun ProfileAgeRangeField(
     onMaxAgeChange: (Int) -> Unit
 ) {
     FieldSurface {
-        InlineNumberField(
+        EditableNumberField(
             title = stringResource(R.string.profile_age_range_min),
-            value = minAge.toString(),
-            onValueChange = { it.digitsOrNull()?.let(onMinAgeChange) }
+            value = minAge,
+            minValue = 18,
+            maxValue = 98,
+            maxDigits = 2,
+            onValidValueChange = onMinAgeChange
         )
         HorizontalDivider()
-        InlineNumberField(
+        EditableNumberField(
             title = stringResource(R.string.profile_age_range_max),
-            value = maxAge.toString(),
-            onValueChange = { it.digitsOrNull()?.let(onMaxAgeChange) }
+            value = maxAge,
+            minValue = maxOf(minAge + 1, 19),
+            maxValue = 99,
+            maxDigits = 2,
+            onValidValueChange = onMaxAgeChange
         )
     }
 }
@@ -1068,33 +1084,45 @@ private fun ProfileDistanceField(
     onValueChange: (Int?) -> Unit
 ) {
     FieldSurface {
-        InlineNumberField(
+        EditableNumberField(
             title = stringResource(R.string.profile_max_distance_km),
             subtitle = stringResource(R.string.profile_max_distance_km_hint),
-            value = maxDistanceKm?.toString().orEmpty(),
+            value = maxDistanceKm,
+            minValue = 5,
+            maxValue = 999,
+            maxDigits = 3,
             placeholder = stringResource(R.string.common_none),
             suffix = "km",
-            onValueChange = { text ->
-                val digits = text.filter(Char::isDigit)
-                if (digits.isBlank()) {
-                    onValueChange(null)
-                } else {
-                    digits.toIntOrNull()?.let { onValueChange(it.coerceAtLeast(5)) }
-                }
-            }
+            allowEmpty = true,
+            onEmpty = { onValueChange(null) },
+            onValidValueChange = { onValueChange(it) }
         )
     }
 }
 
 @Composable
-private fun InlineNumberField(
+private fun EditableNumberField(
     title: String,
-    value: String,
-    onValueChange: (String) -> Unit,
+    value: Int?,
+    minValue: Int,
+    maxValue: Int,
+    maxDigits: Int,
+    onValidValueChange: (Int) -> Unit,
     subtitle: String? = null,
     placeholder: String = "",
-    suffix: String? = null
+    suffix: String? = null,
+    allowEmpty: Boolean = false,
+    onEmpty: () -> Unit = {}
 ) {
+    var text by rememberSaveable(title) { mutableStateOf(value?.toString().orEmpty()) }
+    val normalizedValue = value?.toString().orEmpty()
+
+    LaunchedEffect(normalizedValue) {
+        if (normalizedValue != text && text.toIntOrNull() != value) {
+            text = normalizedValue
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1104,15 +1132,30 @@ private fun InlineNumberField(
             Text(text = title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedTextField(
-                    value = value,
-                    onValueChange = onValueChange,
+                    value = text,
+                    onValueChange = { raw ->
+                        val digits = raw.filter(Char::isDigit).take(maxDigits)
+                        text = digits
+
+                        if (digits.isBlank()) {
+                            if (allowEmpty) {
+                                onEmpty()
+                            }
+                            return@OutlinedTextField
+                        }
+
+                        val parsed = digits.toIntOrNull() ?: return@OutlinedTextField
+                        if (parsed in minValue..maxValue) {
+                            onValidValueChange(parsed)
+                        }
+                    },
                     modifier = Modifier.width(96.dp),
                     placeholder = { if (placeholder.isNotBlank()) Text(placeholder) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     textStyle = MaterialTheme.typography.titleMedium.copy(textAlign = TextAlign.End)
                 )
-                if (!suffix.isNullOrBlank() && value.isNotBlank()) {
+                if (!suffix.isNullOrBlank() && text.isNotBlank()) {
                     Text(text = suffix, style = MaterialTheme.typography.titleMedium)
                 }
             }
@@ -1141,6 +1184,41 @@ private fun DiscoveryPreferencesSection(
             subtitle = stringResource(R.string.account_preferences_hint),
             icon = Icons.Filled.Tune
         ) {
+            ProfilePickerField(
+                title = stringResource(R.string.account_intent_label),
+                selectedValue = prefs.intent,
+                options = DiscoveryIntentOptions,
+                onValueChange = { onUpdate(prefs.copy(intent = it)) }
+            )
+
+            ProfileAgeRangeField(
+                minAge = prefs.minAge,
+                maxAge = prefs.maxAge,
+                onMinAgeChange = { nextMin ->
+                    val clampedMin = nextMin.coerceIn(18, 98)
+                    val nextMax = if (prefs.maxAge <= clampedMin) {
+                        maxOf(clampedMin + 1, 19).coerceAtMost(99)
+                    } else {
+                        prefs.maxAge
+                    }
+                    onUpdate(prefs.copy(minAge = clampedMin, maxAge = nextMax))
+                },
+                onMaxAgeChange = { nextMax ->
+                    val minimum = maxOf(prefs.minAge + 1, 19)
+                    onUpdate(prefs.copy(maxAge = nextMax.coerceIn(minimum, 99)))
+                }
+            )
+
+            EditableNumberField(
+                title = stringResource(R.string.account_distance_max_label),
+                value = prefs.maxDistanceKm,
+                minValue = 1,
+                maxValue = 999,
+                maxDigits = 3,
+                suffix = "km",
+                onValidValueChange = { onUpdate(prefs.copy(maxDistanceKm = it)) }
+            )
+
             SettingSwitchRow(
                 label = stringResource(R.string.account_switch_only_verified),
                 checked = prefs.showOnlyVerified,

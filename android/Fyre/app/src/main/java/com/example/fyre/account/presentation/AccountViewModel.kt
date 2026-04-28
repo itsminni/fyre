@@ -53,9 +53,11 @@ class AccountViewModel(
                         discoveryPreferences = persisted.discoveryPreferences,
                         chatCustomizationSettings = persisted.chatCustomizationSettings,
                         notificationSettings = persisted.notificationSettings,
+                        securitySettings = persisted.securitySettings,
                         appearanceSettings = current.appearanceSettings.copy(
                             themeMode = persisted.themeMode,
-                            dynamicColor = persisted.dynamicColor
+                            dynamicColor = persisted.dynamicColor,
+                            compactMode = persisted.compactMode
                         )
                     )
                 }
@@ -97,7 +99,6 @@ class AccountViewModel(
         val profile = (user.profile ?: UserProfile()).copy(
             firstName = draft.firstName.trim(),
             lastName = draft.lastName.trim(),
-            username = draft.username.trim(),
             city = draft.city.trim(),
             birthDate = draft.birthDate.trim(),
             gender = draft.gender.ifBlank { ProfileFieldValues.GenderMale },
@@ -144,13 +145,14 @@ class AccountViewModel(
     }
 
     fun updateDiscoveryPreferences(update: DiscoveryPreferences) {
+        val normalized = normalizedDiscoveryPreferences(update)
         _uiState.value = _uiState.value.copy(
-            discoveryPreferences = update,
+            discoveryPreferences = normalized,
             statusMessage = "Preferenze discovery salvate sul dispositivo"
         )
         userSettingsDataStore?.let { dataStore ->
             viewModelScope.launch {
-                dataStore.updateDiscoveryPreferences(update)
+                dataStore.updateDiscoveryPreferences(normalized)
             }
         }
     }
@@ -184,6 +186,11 @@ class AccountViewModel(
             securitySettings = update,
             statusMessage = "Impostazioni sicurezza aggiornate sul dispositivo"
         )
+        userSettingsDataStore?.let { dataStore ->
+            viewModelScope.launch {
+                dataStore.updateSecuritySettings(update)
+            }
+        }
     }
 
     fun updateAppearanceSettings(update: AppearanceSettings) {
@@ -195,7 +202,8 @@ class AccountViewModel(
             viewModelScope.launch {
                 dataStore.updateTheme(
                     mode = update.themeMode,
-                    dynamicColor = update.dynamicColor
+                    dynamicColor = update.dynamicColor,
+                    compactMode = update.compactMode
                 )
             }
         }
@@ -212,7 +220,6 @@ class AccountViewModel(
             return ProfileDraft(
                 firstName = profile.firstName,
                 lastName = profile.lastName,
-                username = profile.username,
                 city = profile.city,
                 birthDate = profile.birthDate,
                 gender = normalizedProfileGender(profile.gender),
@@ -239,8 +246,7 @@ class AccountViewModel(
         val parts = safeName.split(" ").filter { it.isNotBlank() }
         return ProfileDraft(
             firstName = parts.firstOrNull().orEmpty(),
-            lastName = parts.drop(1).joinToString(" "),
-            username = safeName.lowercase().replace(" ", "")
+            lastName = parts.drop(1).joinToString(" ")
         )
     }
 
@@ -257,6 +263,16 @@ class AccountViewModel(
         } else {
             value
         }
+    }
+
+    private fun normalizedDiscoveryPreferences(preferences: DiscoveryPreferences): DiscoveryPreferences {
+        val minAge = preferences.minAge.coerceIn(18, 98)
+        val maxAge = preferences.maxAge.coerceIn(maxOf(minAge + 1, 19), 99)
+        return preferences.copy(
+            minAge = minAge,
+            maxAge = maxAge,
+            maxDistanceKm = preferences.maxDistanceKm.coerceIn(1, 999)
+        )
     }
 
     private fun loadEventHistoryFromDatabase() {

@@ -20,6 +20,8 @@ object MockEventsRepository {
         var description: String,
         var rules: MutableList<String>,
         var capacity: Int,
+        var maleLimit: Int,
+        var femaleLimit: Int,
         var deadlineText: String,
         var liveMetrics: LiveMetrics,
         val participants: MutableList<EventParticipant>
@@ -97,6 +99,8 @@ object MockEventsRepository {
         record.description = description
         record.deadlineText = deadlineText
         record.capacity = capacity.coerceAtLeast(1)
+        record.maleLimit = (record.capacity / 2).coerceAtLeast(1)
+        record.femaleLimit = (record.capacity / 2).coerceAtLeast(1)
         record.rules = rules.map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
         rebalanceParticipantsAfterCapacityChange(record)
         return true
@@ -157,6 +161,13 @@ object MockEventsRepository {
         val userStatus = record.participants.firstOrNull { it.id == userId }?.status
             ?: RegistrationStatus.NotRegistered
         val registeredCount = record.participants.count { it.status == RegistrationStatus.Registered }
+        val maleCount = record.participants.count {
+            it.status == RegistrationStatus.Registered && it.gender == "male"
+        }
+        val femaleCount = record.participants.count {
+            it.status == RegistrationStatus.Registered && it.gender == "female"
+        }
+        val waitingListCount = record.participants.count { it.status == RegistrationStatus.Waitlist }
         val userState = when {
             userStatus == RegistrationStatus.Registered -> EventUserState.Registered
             userStatus == RegistrationStatus.Waitlist -> EventUserState.Waitlist
@@ -182,6 +193,11 @@ object MockEventsRepository {
             userRole = userRole,
             capacity = record.capacity,
             registeredCount = registeredCount,
+            maleLimit = record.maleLimit,
+            femaleLimit = record.femaleLimit,
+            maleCount = maleCount,
+            femaleCount = femaleCount,
+            waitingListCount = waitingListCount,
             participants = record.participants.toList(),
             deadlineText = record.deadlineText,
             liveMetrics = record.liveMetrics
@@ -227,7 +243,8 @@ object MockEventsRepository {
                 EventParticipant(
                     id = userId,
                     displayName = displayName,
-                    status = status
+                    status = status,
+                    gender = null
                 )
             )
         }
@@ -239,7 +256,8 @@ object MockEventsRepository {
                 EventParticipant(
                     id = userId,
                     displayName = displayName,
-                    status = RegistrationStatus.NotRegistered
+                    status = RegistrationStatus.NotRegistered,
+                    gender = null
                 )
             )
         }
@@ -255,12 +273,14 @@ object MockEventsRepository {
                 description = "Networking serale tra developer, designer e founder.",
                 rules = mutableListOf("Dress code smart casual", "No spam", "Rispetta i tempi di speech"),
                 capacity = 120,
+                maleLimit = 60,
+                femaleLimit = 60,
                 deadlineText = "23/04/2026 23:59",
                 liveMetrics = LiveMetrics(viewersOnline = 41, checkIns = 12, chatPerMinute = 8),
                 participants = mutableListOf(
-                    EventParticipant("u_alice", "Alice", RegistrationStatus.Registered),
-                    EventParticipant("u_bruno", "Bruno", RegistrationStatus.Registered),
-                    EventParticipant("u_carla", "Carla", RegistrationStatus.Waitlist)
+                    EventParticipant("u_alice", "Alice", RegistrationStatus.Registered, "female"),
+                    EventParticipant("u_bruno", "Bruno", RegistrationStatus.Registered, "male"),
+                    EventParticipant("u_carla", "Carla", RegistrationStatus.Waitlist, "female")
                 )
             ),
             EventRecord(
@@ -271,11 +291,13 @@ object MockEventsRepository {
                 description = "DJ set, drink menu dedicato e social game live.",
                 rules = mutableListOf("Solo maggiorenni", "Documento richiesto", "No ingresso dopo le 21:30"),
                 capacity = 200,
+                maleLimit = 100,
+                femaleLimit = 100,
                 deadlineText = "27/04/2026 12:00",
                 liveMetrics = LiveMetrics(viewersOnline = 63, checkIns = 29, chatPerMinute = 15),
                 participants = mutableListOf(
-                    EventParticipant("u_diego", "Diego", RegistrationStatus.Registered),
-                    EventParticipant("u_elisa", "Elisa", RegistrationStatus.Registered)
+                    EventParticipant("u_diego", "Diego", RegistrationStatus.Registered, "male"),
+                    EventParticipant("u_elisa", "Elisa", RegistrationStatus.Registered, "female")
                 )
             ),
             EventRecord(
@@ -286,11 +308,13 @@ object MockEventsRepository {
                 description = "Escursione guidata con gruppo misto e pranzo al sacco.",
                 rules = mutableListOf("Scarpe trekking obbligatorie", "Rispettare la guida", "Conferma meteo il giorno prima"),
                 capacity = 40,
+                maleLimit = 20,
+                femaleLimit = 20,
                 deadlineText = "29/04/2026 20:00",
                 liveMetrics = LiveMetrics(viewersOnline = 19, checkIns = 4, chatPerMinute = 3),
                 participants = mutableListOf(
-                    EventParticipant("u_federico", "Federico", RegistrationStatus.Registered),
-                    EventParticipant("u_giulia", "Giulia", RegistrationStatus.Waitlist)
+                    EventParticipant("u_federico", "Federico", RegistrationStatus.Registered, "male"),
+                    EventParticipant("u_giulia", "Giulia", RegistrationStatus.Waitlist, "female")
                 )
             )
         )

@@ -14,6 +14,7 @@ import com.example.fyre.account.model.ChatBackgroundStyle
 import com.example.fyre.account.model.ChatBubblePalette
 import com.example.fyre.account.model.DiscoveryPreferences
 import com.example.fyre.account.model.NotificationSettings
+import com.example.fyre.account.model.SecuritySettings
 import com.example.fyre.account.model.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -27,9 +28,11 @@ private val Context.userSettingsDataStore: DataStore<Preferences> by preferences
 data class PersistedUserSettings(
     val themeMode: ThemeMode = ThemeMode.System,
     val dynamicColor: Boolean = true,
+    val compactMode: Boolean = false,
     val discoveryPreferences: DiscoveryPreferences = DiscoveryPreferences(),
     val chatCustomizationSettings: ChatCustomizationSettings = ChatCustomizationSettings(),
-    val notificationSettings: NotificationSettings = NotificationSettings()
+    val notificationSettings: NotificationSettings = NotificationSettings(),
+    val securitySettings: SecuritySettings = SecuritySettings()
 )
 
 class UserSettingsDataStore(private val context: Context) {
@@ -37,6 +40,7 @@ class UserSettingsDataStore(private val context: Context) {
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+        val COMPACT_MODE = booleanPreferencesKey("compact_mode")
 
         val DISCOVERY_MIN_AGE = intPreferencesKey("discovery_min_age")
         val DISCOVERY_MAX_AGE = intPreferencesKey("discovery_max_age")
@@ -68,6 +72,11 @@ class UserSettingsDataStore(private val context: Context) {
         val NOTIF_MESSAGES_ENABLED = booleanPreferencesKey("notif_messages_enabled")
         val NOTIF_EVENTS_ENABLED = booleanPreferencesKey("notif_events_enabled")
         val NOTIF_MARKETING_ENABLED = booleanPreferencesKey("notif_marketing_enabled")
+
+        val SECURITY_BIOMETRIC = booleanPreferencesKey("security_biometric")
+        val SECURITY_TWO_FACTOR = booleanPreferencesKey("security_two_factor")
+        val SECURITY_HIDE_ONLINE = booleanPreferencesKey("security_hide_online")
+        val SECURITY_SESSION_PIN = booleanPreferencesKey("security_session_pin")
     }
 
     val settings: Flow<PersistedUserSettings> = context.userSettingsDataStore.data
@@ -75,13 +84,18 @@ class UserSettingsDataStore(private val context: Context) {
             if (exception is IOException) emit(emptyPreferences()) else throw exception
         }
         .map { prefs ->
+            val discoveryMinAge = (prefs[DISCOVERY_MIN_AGE] ?: 18).coerceIn(18, 98)
+            val discoveryMaxAge = (prefs[DISCOVERY_MAX_AGE] ?: 35)
+                .coerceIn(maxOf(discoveryMinAge + 1, 19), 99)
+
             PersistedUserSettings(
                 themeMode = ThemeMode.entries.firstOrNull { it.name == prefs[THEME_MODE] } ?: ThemeMode.System,
                 dynamicColor = prefs[DYNAMIC_COLOR] ?: true,
+                compactMode = prefs[COMPACT_MODE] ?: false,
                 discoveryPreferences = DiscoveryPreferences(
-                    minAge = prefs[DISCOVERY_MIN_AGE] ?: 18,
-                    maxAge = prefs[DISCOVERY_MAX_AGE] ?: 35,
-                    maxDistanceKm = prefs[DISCOVERY_MAX_DISTANCE] ?: 30,
+                    minAge = discoveryMinAge,
+                    maxAge = discoveryMaxAge,
+                    maxDistanceKm = (prefs[DISCOVERY_MAX_DISTANCE] ?: 30).coerceIn(1, 999),
                     showOnlyVerified = prefs[DISCOVERY_VERIFIED_ONLY] ?: false,
                     intent = prefs[DISCOVERY_INTENT] ?: "Tutti",
                     showAge = prefs[DISCOVERY_SHOW_AGE] ?: true,
@@ -117,22 +131,31 @@ class UserSettingsDataStore(private val context: Context) {
                     messageNotifications = prefs[NOTIF_MESSAGES_ENABLED] ?: true,
                     eventReminders = prefs[NOTIF_EVENTS_ENABLED] ?: true,
                     marketingUpdates = prefs[NOTIF_MARKETING_ENABLED] ?: false
+                ),
+                securitySettings = SecuritySettings(
+                    biometricUnlock = prefs[SECURITY_BIOMETRIC] ?: false,
+                    twoFactorEnabled = prefs[SECURITY_TWO_FACTOR] ?: false,
+                    hideOnlineStatus = prefs[SECURITY_HIDE_ONLINE] ?: false,
+                    sessionPinEnabled = prefs[SECURITY_SESSION_PIN] ?: false
                 )
             )
         }
 
-    suspend fun updateTheme(mode: ThemeMode, dynamicColor: Boolean) {
+    suspend fun updateTheme(mode: ThemeMode, dynamicColor: Boolean, compactMode: Boolean = false) {
         context.userSettingsDataStore.edit { prefs ->
             prefs[THEME_MODE] = mode.name
             prefs[DYNAMIC_COLOR] = dynamicColor
+            prefs[COMPACT_MODE] = compactMode
         }
     }
 
     suspend fun updateDiscoveryPreferences(preferences: DiscoveryPreferences) {
         context.userSettingsDataStore.edit { prefs ->
-            prefs[DISCOVERY_MIN_AGE] = preferences.minAge
-            prefs[DISCOVERY_MAX_AGE] = preferences.maxAge
-            prefs[DISCOVERY_MAX_DISTANCE] = preferences.maxDistanceKm
+            val minAge = preferences.minAge.coerceIn(18, 98)
+            val maxAge = preferences.maxAge.coerceIn(maxOf(minAge + 1, 19), 99)
+            prefs[DISCOVERY_MIN_AGE] = minAge
+            prefs[DISCOVERY_MAX_AGE] = maxAge
+            prefs[DISCOVERY_MAX_DISTANCE] = preferences.maxDistanceKm.coerceIn(1, 999)
             prefs[DISCOVERY_VERIFIED_ONLY] = preferences.showOnlyVerified
             prefs[DISCOVERY_INTENT] = preferences.intent
             prefs[DISCOVERY_SHOW_AGE] = preferences.showAge
@@ -168,6 +191,15 @@ class UserSettingsDataStore(private val context: Context) {
             prefs[NOTIF_MESSAGES_ENABLED] = settings.messageNotifications
             prefs[NOTIF_EVENTS_ENABLED] = settings.eventReminders
             prefs[NOTIF_MARKETING_ENABLED] = settings.marketingUpdates
+        }
+    }
+
+    suspend fun updateSecuritySettings(settings: SecuritySettings) {
+        context.userSettingsDataStore.edit { prefs ->
+            prefs[SECURITY_BIOMETRIC] = settings.biometricUnlock
+            prefs[SECURITY_TWO_FACTOR] = settings.twoFactorEnabled
+            prefs[SECURITY_HIDE_ONLINE] = settings.hideOnlineStatus
+            prefs[SECURITY_SESSION_PIN] = settings.sessionPinEnabled
         }
     }
 }

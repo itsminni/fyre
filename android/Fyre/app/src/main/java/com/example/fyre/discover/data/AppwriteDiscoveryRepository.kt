@@ -302,7 +302,7 @@ class AppwriteDiscoveryRepository(
         return when (value?.replace(Regex("[\\s_-]"), "")?.lowercase(Locale.ROOT)) {
             "male" -> "male"
             "female" -> "female"
-            "nonbinary" -> "nonbinary"
+            "nonbinary" -> "nonBinary"
             "other" -> "other"
             else -> null
         }
@@ -528,6 +528,6 @@ class AppwriteDiscoveryRepository(
         private const val MaxProfiles = 40
         private const val DefaultMinAge = 18
         private const val DefaultMaxAge = 35
-        private val AllGenders = listOf("male", "female", "nonbinary", "other")
+        private val AllGenders = listOf("male", "female", "nonBinary", "other")
     }
 }

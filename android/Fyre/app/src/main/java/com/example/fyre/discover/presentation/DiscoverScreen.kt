@@ -118,7 +118,12 @@ fun DiscoverScreen(
     }
 
     val filteredProfiles = profiles.filter { profile ->
-        !discoveryPreferences.showOnlyVerified || profile.isVerified
+        val verifiedAllowed = !discoveryPreferences.showOnlyVerified || profile.isVerified
+        val ageAllowed = profile.age in discoveryPreferences.minAge..discoveryPreferences.maxAge
+        val distanceAllowed = profile.distanceKm <= discoveryPreferences.maxDistanceKm
+        val intentAllowed = matchesIntentFilter(profile.intent, discoveryPreferences.intent)
+
+        verifiedAllowed && ageAllowed && distanceAllowed && intentAllowed
     }
 
     val currentProfile = filteredProfiles.getOrNull(currentIndex)
@@ -396,6 +401,24 @@ private data class MatchPayload(
 private enum class SwipeDecision {
     Like,
     Skip
+}
+
+private fun matchesIntentFilter(profileIntent: String, filter: String): Boolean {
+    val normalizedFilter = normalizeIntent(filter)
+    if (normalizedFilter == "all") return true
+    return normalizeIntent(profileIntent) == normalizedFilter
+}
+
+private fun normalizeIntent(value: String): String {
+    val normalized = value.trim().lowercase().replace(Regex("[\\s_-]+"), "")
+    return when {
+        normalized.isBlank() || normalized == "tutti" || normalized == "all" -> "all"
+        normalized == "relationship" || normalized.contains("relaz") -> "relationship"
+        normalized == "casual" || normalized.contains("legger") -> "casual"
+        normalized == "friendship" || normalized.contains("amic") -> "friendship"
+        normalized == "notsure" || normalized.contains("nons") -> "notSure"
+        else -> normalized
+    }
 }
 
 @Composable

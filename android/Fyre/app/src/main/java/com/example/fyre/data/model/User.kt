@@ -53,7 +53,6 @@ object ProfileFieldValues {
 data class UserProfile(
     val firstName: String = "",
     val lastName: String = "",
-    val username: String = "",
     val city: String = "",
     val birthDate: String = "",
     val gender: String = ProfileFieldValues.GenderMale,

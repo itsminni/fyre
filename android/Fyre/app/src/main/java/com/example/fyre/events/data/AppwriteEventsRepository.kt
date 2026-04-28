@@ -204,8 +204,19 @@ class AppwriteEventsRepository(
             val status = normalizeStatus(it.stringOrNull("status"))
             status == "confirmed" || status == "promoted"
         }
+        val confirmedRegistrations = activeRegistrations.filter {
+            val status = normalizeStatus(it.stringOrNull("status"))
+            status == "confirmed" || status == "promoted"
+        }
+        val maleCount = confirmedRegistrations.count { it.stringOrNull("gender") == "male" }
+        val femaleCount = confirmedRegistrations.count { it.stringOrNull("gender") == "female" }
+        val waitingListCount = activeRegistrations.count {
+            normalizeStatus(it.stringOrNull("status")) == "waitlisted"
+        }
 
         val capacity = eventRow.intOrNull("maxParticipants") ?: 48
+        val maleLimit = eventRow.intOrNull("maleLimit") ?: (capacity / 2).coerceAtLeast(1)
+        val femaleLimit = eventRow.intOrNull("femaleLimit") ?: (capacity / 2).coerceAtLeast(1)
 
         val userRegistration = activeRegistrations.firstOrNull { row ->
             row.stringOrNull("userId") == currentUserId
@@ -227,7 +238,8 @@ class AppwriteEventsRepository(
             EventParticipant(
                 id = participantUserId,
                 displayName = resolveParticipantDisplayName(participantUserId, fallbackDisplayName),
-                status = mapRegistrationStatus(row.stringOrNull("status"))
+                status = mapRegistrationStatus(row.stringOrNull("status")),
+                gender = row.stringOrNull("gender")
             )
         }
 
@@ -247,6 +259,11 @@ class AppwriteEventsRepository(
             userRole = role,
             capacity = capacity,
             registeredCount = registeredCount,
+            maleLimit = maleLimit,
+            femaleLimit = femaleLimit,
+            maleCount = maleCount,
+            femaleCount = femaleCount,
+            waitingListCount = waitingListCount,
             participants = participants,
             deadlineText = formatDate(eventRow.stringOrNull("registrationClosesAt")),
             liveMetrics = LiveMetrics(

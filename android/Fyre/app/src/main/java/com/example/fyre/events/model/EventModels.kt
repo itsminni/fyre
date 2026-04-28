@@ -22,7 +22,8 @@ enum class EventUserState {
 data class EventParticipant(
     val id: String,
     val displayName: String,
-    val status: RegistrationStatus
+    val status: RegistrationStatus,
+    val gender: String? = null
 )
 
 enum class EventSyncStatus {
@@ -49,6 +50,11 @@ data class EventItem(
     val userRole: EventUserRole,
     val capacity: Int,
     val registeredCount: Int,
+    val maleLimit: Int = 24,
+    val femaleLimit: Int = 24,
+    val maleCount: Int = 0,
+    val femaleCount: Int = 0,
+    val waitingListCount: Int = 0,
     val participants: List<EventParticipant>,
     val deadlineText: String,
     val liveMetrics: LiveMetrics,

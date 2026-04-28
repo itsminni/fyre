@@ -127,9 +127,6 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     private val _profileLastName = MutableStateFlow("")
     val profileLastName: StateFlow<String> = _profileLastName.asStateFlow()
 
-    private val _profileUsername = MutableStateFlow("")
-    val profileUsername: StateFlow<String> = _profileUsername.asStateFlow()
-
     private val _profileCity = MutableStateFlow("")
     val profileCity: StateFlow<String> = _profileCity.asStateFlow()
 
@@ -237,11 +234,6 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
     fun updateProfileLastName(value: String) {
         _profileLastName.value = value
-        _profileError.value = null
-    }
-
-    fun updateProfileUsername(value: String) {
-        _profileUsername.value = value
         _profileError.value = null
     }
 
@@ -365,7 +357,6 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         val profile = _currentUser.value?.profile ?: return
         _profileFirstName.value = profile.firstName
         _profileLastName.value = profile.lastName
-        _profileUsername.value = profile.username
         _profileCity.value = profile.city
         _profileBirthDate.value = profile.birthDate
         _profileBio.value = profile.bio
@@ -590,7 +581,6 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         val profile = (current.profile ?: UserProfile()).copy(
             firstName = _profileFirstName.value.trim(),
             lastName = _profileLastName.value.trim(),
-            username = _profileUsername.value.trim().ifBlank { derivedUsername(current) },
             city = _profileCity.value.trim(),
             birthDate = _profileBirthDate.value.trim(),
             gender = _profileGender.value,
@@ -678,7 +668,6 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     private fun clearProfileDraft() {
         _profileFirstName.value = ""
         _profileLastName.value = ""
-        _profileUsername.value = ""
         _profileCity.value = ""
         _profileBirthDate.value = ""
         _profileBio.value = ""
@@ -748,15 +737,6 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         val withoutWhitespace = withoutAtPrefix.replace(Regex("\\s+"), "")
         val withoutAt = withoutWhitespace.replace("@", "")
         return withoutAt.take(64).takeIf { it.isNotBlank() }
-    }
-
-    private fun derivedUsername(user: User): String {
-        val base = listOf(_profileFirstName.value, _profileLastName.value)
-            .joinToString(" ")
-            .trim()
-            .ifBlank { user.displayName }
-            .ifBlank { user.email.substringBefore("@") }
-        return base.lowercase().replace(Regex("\\s+"), "")
     }
 
     private fun ageFromBirthDate(value: String): Int? {

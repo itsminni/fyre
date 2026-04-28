@@ -7,7 +7,6 @@
     <string name="common_password">Password</string>
     <string name="common_name">Nome</string>
     <string name="common_last_name">Cognome</string>
-    <string name="common_username">Username</string>
     <string name="common_city">Citta</string>
     <string name="common_bio">Bio</string>
     <string name="common_avatar">Avatar</string>
@@ -17,6 +16,7 @@
     <string name="common_terms_privacy">Termini e Privacy</string>
     <string name="common_dash">-</string>
     <string name="common_none">Nessuno</string>
+    <string name="common_all">Tutti</string>
 
     <!-- Navigation -->
     <string name="nav_loading_session">Caricamento sessione...</string>
@@ -110,7 +110,7 @@
     <string name="profile_intent_casual">Qualcosa di leggero</string>
     <string name="profile_intent_friendship">Amicizia</string>
     <string name="profile_intent_not_sure">Non lo so ancora</string>
-    <string name="profile_preferred_genders">Show me</string>
+    <string name="profile_preferred_genders">Chi vedere</string>
     <string name="profile_age_range_min">Eta minima</string>
     <string name="profile_age_range_max">Eta massima</string>
     <string name="profile_max_distance_km">Distanza massima (km)</string>
@@ -118,7 +118,7 @@
     <string name="profile_interests">Interessi</string>
     <string name="profile_instagram_tag">Tag Instagram</string>
     <string name="profile_spotify_tag">Tag Spotify</string>
-    <string name="profile_social_placeholder">@username</string>
+    <string name="profile_social_placeholder">@profilo</string>
     <string name="profile_smokes">Fumi?</string>
     <string name="profile_drinks">Bevi alcolici?</string>
     <string name="profile_save_changes">Salva modifiche profilo</string>
@@ -255,8 +255,46 @@
 
     <!-- Events -->
     <string name="events_title">Eventi</string>
+    <string name="events_empty">Nessun evento disponibile.</string>
     <string name="events_user_state">Stato utente: %1$s</string>
     <string name="events_capacity_deadline">Capienza %1$d/%2$d - Deadline %3$s</string>
+    <string name="events_preview_deadline">Deadline: %1$s</string>
+    <string name="events_preview_remaining">Posti rimanenti - M: %1$d, F: %2$d</string>
+    <string name="events_preview_open">Apri dettaglio evento</string>
+    <string name="events_poster_cd">Poster evento</string>
+    <string name="events_detail_title">Dettaglio evento</string>
+    <string name="events_badge_confirmed">Confermato</string>
+    <string name="events_badge_waitlisted">Waiting list</string>
+    <string name="events_section_main_event">Evento principale</string>
+    <string name="events_section_info">Info evento</string>
+    <string name="events_section_rules">Regole</string>
+    <string name="events_section_live">Stato live</string>
+    <string name="events_info_club">EVENT_VENUE_REDACTED</string>
+    <string name="events_info_address">EVENT_ADDRESS_REDACTED</string>
+    <string name="events_info_exclusive">Serata esclusiva per coppie e single selezionati, in un ambiente riservato.</string>
+    <string name="events_info_buffet">Buffet serale incluso.</string>
+    <string name="events_info_welcome_drink">Drink di benvenuto incluso.</string>
+    <string name="events_info_contribution">Contributo di partecipazione: 35 EUR a persona.</string>
+    <string name="events_info_contact">Info e prenotazioni: EVENT_CONTACT_REDACTED</string>
+    <string name="events_info_dress_code">Dress code: elegante / sensuale.</string>
+    <string name="events_rule_max_participants">24 prive, massimo 48 partecipanti</string>
+    <string name="events_rule_balance">La waiting list scatta solo quando i 24 posti del tuo genere sono pieni</string>
+    <string name="events_rule_cancel_48h">Disdetta consentita fino a 48 ore prima</string>
+    <string name="events_rule_lock_24h">Iscrizioni definitive 24 ore prima</string>
+    <string name="events_rule_staff">Staff di supporto in sede: EVENT_STAFF_REDACTED.</string>
+    <string name="events_label_male">Uomini</string>
+    <string name="events_label_female">Donne</string>
+    <string name="events_label_capacity">Capienza</string>
+    <string name="events_label_waiting">Waiting</string>
+    <string name="events_capacity_value">%1$d/%2$d</string>
+    <string name="events_male_count">Uomini: %1$d</string>
+    <string name="events_female_count">Donne: %1$d</string>
+    <string name="events_waiting_count">Waiting list: %1$d</string>
+    <string name="events_action_join">Partecipa all\'evento</string>
+    <string name="events_action_cancel">Annulla iscrizione</string>
+    <string name="events_action_leave_waiting">Esci dalla waiting list</string>
+    <string name="events_admin_subtitle">Aggiorna dati evento e gestisci partecipanti come su iOS.</string>
+    <string name="events_admin_participants_empty">Nessun partecipante registrato.</string>
     <string name="events_metric_online">Online %1$d</string>
     <string name="events_metric_checkin">Check-in %1$d</string>
     <string name="events_metric_chat_per_min">Chat/min %1$d</string>

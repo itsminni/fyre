@@ -16,7 +16,6 @@ enum class AccountSection(@param:StringRes val titleRes: Int) {
 data class ProfileDraft(
     val firstName: String = "",
     val lastName: String = "",
-    val username: String = "",
     val city: String = "",
     val birthDate: String = "",
     val gender: String = ProfileFieldValues.GenderMale,

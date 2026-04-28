@@ -222,8 +222,6 @@ class AppwriteAuthRepository(
             UserProfile(
                 firstName = firstName,
                 lastName = lastName,
-                username = it.stringOrNull("username")
-                    ?: displayName.lowercase().replace(" ", ""),
                 city = it.stringOrNull("city").orEmpty(),
                 birthDate = it.stringOrNull("birthDate").orEmpty(),
                 bio = it.stringOrNull("bio").orEmpty(),
@@ -301,7 +299,7 @@ class AppwriteAuthRepository(
 
     private fun backendGenderValue(value: String): String {
         return if (value.equals("nonbinary", ignoreCase = true)) {
-            "nonbinary"
+            "nonBinary"
         } else {
             value
         }
