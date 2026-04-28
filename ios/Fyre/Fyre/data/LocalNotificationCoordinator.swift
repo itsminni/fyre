@@ -109,7 +109,7 @@ final class LocalNotificationCoordinator: NSObject {
 
     private func handleRealtimeEvent(_ event: AppwriteRealtimeEvent, currentUserId: String) async {
         if isThreadParticipantEvent(event) {
-            handleThreadParticipantEvent(event, currentUserId: currentUserId)
+            await handleThreadParticipantEvent(event, currentUserId: currentUserId)
             return
         }
 
@@ -123,7 +123,7 @@ final class LocalNotificationCoordinator: NSObject {
         }
     }
 
-    private func handleThreadParticipantEvent(_ event: AppwriteRealtimeEvent, currentUserId: String) {
+    private func handleThreadParticipantEvent(_ event: AppwriteRealtimeEvent, currentUserId: String) async {
         guard event.stringValue(forKey: "userId") == currentUserId,
               let threadId = event.stringValue(forKey: "threadId")
         else {
@@ -133,28 +133,41 @@ final class LocalNotificationCoordinator: NSObject {
         if event.isDelete {
             knownThreadIds.remove(threadId)
         } else {
+            let wasKnown = knownThreadIds.contains(threadId)
             knownThreadIds.insert(threadId)
+            if event.isCreate, !wasKnown {
+                await scheduleMatchNotification(
+                    rawIdentifier: threadId,
+                    threadId: threadId,
+                    currentUserId: currentUserId
+                )
+            }
         }
     }
 
     private func handleMatchEvent(_ event: AppwriteRealtimeEvent, currentUserId: String) async {
-        guard matchNotificationsEnabled else { return }
-
         let userAId = event.stringValue(forKey: "userAId")
         let userBId = event.stringValue(forKey: "userBId")
         guard userAId == currentUserId || userBId == currentUserId else { return }
 
-        let rawIdentifier = event.stringValue(forKey: "$id")
+        let rawIdentifier = event.stringValue(forKey: "threadId")
+            ?? event.stringValue(forKey: "$id")
             ?? event.stringValue(forKey: "matchKey")
-            ?? event.stringValue(forKey: "threadId")
-        guard let rawIdentifier,
-              markSeenRealtimeIdentifier(rawIdentifier, kind: .match, userId: currentUserId)
-        else {
-            return
-        }
+        guard let rawIdentifier else { return }
+
+        await scheduleMatchNotification(
+            rawIdentifier: rawIdentifier,
+            threadId: event.stringValue(forKey: "threadId"),
+            currentUserId: currentUserId
+        )
+    }
+
+    private func scheduleMatchNotification(rawIdentifier: String, threadId: String?, currentUserId: String) async {
+        guard matchNotificationsEnabled,
+              markSeenRealtimeIdentifier(rawIdentifier, kind: .match, userId: currentUserId) else { return }
 
         var body = L10n.tr("notifications.match.body.generic")
-        if let threadId = event.stringValue(forKey: "threadId"),
+        if let threadId,
            let threadName = await resolvedThreadName(threadId: threadId),
            !threadName.isEmpty {
             body = String(format: L10n.tr("notifications.match.body.named"), threadName)

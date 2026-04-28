@@ -39,6 +39,13 @@
 "home.skip.accessibility" = "Skip";
 "home.swipe.error" = "Unable to update the swipe right now. Please try again.";
 "home.commonInterests.empty" = "Fresh energy, no shared tags yet.";
+"discover.details.title" = "Profile";
+"discover.details.section.info" = "Information";
+"discover.details.section.bio" = "Bio";
+"discover.details.section.interests" = "Interests";
+"discover.details.open.accessibility" = "Open profile details";
+"discover.details.value.yes" = "Yes";
+"discover.details.value.no" = "No";
 "match.banner.title" = "Match with %@";
 "match.banner.subtitle" = "Tap to open the chat";
 

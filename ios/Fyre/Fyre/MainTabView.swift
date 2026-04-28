@@ -21,6 +21,7 @@ struct MainTabView: View {
     }
 
     @Environment(AppServices.self) private var services
+    @Environment(UserStore.self) private var store
     @State private var selectedTab: MainTab = .home
     @State private var threadToOpen: ChatThread?
     @State private var unreadMessageCount = 0
@@ -65,8 +66,6 @@ struct MainTabView: View {
                     }
                     .tag(MainTab.account)
             }
-            .toolbarBackground(.visible, for: .tabBar)
-            .toolbarBackground(.ultraThinMaterial, for: .tabBar)
             .tint(.orange)
 
             if let matchBanner {
@@ -106,9 +105,12 @@ struct MainTabView: View {
     }
 
     private func handleMatchedThread(_ thread: ChatThread) {
+        let alreadyTracked = unreadMatchThreadIds.contains(thread.remoteId)
         RecentChatThreadStore.upsert(thread)
         unreadMatchThreadIds.insert(thread.remoteId)
-        showMatchBanner(for: thread)
+        if !alreadyTracked {
+            showMatchBanner(for: thread)
+        }
         scheduleUnreadBadgeReload()
     }
 
@@ -153,6 +155,9 @@ struct MainTabView: View {
             onChange: {
                 scheduleUnreadBadgeReload()
             },
+            onEvent: { event in
+                handleInboxRealtimeEvent(event)
+            },
             onError: { error in
 #if DEBUG
                 debugPrint("Main tab realtime error: \(error.localizedDescription)")
@@ -176,6 +181,67 @@ struct MainTabView: View {
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
             await refreshUnreadMessageCount()
+        }
+    }
+
+    private func handleInboxRealtimeEvent(_ event: AppwriteRealtimeEvent) {
+        guard let currentUserId = store.currentUser?.appwriteUserId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !currentUserId.isEmpty,
+              let threadId = realtimeMatchThreadId(from: event, currentUserId: currentUserId),
+              !unreadMatchThreadIds.contains(threadId)
+        else {
+            return
+        }
+
+        Task {
+            await openRealtimeMatchedThread(threadId: threadId)
+        }
+    }
+
+    private func realtimeMatchThreadId(from event: AppwriteRealtimeEvent, currentUserId: String) -> String? {
+        if let userId = event.stringValue(forKey: "userId"),
+           userId == currentUserId,
+           event.isCreate,
+           let threadId = event.stringValue(forKey: "threadId") {
+            return threadId
+        }
+
+        let userAId = event.stringValue(forKey: "userAId")
+        let userBId = event.stringValue(forKey: "userBId")
+        guard userAId == currentUserId || userBId == currentUserId else {
+            return nil
+        }
+
+        return event.stringValue(forKey: "threadId")
+    }
+
+    @MainActor
+    private func openRealtimeMatchedThread(threadId: String) async {
+        guard !unreadMatchThreadIds.contains(threadId) else { return }
+
+        do {
+            guard let dto = try await services.backend.fetchThread(threadId: threadId) else { return }
+            let thread = ChatThread(
+                id: dto.id,
+                remoteId: dto.remoteId,
+                name: dto.name,
+                avatar: dto.avatar,
+                isOnline: dto.isOnline,
+                lastSeenAt: dto.lastSeenAt,
+                currentUserReadAt: dto.currentUserReadAt,
+                otherParticipantReadAt: dto.otherParticipantReadAt,
+                participantUserIds: dto.participantUserIds,
+                relationshipState: dto.relationshipState,
+                messages: dto.messages.map(ChatMessage.init(dto:))
+            )
+            RecentChatThreadStore.upsert(thread)
+            unreadMatchThreadIds.insert(thread.remoteId)
+            NotificationCenter.default.post(name: .fyreThreadsDidChange, object: thread)
+            showMatchBanner(for: thread)
+        } catch {
+#if DEBUG
+            debugPrint("Realtime match fetch failed for \(threadId): \(error.localizedDescription)")
+#endif
         }
     }
 
