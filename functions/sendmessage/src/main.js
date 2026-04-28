@@ -72,6 +72,7 @@ export default async ({ req, res, error }) => {
 
     const now = new Date().toISOString();
     const messageId = uniqueId();
+    const messagePermissions = messageRowPermissions(participantIds, currentUserId);
     try {
       await createRow(config, config.messagesTableId, messageId, {
         threadId,
@@ -87,7 +88,7 @@ export default async ({ req, res, error }) => {
         attachmentDuration,
         replyToMessageId,
         createdAt: now
-      }, participantIds.map((userId) => `read("user:${userId}")`));
+      }, messagePermissions);
     } catch (err) {
       throw new Error(`Failed creating row in ${config.messagesTableId}: ${err?.message ?? err}`);
     }
@@ -140,7 +141,7 @@ export default async ({ req, res, error }) => {
       createdAt: now
     });
 
-    return res.json(payload ?? {
+    const responsePayload = payload ?? {
       messageId,
       text,
       messageType,
@@ -153,7 +154,9 @@ export default async ({ req, res, error }) => {
       attachmentDuration,
       replyToMessageId,
       createdAt: now
-    }, 200);
+    };
+    console.log(`RESULT_JSON:${JSON.stringify(responsePayload)}`);
+    return res.json(responsePayload, 200);
   } catch (err) {
     error(String(err?.stack ?? err));
     return res.json({ message: "Unable to send message" }, 500);
@@ -234,6 +237,13 @@ function resolveApiKey(req) {
     return runtimeKey.trim();
   }
   return requiredHeader(req, "x-appwrite-key");
+}
+
+function messageRowPermissions(participantIds, currentUserId) {
+  const permissions = participantIds.map((userId) => `read("user:${userId}")`);
+  permissions.push(`update("user:${currentUserId}")`);
+  permissions.push(`delete("user:${currentUserId}")`);
+  return Array.from(new Set(permissions));
 }
 
 async function listRows(config, tableId, queries) {
