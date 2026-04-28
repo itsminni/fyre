@@ -95,6 +95,14 @@ struct ChatThread: Identifiable, Hashable {
     var lastTime: String {
         messages.last?.time ?? ""
     }
+
+    var unreadCount: Int {
+        messages.filter { message in
+            guard !message.isMe else { return false }
+            guard let currentUserReadAt else { return true }
+            return message.sentAt > currentUserReadAt
+        }.count
+    }
 }
 
 @MainActor
@@ -131,9 +139,14 @@ struct MessagesView: View {
     @State private var realtimeReloadTask: Task<Void, Never>?
     @State private var selectedThread: ChatThread?
     @Binding private var externalOpenThread: ChatThread?
+    private let onUnreadCountChanged: (Int) -> Void
 
-    init(openThread: Binding<ChatThread?> = .constant(nil)) {
+    init(
+        openThread: Binding<ChatThread?> = .constant(nil),
+        onUnreadCountChanged: @escaping (Int) -> Void = { _ in }
+    ) {
         _externalOpenThread = openThread
+        self.onUnreadCountChanged = onUnreadCountChanged
     }
 
     var body: some View {
@@ -262,6 +275,9 @@ struct MessagesView: View {
         }
         .onChange(of: externalOpenThread) { _, _ in
             consumeExternalOpenThreadIfNeeded()
+        }
+        .onChange(of: threads) { _, newThreads in
+            onUnreadCountChanged(newThreads.reduce(0) { $0 + $1.unreadCount })
         }
         .background {
             TabBarRestoreController()
@@ -522,11 +538,7 @@ private struct ChatThreadRow: View {
     }
 
     private var unreadCount: Int {
-        thread.messages.filter { message in
-            guard !message.isMe else { return false }
-            guard let currentUserReadAt = thread.currentUserReadAt else { return true }
-            return message.sentAt > currentUserReadAt
-        }.count
+        thread.unreadCount
     }
 
     private var lastMessage: ChatMessage? {

@@ -26,6 +26,7 @@ export default async ({ req, res, error }) => {
       limit(10)
     ]);
     const participantIds = participantRows.map((row) => row.userId).filter(Boolean);
+    const participantPermissions = conversationRowPermissions(participantIds);
 
     // Only participants of the thread are allowed to append new messages to it.
     if (!participantIds.includes(currentUserId)) {
@@ -50,6 +51,8 @@ export default async ({ req, res, error }) => {
       }
     }
 
+    await repairConversationAccess(config, threadId, currentUserId, participantRows, participantPermissions);
+
     if (attachmentFileId) {
       if (!config.chatAttachmentsBucketId) {
         throw new Error("Missing environment variable APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID");
@@ -72,6 +75,7 @@ export default async ({ req, res, error }) => {
 
     const now = new Date().toISOString();
     const messageId = uniqueId();
+    const messagePermissions = messageRowPermissions(participantIds, currentUserId);
     try {
       await createRow(config, config.messagesTableId, messageId, {
         threadId,
@@ -87,7 +91,7 @@ export default async ({ req, res, error }) => {
         attachmentDuration,
         replyToMessageId,
         createdAt: now
-      }, participantIds.map((userId) => `read("user:${userId}")`));
+      }, messagePermissions);
     } catch (err) {
       throw new Error(`Failed creating row in ${config.messagesTableId}: ${err?.message ?? err}`);
     }
@@ -103,7 +107,7 @@ export default async ({ req, res, error }) => {
         status: threadRow?.status ?? "active",
         lastMessageText: previewText,
         lastMessageAt: now
-      });
+      }, participantPermissions);
     } catch (err) {
       error(`Non-fatal thread preview update failure in ${config.threadsTableId}: ${err?.message ?? err}`);
     }
@@ -119,7 +123,7 @@ export default async ({ req, res, error }) => {
           muted: currentParticipant.muted ?? false,
           pinned: currentParticipant.pinned ?? false,
           notificationsEnabled: currentParticipant.notificationsEnabled ?? true
-        });
+        }, participantPermissions);
       } catch (err) {
         error(`Non-fatal participant update failure in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
       }
@@ -140,7 +144,7 @@ export default async ({ req, res, error }) => {
       createdAt: now
     });
 
-    return res.json(payload ?? {
+    const responsePayload = payload ?? {
       messageId,
       text,
       messageType,
@@ -153,7 +157,9 @@ export default async ({ req, res, error }) => {
       attachmentDuration,
       replyToMessageId,
       createdAt: now
-    }, 200);
+    };
+    console.log(`RESULT_JSON:${JSON.stringify(responsePayload)}`);
+    return res.json(responsePayload, 200);
   } catch (err) {
     error(String(err?.stack ?? err));
     return res.json({ message: "Unable to send message" }, 500);
@@ -236,6 +242,51 @@ function resolveApiKey(req) {
   return requiredHeader(req, "x-appwrite-key");
 }
 
+function messageRowPermissions(participantIds, currentUserId) {
+  const permissions = participantIds.map((userId) => `read("user:${userId}")`);
+  permissions.push(`update("user:${currentUserId}")`);
+  permissions.push(`delete("user:${currentUserId}")`);
+  return Array.from(new Set(permissions));
+}
+
+function conversationRowPermissions(participantIds) {
+  return Array.from(new Set(participantIds.flatMap((userId) => [
+    `read("user:${userId}")`,
+    `update("user:${userId}")`,
+    `delete("user:${userId}")`
+  ])));
+}
+
+async function repairConversationAccess(config, threadId, currentUserId, participantRows, permissions) {
+  const threadRow = await getRow(config, config.threadsTableId, threadId);
+  await updateRow(config, config.threadsTableId, threadId, {
+    threadId,
+    createdByUserId: threadRow?.createdByUserId ?? currentUserId,
+    subject: threadRow?.subject ?? null,
+    status: threadRow?.status ?? "active",
+    lastMessageText: threadRow?.lastMessageText ?? null,
+    lastMessageAt: threadRow?.lastMessageAt ?? null
+  }, permissions);
+
+  for (const participantRow of participantRows) {
+    const participantRowId = asString(participantRow.$id);
+    const userId = asString(participantRow.userId);
+    if (!participantRowId || !userId) {
+      continue;
+    }
+
+    await updateRow(config, config.threadParticipantsTableId, participantRowId, {
+      threadId,
+      userId,
+      role: participantRow.role ?? "member",
+      lastReadAt: participantRow.lastReadAt ?? null,
+      muted: participantRow.muted ?? false,
+      pinned: participantRow.pinned ?? false,
+      notificationsEnabled: participantRow.notificationsEnabled ?? true
+    }, permissions);
+  }
+}
+
 async function listRows(config, tableId, queries) {
   const payload = await request(
     config,
@@ -313,10 +364,12 @@ async function updateFile(config, fileId, data) {
   return request(config, "PUT", `/storage/buckets/${config.chatAttachmentsBucketId}/files/${fileId}`, data);
 }
 
-async function updateRow(config, tableId, rowId, data) {
-  return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
-    data
-  });
+async function updateRow(config, tableId, rowId, data, permissions) {
+  const body = { data };
+  if (permissions) {
+    body.permissions = permissions;
+  }
+  return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, body);
 }
 
 async function request(config, method, path, body, queries = []) {

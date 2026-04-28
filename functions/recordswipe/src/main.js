@@ -84,6 +84,14 @@ export default async ({ req, res, error }) => {
       if (config.relationshipsTableId) {
         await upsertMatchedRelationship(config, currentUserId, otherUserId, existingMatch.threadId, now);
       }
+      await updateRow(config, config.matchesTableId, existingMatch.$id, {
+        matchKey,
+        userAId: userIds[0],
+        userBId: userIds[1],
+        threadId: existingMatch.threadId,
+        createdAt: existingMatch.createdAt ?? now,
+        matchedAt: now
+      }, permissions);
       return res.json({
         matched: true,
         matchId: existingMatch.$id,

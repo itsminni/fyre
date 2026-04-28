@@ -24,7 +24,7 @@ export default async ({ req, res, error }) => {
     const currentUserContext = makeUserContext(currentProfile);
     const profileQueries =
       currentUserContext.preferredGenders.length > 0 && currentUserContext.preferredGenders.length < 4
-        ? [equal("gender", currentUserContext.preferredGenders)]
+        ? [equal("gender", currentUserContext.preferredGenders.map(storedGenderValue))]
         : [];
 
     const [
@@ -148,7 +148,7 @@ function buildExcludedUserIds(currentUserId, swipes, matches, relationships) {
   return excludedUserIds;
 }
 
-function buildCandidateEntry(row, currentUserId, currentUser, excludedUserIds) {
+export function buildCandidateEntry(row, currentUserId, currentUser, excludedUserIds) {
   const candidateUserId = asString(row.userId);
   if (!candidateUserId || candidateUserId === currentUserId || excludedUserIds.has(candidateUserId)) {
     return null;
@@ -180,15 +180,11 @@ function buildCandidateEntry(row, currentUserId, currentUser, excludedUserIds) {
   }
 
   const distanceKm = distanceKmBetween(currentUser, candidate);
-  if (distanceKm == null) {
+  if (distanceKm != null && Number.isFinite(currentUser.maxDistanceKm) && distanceKm > currentUser.maxDistanceKm) {
     return null;
   }
 
-  if (Number.isFinite(currentUser.maxDistanceKm) && distanceKm > currentUser.maxDistanceKm) {
-    return null;
-  }
-
-  if (Number.isFinite(candidate.maxDistanceKm) && distanceKm > candidate.maxDistanceKm) {
+  if (distanceKm != null && Number.isFinite(candidate.maxDistanceKm) && distanceKm > candidate.maxDistanceKm) {
     return null;
   }
 
@@ -256,7 +252,7 @@ function makeUserContext(row) {
   };
 }
 
-function isProfileReady(row) {
+export function isProfileReady(row) {
   if (asBool(row.profileReady)) {
     return true;
   }
@@ -265,8 +261,6 @@ function isProfileReady(row) {
     asString(row.firstName)
     && normalizeCity(row.city)
     && normalizeGender(row.gender)
-    && Number.isFinite(numberValue(row.latitude))
-    && Number.isFinite(numberValue(row.longitude))
     && ageFromBirthDate(row.birthDate) >= 18
     && firstNonEmpty([row.bio])
   );
@@ -297,6 +291,10 @@ function normalizeGender(value) {
     default:
       return null;
   }
+}
+
+function storedGenderValue(value) {
+  return value === "nonbinary" ? "nonBinary" : value;
 }
 
 function normalizeIntent(value) {

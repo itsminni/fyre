@@ -111,6 +111,7 @@ struct AccountView: View {
     @State private var securityMessage: String?
     @State private var pickedPhotoItem: PhotosPickerItem?
     @State private var pickedAdditionalPhotoItems: [PhotosPickerItem] = []
+    @State private var pendingAvatarCrop: PendingProfileAvatarCrop?
     @State private var pendingChatBackgroundPreview: PendingChatBackgroundPreview?
     @State private var chatBackgroundStyleSelection = ChatBackgroundStyle.defaultDark.rawValue
     @State private var chatBackgroundSettingsMessage: String?
@@ -125,6 +126,7 @@ struct AccountView: View {
 
     private let supportEmail = "support@example.com"
     private let maxProfilePhotoCount = 6
+    private let profilePhotoDragPayloadPrefix = "fyre-profile-photo:"
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -152,18 +154,13 @@ struct AccountView: View {
             }
             .task(id: pickedPhotoItem) {
                 guard let pickedPhotoItem else { return }
-                if let data = try? await pickedPhotoItem.loadTransferable(type: Data.self) {
-                    // Avatar uploads are handled separately so autosaving text fields never reuploads the image.
-                    let result = await store.updateProfileImage(data)
-                    if let result {
-                        profileMessage = result
-                        profileMessageIsError = true
-                    } else {
-                        profileMessage = nil
-                        profileMessageIsError = false
-                        fillFromUser()
-                    }
+                if let crop = await loadPendingProfileAvatarCrop(from: pickedPhotoItem) {
+                    pendingAvatarCrop = crop
+                } else {
+                    profileMessage = L10n.tr("profile.photo.crop.invalid")
+                    profileMessageIsError = true
                 }
+                self.pickedPhotoItem = nil
             }
             .onChange(of: pickedAdditionalPhotoItems) { _, newItems in
                 guard !newItems.isEmpty else { return }
@@ -180,10 +177,6 @@ struct AccountView: View {
                 pendingChatBackgroundPreview = PendingChatBackgroundPreview(
                     style: style
                 )
-            }
-            .task(id: editableProfileDraft) {
-                // Only editable profile fields participate in autosave; identity fields stay read-only above.
-                await autosaveProfileIfNeeded()
             }
             .alert(
                 L10n.tr("profile.eventsRemoval.warning.title"),
@@ -206,6 +199,20 @@ struct AccountView: View {
                 }
             } message: {
                 Text(L10n.tr("profile.eventsRemoval.warning.message"))
+            }
+            .sheet(item: $pendingAvatarCrop) { crop in
+                ProfileAvatarCropSheet(
+                    image: crop.image,
+                    onCancel: {
+                        pendingAvatarCrop = nil
+                    },
+                    onComplete: { data in
+                        pendingAvatarCrop = nil
+                        Task { @MainActor in
+                            await saveCroppedProfileAvatar(data)
+                        }
+                    }
+                )
             }
             .fullScreenCover(item: $pendingChatBackgroundPreview) { preview in
                 ChatBackgroundConfirmationView(
@@ -243,6 +250,8 @@ struct AccountView: View {
                 }
 
                 eventsHubCard
+
+                logoutButton
             }
             .padding(.horizontal)
             .padding(.top, 8)
@@ -363,6 +372,16 @@ struct AccountView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var logoutButton: some View {
+        Button(L10n.tr("auth.logout.action")) {
+            Task {
+                await performLogout()
+            }
+        }
+        .buttonStyle(AccountPrimaryButtonStyle(tint: .red))
+        .disabled(isLoggingOut)
     }
 
     private func settingsDestinationView(_ destination: SettingsDestination) -> some View {
@@ -502,13 +521,7 @@ struct AccountView: View {
                         .padding(.horizontal, 4)
                 }
 
-                Button(L10n.tr("auth.logout.action")) {
-                    Task {
-                        await performLogout()
-                    }
-                }
-                .buttonStyle(AccountPrimaryButtonStyle(tint: .red))
-                .disabled(isLoggingOut)
+                logoutButton
             }
             .padding(.horizontal)
             .padding(.top, 2)
@@ -518,6 +531,9 @@ struct AccountView: View {
             Task {
                 await flushPendingProfileEdits()
             }
+        }
+        .task(id: editableProfileDraft) {
+            await autosaveProfileIfNeeded()
         }
         .scrollIndicators(.hidden)
         .background(accountBackground.ignoresSafeArea())
@@ -892,6 +908,20 @@ struct AccountView: View {
         store.currentUser?.resolvedProfilePhotoDataItems ?? []
     }
 
+    @MainActor
+    private func saveCroppedProfileAvatar(_ data: Data) async {
+        // Avatar uploads are handled separately so autosaving text fields never reuploads the image.
+        let result = await store.updateProfileImage(data)
+        if let result {
+            profileMessage = result
+            profileMessageIsError = true
+        } else {
+            profileMessage = nil
+            profileMessageIsError = false
+            fillFromUser()
+        }
+    }
+
     private var profilePhotoGalleryEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
@@ -944,84 +974,56 @@ struct AccountView: View {
 
     @ViewBuilder
     private func profilePhotoThumbnail(data: Data, index: Int) -> some View {
-        VStack(spacing: 8) {
-            ZStack(alignment: .topTrailing) {
-                Group {
-                    if let uiImage = UIImage(data: data) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(.white.opacity(0.05))
-                            .overlay {
-                                Image(systemName: "photo")
-                                    .foregroundStyle(.secondary)
-                            }
-                    }
-                }
-                .frame(width: 92, height: 118)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(alignment: .bottomLeading) {
-                    if index == 0 {
-                        Text(L10n.tr("profile.photo.primaryBadge"))
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.orange.opacity(0.92), in: Capsule(style: .continuous))
-                            .padding(8)
-                    }
-                }
-                .overlay {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.10), lineWidth: 1)
+                        .fill(.white.opacity(0.05))
+                        .overlay {
+                            Image(systemName: "photo")
+                                .foregroundStyle(.secondary)
+                        }
                 }
-
-                Button {
-                    removeProfilePhoto(at: index)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.bold))
+            }
+            .frame(width: 92, height: 118)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(alignment: .bottomLeading) {
+                if index == 0 {
+                    Text(L10n.tr("profile.photo.primaryBadge"))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
-                        .background(.black.opacity(0.72), in: Circle())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(.orange.opacity(0.92), in: Capsule(style: .continuous))
+                        .padding(8)
                 }
-                .buttonStyle(.plain)
-                .padding(8)
-                .accessibilityLabel(L10n.tr("profile.photo.remove"))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.10), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .draggable(profilePhotoDragPayload(for: index))
+            .dropDestination(for: String.self) { payloads, _ in
+                handleProfilePhotoDrop(payloads, at: index)
             }
 
-            HStack(spacing: 6) {
-                Button {
-                    moveProfilePhoto(at: index, by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.caption.weight(.bold))
-                        .frame(width: 26, height: 24)
-                }
-                .buttonStyle(.plain)
-                .disabled(index == 0)
-                .opacity(index == 0 ? 0.35 : 1)
-
-                Text("\(index + 1)")
+            Button {
+                removeProfilePhoto(at: index)
+            } label: {
+                Image(systemName: "xmark")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22)
-
-                Button {
-                    moveProfilePhoto(at: index, by: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .frame(width: 26, height: 24)
-                }
-                .buttonStyle(.plain)
-                .disabled(index >= currentProfilePhotoDataItems.count - 1)
-                .opacity(index >= currentProfilePhotoDataItems.count - 1 ? 0.35 : 1)
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .background(.black.opacity(0.72), in: Circle())
             }
-            .foregroundStyle(.orange)
-            .background(.white.opacity(0.05), in: Capsule(style: .continuous))
+            .buttonStyle(.plain)
+            .padding(8)
+            .accessibilityLabel(L10n.tr("profile.photo.remove"))
         }
         .frame(width: 92)
     }
@@ -1030,13 +1032,33 @@ struct AccountView: View {
         max(0, maxProfilePhotoCount - currentProfilePhotoDataItems.count)
     }
 
-    private func moveProfilePhoto(at index: Int, by delta: Int) {
-        let targetIndex = index + delta
-        guard currentProfilePhotoDataItems.indices.contains(index),
-              currentProfilePhotoDataItems.indices.contains(targetIndex) else { return }
+    private func profilePhotoDragPayload(for index: Int) -> String {
+        "\(profilePhotoDragPayloadPrefix)\(index)"
+    }
+
+    private func profilePhotoDragIndex(from payload: String) -> Int? {
+        guard payload.hasPrefix(profilePhotoDragPayloadPrefix) else { return nil }
+        return Int(payload.dropFirst(profilePhotoDragPayloadPrefix.count))
+    }
+
+    private func handleProfilePhotoDrop(_ payloads: [String], at destinationIndex: Int) -> Bool {
+        guard let sourceIndex = payloads.compactMap(profilePhotoDragIndex(from:)).first else {
+            return false
+        }
+
+        return moveProfilePhoto(from: sourceIndex, to: destinationIndex)
+    }
+
+    @discardableResult
+    private func moveProfilePhoto(from sourceIndex: Int, to destinationIndex: Int) -> Bool {
+        guard currentProfilePhotoDataItems.indices.contains(sourceIndex),
+              currentProfilePhotoDataItems.indices.contains(destinationIndex) else { return false }
+
+        guard sourceIndex != destinationIndex else { return true }
 
         var updatedImages = currentProfilePhotoDataItems
-        updatedImages.swapAt(index, targetIndex)
+        let movedImage = updatedImages.remove(at: sourceIndex)
+        updatedImages.insert(movedImage, at: destinationIndex)
 
         Task { @MainActor in
             let result = await store.updateProfileImages(updatedImages)
@@ -1049,6 +1071,8 @@ struct AccountView: View {
                 fillFromUser()
             }
         }
+
+        return true
     }
 
     private func displayValue(_ value: String) -> String {

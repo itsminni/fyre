@@ -160,7 +160,9 @@ actor AppwriteService {
         }
 
         do {
-            return try await ensureProfileRow(for: updatedUser)
+            updatedUser = try await ensureProfileRow(for: updatedUser)
+            await repairAvatarPermissions(for: updatedUser)
+            return updatedUser
         } catch {
             for fileId in uploadedFileIds {
                 try? await deleteAvatar(fileId: fileId)
@@ -188,6 +190,7 @@ actor AppwriteService {
 
         do {
             updatedUser = try await ensureProfileRow(for: updatedUser)
+            await repairAvatarPermissions(for: updatedUser)
         } catch {
             if let nextAvatarFileId {
                 try? await deleteAvatar(fileId: nextAvatarFileId)
@@ -207,6 +210,7 @@ actor AppwriteService {
     func updateProfileImages(_ imageDataItems: [Data], for user: User) async throws -> User {
         let accountId = try await resolvedRequiredAccountId(from: user)
         let previousFileIds = user.resolvedPhotoFileIds
+        let previousAvatarFileId = user.avatarFileId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let sanitizedImages = imageDataItems.filter { !$0.isEmpty }
         let nextFileIds = try await uploadProfilePhotos(sanitizedImages)
 
@@ -215,8 +219,15 @@ actor AppwriteService {
         updatedUser.photoFileIds = nextFileIds
         updatedUser.profilePhotoDataItems = sanitizedImages
 
+        if previousAvatarFileId?.isEmpty ?? true {
+            updatedUser.avatarFileId = nextFileIds.first
+        } else if previousAvatarFileId == previousFileIds.first {
+            updatedUser.avatarFileId = nextFileIds.first
+        }
+
         do {
             updatedUser = try await ensureProfileRow(for: updatedUser)
+            await repairAvatarPermissions(for: updatedUser)
         } catch {
             for fileId in nextFileIds {
                 try? await deleteAvatar(fileId: fileId)
@@ -859,6 +870,9 @@ actor AppwriteService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(jwt, forHTTPHeaderField: "x-appwrite-user-jwt")
+        if let currentUserId = stringValue(forKey: "currentUserId", in: body) {
+            request.setValue(currentUserId, forHTTPHeaderField: "x-appwrite-user-id")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         do {
@@ -1082,7 +1096,7 @@ actor AppwriteService {
         return []
     }
 
-    private func uploadAvatar(data: Data, fileId: String) async throws {
+    private func uploadAvatar(data: Data, fileId: String, ownerUserId: String) async throws {
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(
             url: url(
@@ -1098,12 +1112,14 @@ actor AppwriteService {
         request.setValue(configuration.projectId, forHTTPHeaderField: "X-Appwrite-Project")
         request.setValue("1.8.0", forHTTPHeaderField: "X-Appwrite-Response-Format")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let permissions = avatarPermissions(ownerUserId: ownerUserId)
         request.httpBody = makeMultipartBody(
             boundary: boundary,
             fileId: fileId,
             fileName: "avatar-\(fileId).jpg",
             mimeType: "image/jpeg",
-            fileData: data
+            fileData: data,
+            permissions: permissions
         )
 
         let (responseData, response) = try await session.data(for: request)
@@ -1121,12 +1137,13 @@ actor AppwriteService {
             return []
         }
 
+        let ownerUserId = try await resolvedRequiredAccountId(from: nil)
         var uploadedFileIds: [String] = []
 
         do {
             for data in photoDataItems {
                 let fileId = makeRandomIdentifier()
-                try await uploadAvatar(data: data, fileId: fileId)
+                try await uploadAvatar(data: data, fileId: fileId, ownerUserId: ownerUserId)
                 uploadedFileIds.append(fileId)
             }
 
@@ -1137,6 +1154,55 @@ actor AppwriteService {
             }
             throw error
         }
+    }
+
+    private func avatarPermissions(ownerUserId: String) -> [String] {
+        [
+            "read(\"users\")",
+            "update(\"user:\(ownerUserId)\")",
+            "delete(\"user:\(ownerUserId)\")"
+        ]
+    }
+
+    private func repairAvatarPermissions(for user: User) async {
+        guard let ownerUserId = try? await resolvedRequiredAccountId(from: user) else { return }
+
+        let fileIds = Set(([user.avatarFileId].compactMap { $0 } + user.resolvedPhotoFileIds)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty })
+
+        for fileId in fileIds {
+            try? await updateAvatarPermissions(fileId: fileId, ownerUserId: ownerUserId)
+        }
+    }
+
+    private func updateAvatarPermissions(fileId: String, ownerUserId: String) async throws {
+        let file = try await sendJSONObjectRequest(
+            method: "GET",
+            pathComponents: [
+                "storage",
+                "buckets",
+                configuration.avatarsBucketId,
+                "files",
+                fileId
+            ]
+        )
+        let fileName = stringValue(forKey: "name", in: file) ?? "avatar-\(fileId).jpg"
+
+        _ = try await sendRequest(
+            method: "PUT",
+            pathComponents: [
+                "storage",
+                "buckets",
+                configuration.avatarsBucketId,
+                "files",
+                fileId
+            ],
+            jsonBody: [
+                "name": fileName,
+                "permissions": avatarPermissions(ownerUserId: ownerUserId)
+            ]
+        )
     }
 
     private func deleteAvatar(fileId: String) async throws {
@@ -1299,6 +1365,8 @@ actor AppwriteService {
             commonInterests: discoverCommonInterests(from: row),
             bio: discoverBio(from: row),
             city: stringValue(forKey: "city", in: row),
+            gender: stringValue(forKey: "gender", in: row),
+            orientation: stringValue(forKey: "orientation", in: row),
             intent: stringValue(forKey: "intent", in: row),
             smokes: boolValue(forKey: "smokes", in: row),
             drinks: boolValue(forKey: "drinks", in: row),
@@ -1330,6 +1398,8 @@ actor AppwriteService {
             commonInterests: Array(commonInterests.prefix(4)),
             bio: discoverBio(from: row),
             city: stringValue(forKey: "city", in: row),
+            gender: stringValue(forKey: "gender", in: row),
+            orientation: stringValue(forKey: "orientation", in: row),
             intent: stringValue(forKey: "intent", in: row),
             smokes: boolValue(forKey: "smokes", in: row),
             drinks: boolValue(forKey: "drinks", in: row),

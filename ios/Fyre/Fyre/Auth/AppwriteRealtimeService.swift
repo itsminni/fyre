@@ -261,21 +261,28 @@ enum AppwriteRealtimeService {
     @MainActor
     static func makeInboxSubscription(
         onChange: @escaping @MainActor () -> Void,
+        onEvent: @escaping @MainActor (AppwriteRealtimeEvent) -> Void = { _ in },
         onError: @escaping @MainActor (Error) -> Void = { _ in }
     ) -> AppwriteRealtimeSubscription? {
         guard let configuration = try? AppwriteConfiguration.load() else {
             return nil
         }
 
+        var channels = [
+            configuration.messagesRealtimeChannel,
+            configuration.threadsRealtimeChannel,
+            configuration.threadParticipantsRealtimeChannel
+        ]
+        if let matchesChannel = configuration.matchesRealtimeChannel {
+            channels.append(matchesChannel)
+        }
+
         let subscription = AppwriteRealtimeSubscription(
             configuration: configuration,
-            channels: [
-                configuration.messagesRealtimeChannel,
-                configuration.threadsRealtimeChannel,
-                configuration.threadParticipantsRealtimeChannel
-            ],
+            channels: channels,
             onEvent: { event in
                 guard event.isMutation else { return }
+                onEvent(event)
                 onChange()
             },
             onError: onError

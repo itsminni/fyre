@@ -143,17 +143,25 @@ class AppwriteGateway(
         return try {
             getRow(configuration.profilesTableId, accountId)
         } catch (api: AppwriteApiException) {
-            if (api.statusCode != 404) {
+            if (api.statusCode != 401 && api.statusCode != 403 && api.statusCode != 404) {
                 throw api
             }
-            val rows = listRows(
-                tableId = configuration.profilesTableId,
-                queries = listOf(
-                    queryEqual("userId", listOf(accountId)),
-                    queryLimit(1)
+            try {
+                val rows = listRows(
+                    tableId = configuration.profilesTableId,
+                    queries = listOf(
+                        queryEqual("userId", listOf(accountId)),
+                        queryLimit(1)
+                    )
                 )
-            )
-            rows.firstOrNull()
+                rows.firstOrNull()
+            } catch (fallbackApi: AppwriteApiException) {
+                if (fallbackApi.statusCode == 401 || fallbackApi.statusCode == 403 || fallbackApi.statusCode == 404) {
+                    null
+                } else {
+                    throw fallbackApi
+                }
+            }
         }
     }
 

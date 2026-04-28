@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 private struct SwipeProfile: Identifiable, Equatable {
     let id: String
@@ -17,17 +18,154 @@ private struct SwipeProfile: Identifiable, Equatable {
     let commonInterests: [String]
     let bio: String
     let city: String?
+    let gender: String?
+    let orientation: String?
     let intent: String?
     let smokes: Bool?
     let drinks: Bool?
     let relationshipState: RelationshipStateDTO
+}
 
-    var hasDetailContent: Bool {
-        !normalizedBio.isEmpty || city != nil || intent != nil || smokes != nil || drinks != nil || !commonInterests.isEmpty
+private struct DiscoverProfileDetailsView: View {
+    let profile: SwipeProfile
+    let genderLabel: String?
+    let orientationLabel: String?
+    let intentLabel: String?
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(profile.name), \(profile.age)")
+                            .font(.largeTitle.bold())
+
+                        if let city = profile.city {
+                            Label(city, systemImage: "mappin.and.ellipse")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    infoBlock(title: L10n.tr("discover.details.section.info")) {
+                        infoRow(L10n.tr("profile.gender"), value: genderLabel)
+                        infoRow(L10n.tr("profile.orientation"), value: orientationLabel)
+                        infoRow(L10n.tr("profile.intent"), value: intentLabel)
+                        infoRow(L10n.tr("profile.smokes"), value: yesNo(profile.smokes))
+                        infoRow(L10n.tr("profile.drinks"), value: yesNo(profile.drinks))
+                    }
+
+                    if let bio = normalized(profile.bio) {
+                        infoBlock(title: L10n.tr("discover.details.section.bio")) {
+                            Text(bio)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    if !profile.commonInterests.isEmpty {
+                        infoBlock(title: L10n.tr("discover.details.section.interests")) {
+                            FlowChips(items: profile.commonInterests)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 28)
+            }
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle(L10n.tr("discover.details.title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(L10n.tr("common.done")) {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
     }
 
-    private var normalizedBio: String {
-        bio.trimmingCharacters(in: .whitespacesAndNewlines)
+    @ViewBuilder
+    private func infoBlock<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func infoRow(_ label: String, value: String?) -> some View {
+        if let value = normalized(value) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 14)
+                Text(value)
+                    .multilineTextAlignment(.trailing)
+                    .fontWeight(.semibold)
+            }
+        }
+    }
+
+    private func yesNo(_ value: Bool?) -> String? {
+        guard let value else { return nil }
+        return value ? L10n.tr("discover.details.value.yes") : L10n.tr("discover.details.value.no")
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+}
+
+private struct FlowChips: View {
+    let items: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(rows, id: \.self) { row in
+                HStack(spacing: 8) {
+                    ForEach(row, id: \.self) { item in
+                        Text(item)
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.primary.opacity(0.10), in: Capsule(style: .continuous))
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private var rows: [[String]] {
+        var rows: [[String]] = [[]]
+        var currentCount = 0
+
+        for item in items {
+            let estimatedWidth = item.count + 5
+            if currentCount + estimatedWidth > 26 {
+                rows.append([item])
+                currentCount = estimatedWidth
+            } else {
+                rows[rows.count - 1].append(item)
+                currentCount += estimatedWidth
+            }
+        }
+
+        return rows.filter { !$0.isEmpty }
     }
 }
 
@@ -35,11 +173,6 @@ struct SwipeHomeView: View {
     private enum DecisionDirection {
         case left
         case right
-    }
-
-    private enum DragAxis {
-        case horizontal
-        case vertical
     }
 
     @Environment(AppServices.self) private var services
@@ -50,43 +183,39 @@ struct SwipeHomeView: View {
     @AppStorage("settings_show_interests") private var showInterests = true
     @State private var profiles: [SwipeProfile] = []
     @State private var dragOffset: CGSize = .zero
-    @State private var detailsDragOffset: CGFloat = 0
-    @State private var dragAxis: DragAxis?
     @State private var isAnimatingDecision = false
     @State private var isSubmittingSwipe = false
     @State private var swipeErrorMessage: String?
     @State private var activePhotoIndices: [String: Int] = [:]
-    @State private var detailsExpandedProfileID: String?
+    @State private var selectedDetailsProfile: SwipeProfile?
 
     var onMatchedThread: (ChatThread) -> Void = { _ in }
 
-    private let swipeThreshold: CGFloat = 118
-    private let detailsToggleThreshold: CGFloat = 90
+    private let photoSwipeThreshold: CGFloat = 44
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                Group {
-                    if profiles.isEmpty {
-                        ContentUnavailableView(
-                            L10n.tr("home.empty.title"),
-                            systemImage: "checkmark.circle",
-                            description: Text(L10n.tr("home.empty.description"))
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        GeometryReader { geometry in
-                            swipeDeck(in: geometry.size)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Group {
+                if profiles.isEmpty {
+                    ContentUnavailableView(
+                        L10n.tr("home.empty.title"),
+                        systemImage: "checkmark.circle",
+                        description: Text(L10n.tr("home.empty.description"))
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    GeometryReader { geometry in
+                        swipeDeck(in: geometry.size, safeAreaInsets: geometry.safeAreaInsets)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .ignoresSafeArea(.container, edges: discoveryIgnoredSafeAreaEdges)
                     }
-                }
-
-                if !profiles.isEmpty || swipeErrorMessage != nil {
-                    actionBar
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .navigationTitle(L10n.tr("home.navigationTitle"))
+            .background(discoveryScreenBackground)
+            .toolbar(.hidden, for: .navigationBar)
+            .toolbarBackground(discoveryBarBackground, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
         }
         .onAppear {
             Task {
@@ -96,36 +225,21 @@ struct SwipeHomeView: View {
         .task(id: discoverFilterID) {
             await loadProfiles()
         }
-    }
-
-    private var actionBar: some View {
-        VStack(spacing: 10) {
-            controlsRow
-
-            if let swipeErrorMessage {
-                Text(swipeErrorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 10)
-        .padding(.bottom, 12)
-        .frame(maxWidth: .infinity)
-        .background(actionBarBackground)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(actionBarSeparator)
-                .frame(height: 1)
+        .fullScreenCover(item: $selectedDetailsProfile) { profile in
+            DiscoverProfileDetailsView(
+                profile: profile,
+                genderLabel: genderLabel(for: profile.gender),
+                orientationLabel: orientationLabel(for: profile.orientation),
+                intentLabel: intentLabel(for: profile.intent)
+            )
         }
     }
 
     @ViewBuilder
-    private func swipeDeck(in size: CGSize) -> some View {
+    private func swipeDeck(in size: CGSize, safeAreaInsets: EdgeInsets) -> some View {
         if let profile = profiles.first {
             ZStack(alignment: .bottom) {
-                fullscreenStage(for: profile, in: size)
+                fullscreenStage(for: profile, in: size, safeAreaInsets: safeAreaInsets)
                     .offset(x: dragOffset.width, y: dragOffset.height * 0.14)
                     .rotationEffect(.degrees(rotationDegrees()))
                     .shadow(color: stageShadow, radius: 16, y: 8)
@@ -133,22 +247,22 @@ struct SwipeHomeView: View {
                     .gesture(dragGesture(for: profile))
                     .animation(.spring(response: 0.34, dampingFraction: 0.86), value: dragOffset)
 
-                if shouldShowDetails(for: profile) {
-                    detailsSheet(for: profile, containerHeight: size.height)
+                if selectedDetailsProfile == nil {
+                    floatingControlsOverlay(safeAreaBottom: deviceBottomSafeAreaInset)
                 }
             }
             .background(Color.black)
-            .clipped()
         } else {
             Color.clear
         }
     }
 
-    private func fullscreenStage(for profile: SwipeProfile, in size: CGSize) -> some View {
+    private func fullscreenStage(for profile: SwipeProfile, in size: CGSize, safeAreaInsets: EdgeInsets) -> some View {
         let photoIndex = currentPhotoIndex(for: profile)
         let photoURL = profile.photos.indices.contains(photoIndex) ? profile.photos[photoIndex] : nil
+        let photoLayerHeight = discoveryPhotoLayerHeight(in: size, safeAreaInsets: safeAreaInsets)
 
-        return ZStack(alignment: .top) {
+        return ZStack(alignment: .bottom) {
             ZStack {
                 if let photoURL {
                     AsyncImage(url: photoURL) { phase in
@@ -168,89 +282,107 @@ struct SwipeHomeView: View {
                 }
 
                 LinearGradient(
-                    colors: [.clear, .black.opacity(0.20), .black.opacity(0.80)],
+                    colors: [.clear, .black.opacity(0.18), .black.opacity(0.62)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
                 .allowsHitTesting(false)
             }
-            .frame(width: size.width, height: size.height)
-            .overlay(photoTapZones(for: profile))
+            .frame(width: size.width, height: photoLayerHeight)
+            .frame(width: size.width, height: size.height, alignment: .top)
+            .ignoresSafeArea(.container, edges: discoveryIgnoredSafeAreaEdges)
 
-            VStack(spacing: 0) {
-                VStack(spacing: 10) {
-                    if profile.photos.count > 1 {
-                        photoIndicator(for: profile)
-                    }
+            photoPositionIndicator(currentIndex: photoIndex, count: profile.photos.count)
+                .padding(.horizontal, 34)
+                .padding(.top, safeAreaInsets.top + 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .allowsHitTesting(false)
 
-                    HStack(spacing: 8) {
-                        if profile.photos.count > 1 {
-                            overlayTag("\(photoIndex + 1)/\(profile.photos.count)")
-                        }
-                        overlayTag("\(profile.compatibilityScore)%", accent: .orange)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(nameLine(for: profile))
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineLimit(2)
 
-                    if let city = nonEmpty(profile.city) {
-                        Label(city, systemImage: "mappin.and.ellipse")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.88))
+                    Spacer(minLength: 0)
+
+                    Button {
+                        selectedDetailsProfile = profile
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.tr("discover.details.open.accessibility"))
+                }
+
+                if let city = nonEmpty(profile.city) {
+                    Label(city, systemImage: "mappin.and.ellipse")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                }
+
+                HStack(spacing: 8) {
+                    overlayTag("\(profile.compatibilityScore)%", accent: .orange)
+
+                    if showDistance, let distanceKm = profile.distanceKm {
+                        overlayTag("\(distanceKm) km")
                     }
 
-                    HStack(spacing: 8) {
-                        if showDistance, let distanceKm = profile.distanceKm {
-                            overlayTag("\(distanceKm) km")
-                        }
-
-                        if showInterests, !profile.commonInterests.isEmpty {
-                            overlayTag(profile.commonInterests[0])
-                        }
-                    }
-
-                    if profile.photos.count > 1 {
-                        photoPillRail(for: profile)
-                    }
-
-                    if shouldShowDetails(for: profile) {
-                        detailPeek(for: profile)
+                    if showInterests, !profile.commonInterests.isEmpty {
+                        overlayTag(profile.commonInterests[0])
                     }
                 }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 22)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.horizontal, 18)
+            .padding(.bottom, max(112, deviceBottomSafeAreaInset + 82))
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .overlay(swipeFeedbackOverlay)
+        .frame(width: size.width, height: size.height)
         .animation(.easeInOut(duration: 0.22), value: photoIndex)
     }
 
+    @ViewBuilder
+    private func photoPositionIndicator(currentIndex: Int, count: Int) -> some View {
+        if count > 1 {
+            HStack(spacing: 6) {
+                ForEach(0..<count, id: \.self) { index in
+                    Circle()
+                        .fill(index == currentIndex ? Color.white : Color.white.opacity(0.34))
+                        .frame(width: index == currentIndex ? 7 : 6, height: index == currentIndex ? 7 : 6)
+                        .shadow(color: .black.opacity(0.24), radius: 2, y: 1)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.18), in: Capsule(style: .continuous))
+        }
+    }
+
     private var controlsRow: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 14) {
             Button {
                 commitDecision(.left)
             } label: {
                 Image(systemName: "forward.fill")
                     .font(.title3.weight(.bold))
                     .scaleEffect(x: -1, y: 1)
-                    .foregroundStyle(.primary)
-                    .frame(width: 58, height: 58)
-                    .background(controlSurfaceFill, in: Circle())
+                    .foregroundStyle(.white.opacity(0.95))
+                    .frame(width: 52, height: 52)
+                    .background(.ultraThinMaterial, in: Circle())
                     .overlay(
                         Circle()
                             .stroke(controlSurfaceStroke, lineWidth: 1)
                     )
-                    .shadow(color: controlShadow, radius: 10, y: 5)
+                    .shadow(color: controlShadow, radius: 7, y: 3)
                     .scaleEffect(dragOffset.width < 0 ? 1.04 : 1)
             }
             .accessibilityLabel(L10n.tr("home.skip.accessibility"))
@@ -262,267 +394,40 @@ struct SwipeHomeView: View {
                 Image(systemName: "flame.fill")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.orange)
-                    .frame(width: 62, height: 62)
-                    .background(primaryControlFill, in: Circle())
+                    .frame(width: 52, height: 52)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(
+                        Circle()
+                            .fill(Color.orange.opacity(colorScheme == .dark ? 0.16 : 0.13))
+                    )
                     .overlay(
                         Circle()
                             .stroke(primaryControlStroke, lineWidth: 1)
                     )
-                    .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.20 : 0.14), radius: 12, y: 6)
+                    .shadow(color: Color.orange.opacity(colorScheme == .dark ? 0.20 : 0.14), radius: 8, y: 3)
                     .scaleEffect(dragOffset.width > 0 ? 1.05 : 1)
             }
             .accessibilityLabel(L10n.tr("app.name"))
             .disabled(isAnimatingDecision || isSubmittingSwipe || profiles.isEmpty)
         }
         .animation(.spring(response: 0.24, dampingFraction: 0.82), value: dragOffset)
+        .offset(y: -14)
     }
 
-    private func photoTapZones(for profile: SwipeProfile) -> some View {
-        HStack(spacing: 0) {
-            Button {
-                shiftPhoto(for: profile, delta: -1)
-            } label: {
-                Color.clear
-            }
-            .buttonStyle(.plain)
-            .disabled(profile.photos.count <= 1)
+    private func floatingControlsOverlay(safeAreaBottom: CGFloat) -> some View {
+        VStack(spacing: 10) {
+            controlsRow
 
-            Button {
-                shiftPhoto(for: profile, delta: 1)
-            } label: {
-                Color.clear
-            }
-            .buttonStyle(.plain)
-            .disabled(profile.photos.count <= 1)
-        }
-    }
-
-    private func photoIndicator(for profile: SwipeProfile) -> some View {
-        HStack(spacing: 6) {
-            ForEach(Array(profile.photos.enumerated()), id: \.offset) { offset, _ in
-                Capsule(style: .continuous)
-                    .fill(offset == currentPhotoIndex(for: profile) ? .white : .white.opacity(0.34))
-                    .frame(width: offset == currentPhotoIndex(for: profile) ? 22 : 10, height: 4)
+            if let swipeErrorMessage {
+                Text(swipeErrorMessage)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.42), in: Capsule(style: .continuous))
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.black.opacity(0.20), in: Capsule(style: .continuous))
-    }
-
-    private func photoPillRail(for profile: SwipeProfile) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(Array(profile.photos.enumerated()), id: \.offset) { offset, _ in
-                    let isActive = offset == currentPhotoIndex(for: profile)
-                    Button {
-                        activePhotoIndices[profile.id] = offset
-                    } label: {
-                        Text("Foto \(offset + 1)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(isActive ? .black : .white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(isActive ? Color.white.opacity(0.96) : Color.black.opacity(0.28))
-                            )
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .stroke(Color.white.opacity(isActive ? 0.15 : 0.30), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private func detailPeek(for profile: SwipeProfile) -> some View {
-        let expanded = isDetailsExpanded(for: profile)
-
-        return Button {
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
-                detailsExpandedProfileID = expanded ? nil : profile.id
-                detailsDragOffset = 0
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: expanded ? "chevron.down.circle.fill" : "chevron.up.circle.fill")
-                Text(expanded ? "Chiudi dettagli" : "Swipe up per foto e dettagli")
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(.black.opacity(0.30), in: Capsule(style: .continuous))
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.26), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .opacity(shouldShowDetails(for: profile) ? 1 : 0)
-    }
-
-    private func detailsSheet(for profile: SwipeProfile, containerHeight: CGFloat) -> some View {
-        let isExpanded = isDetailsExpanded(for: profile)
-        let panelHeight = min(max(containerHeight * 0.58, 300), 470)
-        let collapsedOffset = panelHeight - 88
-        let baseOffset = isExpanded ? 0 : collapsedOffset
-        let interactiveOffset = isExpanded ? max(0, detailsDragOffset) : min(0, detailsDragOffset)
-
-        return VStack(alignment: .leading, spacing: 14) {
-            Capsule(style: .continuous)
-                .fill(Color.primary.opacity(0.25))
-                .frame(width: 42, height: 5)
-                .frame(maxWidth: .infinity)
-
-            HStack(alignment: .firstTextBaseline) {
-                Text("Dettagli profilo")
-                    .font(.headline)
-
-                Spacer()
-
-                Text(photoCountLabel(for: profile.photos.count))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 16) {
-                    if profile.photos.count > 1 {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Galleria")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 10) {
-                                    ForEach(Array(profile.photos.enumerated()), id: \.offset) { offset, url in
-                                        Button {
-                                            activePhotoIndices[profile.id] = offset
-                                        } label: {
-                                            ZStack(alignment: .bottomLeading) {
-                                                AsyncImage(url: url) { phase in
-                                                    switch phase {
-                                                    case let .success(image):
-                                                        image
-                                                            .resizable()
-                                                            .scaledToFill()
-                                                    default:
-                                                        placeholderAvatar
-                                                    }
-                                                }
-                                                .frame(width: 110, height: 146)
-                                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-                                                Text("Foto \(offset + 1)")
-                                                    .font(.caption2.weight(.semibold))
-                                                    .foregroundStyle(.white)
-                                                    .padding(.horizontal, 8)
-                                                    .padding(.vertical, 5)
-                                                    .background(.black.opacity(0.45), in: Capsule(style: .continuous))
-                                                    .padding(8)
-                                            }
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                                    .stroke(
-                                                        offset == currentPhotoIndex(for: profile)
-                                                            ? Color.orange.opacity(0.9)
-                                                            : Color.primary.opacity(0.10),
-                                                        lineWidth: offset == currentPhotoIndex(for: profile) ? 2 : 1
-                                                    )
-                                            )
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if let bioText = nonEmpty(profile.bio) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Bio")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(bioText)
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-
-                    let pills = detailPills(for: profile)
-                    if !pills.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Pillole")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(alignment: .top, spacing: 8) {
-                                    ForEach(Array(pills.enumerated()), id: \.offset) { _, pill in
-                                        detailPill(pill)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.bottom, 24)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .frame(maxWidth: .infinity)
-        .frame(height: panelHeight, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-        )
-        .offset(y: baseOffset + interactiveOffset)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: detailsExpandedProfileID)
-        .animation(.spring(response: 0.24, dampingFraction: 0.9), value: detailsDragOffset)
-    }
-
-    private func detailPill(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color.primary.opacity(0.08), in: Capsule(style: .continuous))
-    }
-
-    private func detailPills(for profile: SwipeProfile) -> [String] {
-        var pills: [String] = []
-
-        if let intentLabel = intentLabel(for: profile.intent) {
-            pills.append(intentLabel)
-        }
-
-        if let smokes = profile.smokes {
-            pills.append(smokes ? "Fumo: si" : "Fumo: no")
-        }
-
-        if let drinks = profile.drinks {
-            pills.append(drinks ? "Beve: si" : "Beve: no")
-        }
-
-        if showInterests, !profile.commonInterests.isEmpty {
-            pills.append(contentsOf: profile.commonInterests.prefix(6))
-        }
-
-        return pills
+        .padding(.bottom, max(2, safeAreaBottom))
     }
 
     private func overlayTag(_ text: String, accent: Color? = nil) -> some View {
@@ -555,92 +460,21 @@ struct SwipeHomeView: View {
         }
     }
 
-    private var swipeFeedbackOverlay: some View {
-        let likeOpacity = min(max(dragOffset.width / swipeThreshold, 0), 1) * 0.14
-        let passOpacity = min(max(-dragOffset.width / swipeThreshold, 0), 1) * 0.10
-
-        return Rectangle()
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(passOpacity),
-                        Color.clear,
-                        Color.orange.opacity(likeOpacity)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .allowsHitTesting(false)
-    }
-
     private func dragGesture(for profile: SwipeProfile) -> some Gesture {
-        DragGesture(minimumDistance: 6)
-            .onChanged { value in
-                guard !isAnimatingDecision, !isSubmittingSwipe else { return }
-
-                if dragAxis == nil {
-                    dragAxis = abs(value.translation.width) >= abs(value.translation.height)
-                        ? .horizontal
-                        : .vertical
-                }
-
-                switch dragAxis {
-                case .horizontal:
-                    detailsDragOffset = 0
-                    dragOffset = CGSize(width: value.translation.width, height: value.translation.height * 0.18)
-                case .vertical:
-                    guard shouldShowDetails(for: profile) else { return }
-                    dragOffset = .zero
-
-                    if isDetailsExpanded(for: profile) {
-                        detailsDragOffset = max(0, value.translation.height)
-                    } else {
-                        detailsDragOffset = min(0, value.translation.height)
-                    }
-                case .none:
-                    break
-                }
-            }
+        DragGesture(minimumDistance: 10)
             .onEnded { value in
                 guard !isAnimatingDecision, !isSubmittingSwipe else { return }
-                defer { dragAxis = nil }
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
 
-                switch dragAxis {
-                case .horizontal:
-                    let projectedWidth = value.predictedEndTranslation.width
-                    let resolvedWidth = abs(projectedWidth) > abs(value.translation.width) ? projectedWidth : value.translation.width
+                let projectedWidth = value.predictedEndTranslation.width
+                let resolvedWidth = abs(projectedWidth) > abs(value.translation.width)
+                    ? projectedWidth
+                    : value.translation.width
 
-                    if abs(resolvedWidth) > swipeThreshold {
-                        commitDecision(resolvedWidth > 0 ? .right : .left)
-                    } else {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
-                            dragOffset = .zero
-                        }
-                    }
-                case .vertical:
-                    guard shouldShowDetails(for: profile) else {
-                        withAnimation(.spring(response: 0.26, dampingFraction: 0.9)) {
-                            detailsDragOffset = 0
-                        }
-                        return
-                    }
-
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
-                        if isDetailsExpanded(for: profile) {
-                            if value.translation.height > detailsToggleThreshold {
-                                detailsExpandedProfileID = nil
-                            }
-                        } else if value.translation.height < -detailsToggleThreshold {
-                            detailsExpandedProfileID = profile.id
-                        }
-                        detailsDragOffset = 0
-                    }
-                case .none:
-                    withAnimation(.spring(response: 0.30, dampingFraction: 0.84)) {
-                        dragOffset = .zero
-                        detailsDragOffset = 0
-                    }
+                if resolvedWidth <= -photoSwipeThreshold {
+                    shiftPhoto(for: profile, delta: 1)
+                } else if resolvedWidth >= photoSwipeThreshold {
+                    shiftPhoto(for: profile, delta: -1)
                 }
             }
     }
@@ -664,9 +498,7 @@ struct SwipeHomeView: View {
                 profiles.removeFirst()
             }
             dragOffset = .zero
-            detailsDragOffset = 0
-            detailsExpandedProfileID = nil
-            dragAxis = nil
+            selectedDetailsProfile = nil
             isAnimatingDecision = false
 
             Task {
@@ -691,6 +523,8 @@ struct SwipeHomeView: View {
                     commonInterests: $0.commonInterests,
                     bio: $0.bio,
                     city: nonEmpty($0.city),
+                    gender: nonEmpty($0.gender),
+                    orientation: nonEmpty($0.orientation),
                     intent: nonEmpty($0.intent),
                     smokes: $0.smokes,
                     drinks: $0.drinks,
@@ -701,8 +535,8 @@ struct SwipeHomeView: View {
             let validIDs = Set(profiles.map(\.id))
             activePhotoIndices = activePhotoIndices.filter { validIDs.contains($0.key) }
 
-            if let detailsExpandedProfileID, !validIDs.contains(detailsExpandedProfileID) {
-                self.detailsExpandedProfileID = nil
+            if let selectedDetailsProfile, !validIDs.contains(selectedDetailsProfile.id) {
+                self.selectedDetailsProfile = nil
             }
         } catch {
             profiles = []
@@ -774,14 +608,6 @@ struct SwipeHomeView: View {
         }
     }
 
-    private func shouldShowDetails(for profile: SwipeProfile) -> Bool {
-        profile.photos.count > 1 || profile.hasDetailContent
-    }
-
-    private func isDetailsExpanded(for profile: SwipeProfile) -> Bool {
-        detailsExpandedProfileID == profile.id
-    }
-
     private func nonEmpty(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return nil
@@ -796,15 +622,57 @@ struct SwipeHomeView: View {
 
         switch normalized {
         case "relationship":
-            return "Relazione"
+            return L10n.tr("profile.intent.relationship")
         case "friendship":
-            return "Amicizia"
+            return L10n.tr("profile.intent.friendship")
         case "casual":
-            return "Casual"
+            return L10n.tr("profile.intent.casual")
         case "networking":
             return "Networking"
         case "notsure", "not_sure":
-            return "Esplorazione"
+            return L10n.tr("profile.intent.notSure")
+        default:
+            return rawValue
+        }
+    }
+
+    private func genderLabel(for rawValue: String?) -> String? {
+        guard let normalized = nonEmpty(rawValue)?.lowercased() else {
+            return nil
+        }
+
+        switch normalized {
+        case "male":
+            return L10n.tr("profile.gender.male")
+        case "female":
+            return L10n.tr("profile.gender.female")
+        case "nonbinary", "non_binary", "non-binary":
+            return L10n.tr("profile.gender.nonBinary")
+        case "other":
+            return L10n.tr("profile.gender.other")
+        default:
+            return rawValue
+        }
+    }
+
+    private func orientationLabel(for rawValue: String?) -> String? {
+        guard let normalized = nonEmpty(rawValue)?.lowercased() else {
+            return nil
+        }
+
+        switch normalized {
+        case "straight":
+            return L10n.tr("profile.orientation.straight")
+        case "gay":
+            return L10n.tr("profile.orientation.gay")
+        case "lesbian":
+            return L10n.tr("profile.orientation.lesbian")
+        case "bisexual":
+            return L10n.tr("profile.orientation.bisexual")
+        case "pansexual":
+            return L10n.tr("profile.orientation.pansexual")
+        case "other":
+            return L10n.tr("profile.orientation.other")
         default:
             return rawValue
         }
@@ -819,10 +687,6 @@ struct SwipeHomeView: View {
         colorScheme == .dark ? .black.opacity(0.24) : .black.opacity(0.14)
     }
 
-    private var controlSurfaceFill: Color {
-        Color(uiColor: colorScheme == .dark ? .secondarySystemBackground : .systemBackground)
-    }
-
     private var controlSurfaceStroke: Color {
         colorScheme == .dark ? .white.opacity(0.12) : .black.opacity(0.10)
     }
@@ -831,22 +695,41 @@ struct SwipeHomeView: View {
         colorScheme == .dark ? .black.opacity(0.16) : .black.opacity(0.08)
     }
 
-    private var primaryControlFill: Color {
-        colorScheme == .dark ? .orange.opacity(0.18) : .orange.opacity(0.14)
-    }
-
     private var primaryControlStroke: Color {
         colorScheme == .dark ? .orange.opacity(0.28) : .orange.opacity(0.34)
     }
 
-    private var actionBarBackground: Color {
-        colorScheme == .dark
-            ? Color(uiColor: .secondarySystemBackground).opacity(0.98)
-            : Color(uiColor: .systemBackground).opacity(0.96)
+    private var discoveryBarBackground: Color {
+        Color(uiColor: colorScheme == .dark ? .secondarySystemBackground : .secondarySystemGroupedBackground)
     }
 
-    private var actionBarSeparator: Color {
-        colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.08)
+    private var discoveryScreenBackground: Color {
+        profiles.isEmpty ? Color(uiColor: .systemGroupedBackground) : .black
+    }
+
+    private var discoveryIgnoredSafeAreaEdges: Edge.Set {
+        if #available(iOS 26.0, *) {
+            return .all
+        }
+
+        return [.top, .bottom]
+    }
+
+    private func discoveryPhotoLayerHeight(in size: CGSize, safeAreaInsets: EdgeInsets) -> CGFloat {
+        let bottomExtension = max(safeAreaInsets.bottom, deviceBottomSafeAreaInset)
+        if #available(iOS 26.0, *) {
+            return size.height + safeAreaInsets.top + bottomExtension
+        }
+
+        return size.height + bottomExtension
+    }
+
+    private var deviceBottomSafeAreaInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.bottom ?? 0
     }
 
     private func nameLine(for profile: SwipeProfile) -> String {
@@ -854,17 +737,6 @@ struct SwipeHomeView: View {
             return "\(profile.name), \(profile.age)"
         }
         return profile.name
-    }
-
-    private func photoCountLabel(for count: Int) -> String {
-        switch count {
-        case 0:
-            return "Nessuna foto"
-        case 1:
-            return "1 foto"
-        default:
-            return "\(count) foto"
-        }
     }
 
     private var discoverFilterID: String {
