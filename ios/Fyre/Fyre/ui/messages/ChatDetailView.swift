@@ -13,9 +13,6 @@ import AVKit
 import AVFoundation
 import QuickLook
 import Combine
-import Combine
-import Combine
-import Combine
 
 private extension Color {
     var perceivedLuminance: Double {
@@ -80,6 +77,42 @@ private struct VisualEffectBlurView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
         uiView.effect = UIBlurEffect(style: style)
+    }
+}
+
+private struct VoiceWaveformProgressView: View {
+    let progress: CGFloat
+    let isPlaying: Bool
+    let tint: Color
+    let trackTint: Color
+
+    private let amplitudes: [CGFloat] = [
+        0.34, 0.58, 0.42, 0.82, 0.50, 0.68, 0.38, 0.92,
+        0.55, 0.74, 0.44, 0.64, 0.86, 0.48, 0.70, 0.36,
+        0.76, 0.52, 0.62, 0.40, 0.84, 0.56
+    ]
+
+    var body: some View {
+        GeometryReader { geometry in
+            let clampedProgress = min(max(progress, 0), 1)
+            let activeWidth = geometry.size.width * clampedProgress
+
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(Array(amplitudes.enumerated()), id: \.offset) { index, amplitude in
+                    let barWidth = max(2, (geometry.size.width - CGFloat(amplitudes.count - 1) * 3) / CGFloat(amplitudes.count))
+                    let midpoint = CGFloat(index) * (barWidth + 3) + (barWidth / 2)
+                    let isActive = midpoint <= activeWidth
+
+                    Capsule(style: .continuous)
+                        .fill(isActive ? tint : trackTint)
+                        .frame(width: barWidth, height: max(5, geometry.size.height * amplitude))
+                        .animation(.easeOut(duration: 0.16), value: clampedProgress)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        }
+        .frame(height: 26)
+        .opacity(isPlaying ? 1 : 0.86)
     }
 }
 
@@ -585,7 +618,9 @@ struct ChatDetailView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            isInputFocused = true
+            if !hasPendingAudioAttachment {
+                isInputFocused = true
+            }
         }
         .simultaneousGesture(composerFocusDragGesture)
     }
@@ -604,7 +639,9 @@ struct ChatDetailView: View {
     }
 
     private func sendMessage() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachment = pendingAttachment
+        let sendsVoiceOnlyMessage = attachment?.type == .audio
+        let text = sendsVoiceOnlyMessage ? "" : draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canInteractWithThread, !text.isEmpty || pendingAttachment != nil else { return }
         audioPlayback.stop()
         let replyTarget = replyingToMessage
@@ -617,7 +654,6 @@ struct ChatDetailView: View {
         )
         // Clear optimistically for a snappy composer, then restore the draft if the send fails.
         draft = ""
-        let attachment = pendingAttachment
         pendingAttachment = nil
         sendErrorMessage = nil
         isSending = true
@@ -652,7 +688,7 @@ struct ChatDetailView: View {
             } catch {
                 await MainActor.run {
                     messages.removeAll { $0.id == optimisticMessageID }
-                    draft = text
+                    draft = sendsVoiceOnlyMessage ? "" : text
                     pendingAttachment = attachment
                     replyingToMessage = replyTarget
 #if DEBUG
@@ -693,6 +729,7 @@ struct ChatDetailView: View {
         do {
             let attachment = try voiceRecorder.stop()
             pendingAttachment = attachment
+            draft = ""
             sendErrorMessage = nil
         } catch {
             sendErrorMessage = error.localizedDescription
@@ -761,6 +798,10 @@ struct ChatDetailView: View {
             && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || pendingAttachment != nil)
             && !isSending
             && !voiceRecorder.isRecording
+    }
+
+    private var hasPendingAudioAttachment: Bool {
+        pendingAttachment?.type == .audio
     }
 
     private var usesModernChatChrome: Bool {
@@ -1140,6 +1181,39 @@ struct ChatDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func microphoneInlineButton(size: CGFloat, foreground: Color) -> some View {
+        Button(action: handleMicrophoneButtonTap) {
+            Image(systemName: "mic.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(foreground)
+                .frame(width: size, height: size)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Record voice message")
+        .disabled(isSending || pendingAttachment != nil)
+    }
+
+    private func voiceRecordingStopButton(size: CGFloat) -> some View {
+        Button(action: stopVoiceRecording) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: max(14, size * 0.36), weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background {
+                    Circle()
+                        .fill(.red)
+                        .shadow(color: .red.opacity(colorScheme == .dark ? 0.34 : 0.24), radius: 8, y: 3)
+                }
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.22), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Stop voice recording")
+        .disabled(isSending)
+    }
+
     private var messageListTopInset: CGFloat {
         0
     }
@@ -1223,6 +1297,8 @@ struct ChatDetailView: View {
 
                 if voiceRecorder.isRecording {
                     recordingComposerStatusView
+                } else if hasPendingAudioAttachment {
+                    Spacer(minLength: 0)
                 } else {
                     TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
                         .foregroundStyle(shouldUseDarkComposerChrome ? Color.white : Color.primary)
@@ -1233,32 +1309,35 @@ struct ChatDetailView: View {
                         .lineLimit(1...4)
                 }
 
-                Button(action: handleMicrophoneButtonTap) {
-                    Image(systemName: "mic.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(voiceRecorder.isRecording ? .red : composerSecondaryForegroundColor)
-                        .frame(width: metrics.inlineAccessorySize, height: metrics.inlineAccessorySize)
+                if !voiceRecorder.isRecording {
+                    microphoneInlineButton(
+                        size: metrics.inlineAccessorySize,
+                        foreground: composerSecondaryForegroundColor
+                    )
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Microphone")
-                .disabled(isSending || (pendingAttachment != nil && !voiceRecorder.isRecording))
             }
             .padding(.horizontal, metrics.fieldHorizontalPadding)
             .padding(.vertical, metrics.fieldVerticalPadding)
             .background(composerFieldChrome(cornerRadius: metrics.fieldCornerRadius))
             .frame(maxWidth: .infinity, minHeight: metrics.fieldMinHeight, alignment: .leading)
 
-            LiquidStretchSendButton(
-                isEnabled: canSendMessage,
-                action: sendMessage,
-                size: metrics.sendButtonSize,
-                gradientColors: sendButtonGradientColors,
-                allowsLiquidInteraction: true,
-                sharedStretchProgress: modernSendButtonSharedStretchProgress,
-                contrastBoost: isLightChatBackground
-            )
-            .frame(width: metrics.sendButtonSize, height: metrics.sendButtonSize, alignment: .center)
-            .frame(height: metrics.fieldMinHeight, alignment: .center)
+            if voiceRecorder.isRecording {
+                voiceRecordingStopButton(size: metrics.sendButtonSize)
+                    .frame(width: metrics.sendButtonSize, height: metrics.sendButtonSize, alignment: .center)
+                    .frame(height: metrics.fieldMinHeight, alignment: .center)
+            } else {
+                LiquidStretchSendButton(
+                    isEnabled: canSendMessage,
+                    action: sendMessage,
+                    size: metrics.sendButtonSize,
+                    gradientColors: sendButtonGradientColors,
+                    allowsLiquidInteraction: true,
+                    sharedStretchProgress: modernSendButtonSharedStretchProgress,
+                    contrastBoost: isLightChatBackground
+                )
+                .frame(width: metrics.sendButtonSize, height: metrics.sendButtonSize, alignment: .center)
+                .frame(height: metrics.fieldMinHeight, alignment: .center)
+            }
         }
         .animation(.spring(response: 0.28, dampingFraction: 0.84), value: metrics.progress)
     }
@@ -1284,6 +1363,8 @@ struct ChatDetailView: View {
 
                 if voiceRecorder.isRecording {
                     recordingComposerStatusView
+                } else if hasPendingAudioAttachment {
+                    Spacer(minLength: 0)
                 } else {
                     TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
                         .foregroundStyle(.primary)
@@ -1294,22 +1375,19 @@ struct ChatDetailView: View {
                         .lineLimit(1...4)
                 }
 
-                Button(action: handleMicrophoneButtonTap) {
-                    Image(systemName: "mic.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(voiceRecorder.isRecording ? .red : .secondary)
-                        .frame(width: 28, height: 28)
+                if !voiceRecorder.isRecording {
+                    microphoneInlineButton(size: 28, foreground: .secondary)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Microphone")
-                .disabled(isSending || (pendingAttachment != nil && !voiceRecorder.isRecording))
             }
             .padding(.horizontal, usesIOS18LegacyChatChrome ? 13 : 14)
             .padding(.vertical, usesIOS18LegacyChatChrome ? 7 : 10)
             .background(legacyComposerFieldChrome(cornerRadius: usesIOS18LegacyChatChrome ? 20 : 23))
             .frame(maxWidth: .infinity, minHeight: usesIOS18LegacyChatChrome ? 42 : 46, alignment: .leading)
 
-            if usesIOS18LegacyChatChrome {
+            if voiceRecorder.isRecording {
+                voiceRecordingStopButton(size: usesIOS18LegacyChatChrome ? 40 : 44)
+                    .frame(width: usesIOS18LegacyChatChrome ? 40 : 44, height: usesIOS18LegacyChatChrome ? 40 : 44, alignment: .center)
+            } else if usesIOS18LegacyChatChrome {
                 legacySendButton
                     .frame(width: 40, height: 40, alignment: .center)
             } else {
@@ -2128,16 +2206,19 @@ struct ChatDetailView: View {
             }
 
         case .audio:
+            let playbackKey = remoteAudioPlaybackKey(for: attachment)
+            let isPlaying = audioPlayback.activeKey == playbackKey
             audioAttachmentCard(
-                title: L10n.tr("chat.attachment.audio"),
-                subtitle: formatAudioDuration(attachment.duration),
-                isLoading: audioPlayback.loadingKey == remoteAudioPlaybackKey(for: attachment),
-                isPlaying: audioPlayback.activeKey == remoteAudioPlaybackKey(for: attachment)
+                duration: audioPlayback.displayDuration(for: playbackKey, fallbackDuration: attachment.duration),
+                currentTime: audioPlayback.currentTime(for: playbackKey),
+                isLoading: audioPlayback.loadingKey == playbackKey,
+                isPlaying: isPlaying,
+                isCompact: false
             ) {
                 Task {
                     await audioPlayback.toggleRemoteAttachment(
                         attachment,
-                        key: remoteAudioPlaybackKey(for: attachment)
+                        key: playbackKey
                     ) {
                         try await services.backend.fetchAttachmentData(fileId: attachment.fileId)
                     }
@@ -2185,21 +2266,25 @@ struct ChatDetailView: View {
     }
 
     private func pendingAudioAttachmentPreview(_ attachment: PendingChatAttachment) -> some View {
-        ZStack(alignment: .topTrailing) {
+        let playbackKey = pendingAudioPlaybackKey(for: attachment)
+        let isPlaying = audioPlayback.activeKey == playbackKey
+
+        return ZStack(alignment: .topTrailing) {
             audioAttachmentCard(
-                title: L10n.tr("chat.attachment.audio"),
-                subtitle: formatAudioDuration(attachment.duration),
+                duration: audioPlayback.displayDuration(for: playbackKey, fallbackDuration: attachment.duration),
+                currentTime: audioPlayback.currentTime(for: playbackKey),
                 isLoading: false,
-                isPlaying: audioPlayback.activeKey == pendingAudioPlaybackKey(for: attachment)
+                isPlaying: isPlaying,
+                isCompact: true
             ) {
                 Task {
                     await audioPlayback.togglePendingAttachment(
                         attachment,
-                        key: pendingAudioPlaybackKey(for: attachment)
+                        key: playbackKey
                     )
                 }
             }
-            .frame(maxWidth: 184, alignment: .leading)
+            .frame(maxWidth: 214, alignment: .leading)
 
             Button {
                 clearPendingAttachment()
@@ -2216,45 +2301,100 @@ struct ChatDetailView: View {
     }
 
     private func audioAttachmentCard(
-        title: String,
-        subtitle: String,
+        duration: TimeInterval,
+        currentTime: TimeInterval,
         isLoading: Bool,
         isPlaying: Bool,
+        isCompact: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
+        let resolvedDuration = max(0, duration)
+        let progress = resolvedDuration > 0 ? CGFloat(min(max(currentTime / resolvedDuration, 0), 1)) : 0
+        let remainingTime = isPlaying && resolvedDuration > 0 ? max(0, resolvedDuration - currentTime) : resolvedDuration
+
+        return HStack(spacing: isCompact ? 8 : 10) {
+            Button(action: action) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(.white.opacity(0.08))
-                        .frame(width: 38, height: 38)
+                    Circle()
+                        .fill(audioPlayerButtonFill)
+                        .frame(width: isCompact ? 32 : 38, height: isCompact ? 32 : 38)
 
                     if isLoading {
                         ProgressView()
                             .controlSize(.small)
+                            .tint(.orange)
                     } else {
-                        Image(systemName: isPlaying ? "stop.fill" : "play.fill")
-                            .font(.subheadline.weight(.semibold))
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: isCompact ? 13 : 15, weight: .bold))
                             .foregroundStyle(.orange)
+                            .offset(x: isPlaying ? 0 : 1)
                     }
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 0)
             }
-            .frame(maxWidth: min(messageMaxWidth, 240), alignment: .leading)
+            .buttonStyle(.plain)
+
+            VoiceWaveformProgressView(
+                progress: progress,
+                isPlaying: isPlaying,
+                tint: .orange,
+                trackTint: audioPlayerWaveformTrackTint
+            )
+            .frame(maxWidth: .infinity)
+
+            Text(formatAudioDuration(Int(remainingTime.rounded())))
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(audioPlayerSecondaryText)
+                .frame(minWidth: 38, alignment: .trailing)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, isCompact ? 9 : 11)
+        .padding(.vertical, isCompact ? 7 : 9)
+        .frame(maxWidth: isCompact ? 214 : min(messageMaxWidth, 256), alignment: .leading)
+        .background(audioPlayerChrome)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(L10n.tr("chat.attachment.audio"))
+    }
+
+    @ViewBuilder
+    private var audioPlayerChrome: some View {
+        let shape = Capsule(style: .continuous)
+
+        if #available(iOS 26.0, *) {
+            shape
+                .fill(.clear)
+                .glassEffect(in: shape)
+                .overlay {
+                    shape
+                        .stroke(.white.opacity(colorScheme == .dark ? 0.18 : 0.26), lineWidth: 0.8)
+                }
+        } else {
+            shape
+                .fill(audioPlayerLegacyFill)
+                .overlay {
+                    shape
+                        .stroke(audioPlayerLegacyStroke, lineWidth: 0.8)
+                }
+        }
+    }
+
+    private var audioPlayerLegacyFill: Color {
+        Color(uiColor: colorScheme == .dark ? .tertiarySystemBackground : .secondarySystemGroupedBackground)
+            .opacity(colorScheme == .dark ? 0.74 : 0.84)
+    }
+
+    private var audioPlayerLegacyStroke: Color {
+        colorScheme == .dark ? .white.opacity(0.09) : .black.opacity(0.06)
+    }
+
+    private var audioPlayerButtonFill: Color {
+        colorScheme == .dark ? .white.opacity(0.12) : .white.opacity(0.78)
+    }
+
+    private var audioPlayerWaveformTrackTint: Color {
+        colorScheme == .dark ? .white.opacity(0.24) : .black.opacity(0.18)
+    }
+
+    private var audioPlayerSecondaryText: Color {
+        colorScheme == .dark ? .white.opacity(0.72) : .secondary
     }
 
     private func pendingAudioPlaybackKey(for attachment: PendingChatAttachment) -> String {
@@ -2759,6 +2899,10 @@ struct ChatDetailView: View {
             )
             await MainActor.run {
                 pendingAttachment = resolved
+                if resolved.type == .audio {
+                    draft = ""
+                    isInputFocused = false
+                }
                 sendErrorMessage = nil
             }
         } catch {
@@ -2785,6 +2929,10 @@ struct ChatDetailView: View {
                 fileName: url.lastPathComponent,
                 contentType: contentType
             )
+            if pendingAttachment?.type == .audio {
+                draft = ""
+                isInputFocused = false
+            }
             sendErrorMessage = nil
         } catch {
             sendErrorMessage = error.localizedDescription
@@ -2861,8 +3009,11 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
 
     @Published private(set) var activeKey: String?
     @Published private(set) var loadingKey: String?
+    @Published private(set) var currentTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
 
     private var player: AVAudioPlayer?
+    private var progressTimer: Timer?
 
     override init() {
         objectWillChange = ObservableObjectPublisher()
@@ -2921,6 +3072,9 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
         player = nil
         activeKey = nil
         loadingKey = nil
+        currentTime = 0
+        duration = 0
+        stopProgressTimer()
     }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -2933,14 +3087,46 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
         self.player = player
         self.player?.delegate = self
         self.player?.prepareToPlay()
+        currentTime = 0
+        duration = player.duration
         self.player?.play()
         activeKey = key
+        startProgressTimer()
     }
 
     private func configurePlaybackSession() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playback, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
         try session.setActive(true)
+    }
+
+    func currentTime(for key: String) -> TimeInterval {
+        activeKey == key ? currentTime : 0
+    }
+
+    func displayDuration(for key: String, fallbackDuration: Int?) -> TimeInterval {
+        if activeKey == key, duration > 0 {
+            return duration
+        }
+
+        return TimeInterval(max(0, fallbackDuration ?? 0))
+    }
+
+    private func startProgressTimer() {
+        stopProgressTimer()
+        progressTimer = Timer.scheduledTimer(timeInterval: 0.08, target: self, selector: #selector(updatePlaybackProgress), userInfo: nil, repeats: true)
+    }
+
+    private func stopProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+
+    @objc
+    private func updatePlaybackProgress() {
+        guard let player else { return }
+        currentTime = player.currentTime
+        duration = player.duration
     }
 }
 
