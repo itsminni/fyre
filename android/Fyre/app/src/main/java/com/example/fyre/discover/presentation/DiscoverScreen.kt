@@ -117,14 +117,7 @@ fun DiscoverScreen(
         isLoading = false
     }
 
-    val filteredProfiles = profiles.filter { profile ->
-        val verifiedAllowed = !discoveryPreferences.showOnlyVerified || profile.isVerified
-        val ageAllowed = profile.age in discoveryPreferences.minAge..discoveryPreferences.maxAge
-        val distanceAllowed = profile.distanceKm <= discoveryPreferences.maxDistanceKm
-        val intentAllowed = matchesIntentFilter(profile.intent, discoveryPreferences.intent)
-
-        verifiedAllowed && ageAllowed && distanceAllowed && intentAllowed
-    }
+    val filteredProfiles = discoverProfilesForDisplay(profiles, discoveryPreferences)
 
     val currentProfile = filteredProfiles.getOrNull(currentIndex)
     val nextProfile = filteredProfiles.getOrNull(currentIndex + 1)
@@ -403,13 +396,29 @@ private enum class SwipeDecision {
     Skip
 }
 
-private fun matchesIntentFilter(profileIntent: String, filter: String): Boolean {
+internal fun discoverProfilesForDisplay(
+    profiles: List<DiscoveryProfile>,
+    discoveryPreferences: DiscoveryPreferences
+): List<DiscoveryProfile> {
+    val filtered = profiles.filter { profile ->
+        val verifiedAllowed = !discoveryPreferences.showOnlyVerified || profile.isVerified
+        val ageAllowed = profile.age in discoveryPreferences.minAge..discoveryPreferences.maxAge
+        val distanceAllowed = profile.distanceKm <= 0 || profile.distanceKm <= discoveryPreferences.maxDistanceKm
+        val intentAllowed = matchesIntentFilter(profile.intent, discoveryPreferences.intent)
+
+        verifiedAllowed && ageAllowed && distanceAllowed && intentAllowed
+    }
+
+    return filtered.ifEmpty { profiles }
+}
+
+internal fun matchesIntentFilter(profileIntent: String, filter: String): Boolean {
     val normalizedFilter = normalizeIntent(filter)
     if (normalizedFilter == "all") return true
     return normalizeIntent(profileIntent) == normalizedFilter
 }
 
-private fun normalizeIntent(value: String): String {
+internal fun normalizeIntent(value: String): String {
     val normalized = value.trim().lowercase().replace(Regex("[\\s_-]+"), "")
     return when {
         normalized.isBlank() || normalized == "tutti" || normalized == "all" -> "all"

@@ -106,10 +106,21 @@ class AppwriteDiscoveryRepository(
             return compatibleProfiles
         }
 
-        return rows
+        val relaxedProfiles = rows
             .asSequence()
             .filter { row -> candidateUserId(row) != currentUserId }
             .filter { row -> isFallbackDiscoverableCandidate(row, currentContext) }
+            .mapNotNull { row -> mapProfile(row, currentContext) }
+            .rankedProfiles()
+
+        if (relaxedProfiles.isNotEmpty()) {
+            return relaxedProfiles
+        }
+
+        return rows
+            .asSequence()
+            .filter { row -> candidateUserId(row) != currentUserId }
+            .filter { row -> isBasicDiscoverableCandidate(row) }
             .mapNotNull { row -> mapProfile(row, currentContext) }
             .rankedProfiles()
     }
@@ -159,6 +170,10 @@ class AppwriteDiscoveryRepository(
     }
 
     private fun isFallbackDiscoverableCandidate(row: JsonObject, currentUser: ProfileContext): Boolean {
+        if (!isProfileReady(row)) {
+            return false
+        }
+
         val candidate = profileContext(row) ?: return false
         val candidateGender = candidate.gender ?: return false
 
@@ -174,38 +189,25 @@ class AppwriteDiscoveryRepository(
             return false
         }
 
-        val currentGender = currentUser.gender
-        if (
-            currentGender != null &&
-            hasExplicitPreferredGenders(row) &&
-            currentGender !in candidate.preferredGenders
-        ) {
-            return false
-        }
-
-        if (
-            currentUser.age >= 18 &&
-            hasExplicitPreferredAgeRange(row) &&
-            currentUser.age !in candidate.minPreferredAge..candidate.maxPreferredAge
-        ) {
-            return false
-        }
-
         val distanceKm = distanceKmBetween(currentUser, candidate)
-        if (distanceKm != null) {
-            if (currentUser.maxDistanceKm != null && distanceKm > currentUser.maxDistanceKm) {
-                return false
-            }
-            if (
-                candidate.maxDistanceKm != null &&
-                hasExplicitMaxDistance(row) &&
-                distanceKm > candidate.maxDistanceKm
-            ) {
-                return false
-            }
+        if (distanceKm != null && currentUser.maxDistanceKm != null && distanceKm > currentUser.maxDistanceKm) {
+            return false
         }
 
         return true
+    }
+
+    private fun isBasicDiscoverableCandidate(row: JsonObject): Boolean {
+        if (!isProfileReady(row)) {
+            return false
+        }
+
+        val candidate = profileContext(row) ?: return false
+        if (candidate.gender == null) {
+            return false
+        }
+
+        return candidate.age == 0 || candidate.age >= 18
     }
 
     private fun isProfileReady(row: JsonObject): Boolean {
@@ -255,24 +257,6 @@ class AppwriteDiscoveryRepository(
         return (fromArray + fromCsv)
             .distinct()
             .ifEmpty { AllGenders }
-    }
-
-    private fun hasExplicitPreferredGenders(row: JsonObject): Boolean {
-        return row.arrayOrEmpty("preferredGenders").size() > 0 ||
-            !row.stringOrNull("preferredGenders").isNullOrBlank()
-    }
-
-    private fun hasExplicitPreferredAgeRange(row: JsonObject): Boolean {
-        return row.hasNonNull("minPreferredAge") || row.hasNonNull("maxPreferredAge")
-    }
-
-    private fun hasExplicitMaxDistance(row: JsonObject): Boolean {
-        return row.hasNonNull("maxDistanceKm")
-    }
-
-    private fun JsonObject.hasNonNull(key: String): Boolean {
-        val element = this[key] ?: return false
-        return !element.isJsonNull
     }
 
     private fun candidateUserId(row: JsonObject): String? {
