@@ -9,9 +9,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
@@ -30,10 +33,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,9 +99,10 @@ fun DiscoverScreen(
 
     var currentIndex by rememberSaveable { mutableIntStateOf(0) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var pendingDecision by remember { mutableStateOf<SwipeDecision?>(null) }
     var matchPayload by remember { mutableStateOf<MatchPayload?>(null) }
-    var expandedProfileId by remember { mutableStateOf<String?>(null) }
+    var selectedDetailsProfile by remember { mutableStateOf<DiscoveryProfile?>(null) }
     val activePhotoIndices = remember { mutableStateMapOf<String, Int>() }
 
     LaunchedEffect(discoveryRepository) {
@@ -122,6 +129,7 @@ fun DiscoverScreen(
     val currentProfile = filteredProfiles.getOrNull(currentIndex)
     val nextProfile = filteredProfiles.getOrNull(currentIndex + 1)
     val swipeThreshold = 160f
+    val detailsSwipeThreshold = 92f
 
     val animatedOffsetX by animateFloatAsState(
         targetValue = dragOffsetX,
@@ -161,8 +169,9 @@ fun DiscoverScreen(
 
         currentIndex = (currentIndex + 1).coerceAtMost(filteredProfiles.size)
         dragOffsetX = 0f
+        dragOffsetY = 0f
         pendingDecision = null
-        expandedProfileId = null
+        selectedDetailsProfile = null
         isSubmittingDecision = false
     }
 
@@ -245,7 +254,7 @@ fun DiscoverScreen(
                     photoIndex = activePhotoIndices[nextProfile.id] ?: 0,
                     detailsExpanded = false,
                     onShiftPhoto = { },
-                    onToggleDetails = { },
+                    onOpenDetails = { },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 16.dp)
@@ -261,7 +270,7 @@ fun DiscoverScreen(
                 profile = currentProfile,
                 discoveryPreferences = discoveryPreferences,
                 photoIndex = activePhotoIndices[currentProfile.id] ?: 0,
-                detailsExpanded = expandedProfileId == currentProfile.id,
+                detailsExpanded = false,
                 onShiftPhoto = { delta ->
                     val lastIndex = currentProfile.photoUrls.lastIndex
                     if (lastIndex >= 0) {
@@ -269,8 +278,8 @@ fun DiscoverScreen(
                         activePhotoIndices[currentProfile.id] = (currentPhoto + delta).coerceIn(0, lastIndex)
                     }
                 },
-                onToggleDetails = {
-                    expandedProfileId = if (expandedProfileId == currentProfile.id) null else currentProfile.id
+                onOpenDetails = {
+                    selectedDetailsProfile = currentProfile
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -284,15 +293,23 @@ fun DiscoverScreen(
                                 if (pendingDecision != null || isSubmittingDecision) return@detectDragGestures
                                 change.consume()
                                 dragOffsetX += dragAmount.x
+                                dragOffsetY += dragAmount.y
                             },
                             onDragCancel = {
                                 if (pendingDecision == null && !isSubmittingDecision) {
                                     dragOffsetX = 0f
+                                    dragOffsetY = 0f
                                 }
                             },
                             onDragEnd = {
                                 if (pendingDecision != null || isSubmittingDecision) return@detectDragGestures
-                                if (abs(dragOffsetX) >= swipeThreshold) {
+                                val horizontalDistance = abs(dragOffsetX)
+                                val verticalDistance = abs(dragOffsetY)
+                                if (verticalDistance > horizontalDistance && dragOffsetY <= -detailsSwipeThreshold) {
+                                    selectedDetailsProfile = currentProfile
+                                    dragOffsetX = 0f
+                                    dragOffsetY = 0f
+                                } else if (horizontalDistance > verticalDistance && horizontalDistance >= swipeThreshold) {
                                     val decision = if (dragOffsetX.sign >= 0f) {
                                         SwipeDecision.Like
                                     } else {
@@ -301,6 +318,7 @@ fun DiscoverScreen(
                                     triggerDecision(decision)
                                 } else {
                                     dragOffsetX = 0f
+                                    dragOffsetY = 0f
                                 }
                             }
                         )
@@ -384,6 +402,14 @@ fun DiscoverScreen(
             }
         }
     }
+
+    selectedDetailsProfile?.let { profile ->
+        DiscoverProfileDetailsSheet(
+            profile = profile,
+            discoveryPreferences = discoveryPreferences,
+            onDismiss = { selectedDetailsProfile = null }
+        )
+    }
 }
 
 private data class MatchPayload(
@@ -437,7 +463,7 @@ private fun DiscoveryCard(
     photoIndex: Int,
     detailsExpanded: Boolean,
     onShiftPhoto: (Int) -> Unit,
-    onToggleDetails: () -> Unit,
+    onOpenDetails: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val safePhotoIndex = photoIndex.coerceIn(0, profile.photoUrls.lastIndex.coerceAtLeast(0))
@@ -590,7 +616,7 @@ private fun DiscoveryCard(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Button(onClick = onToggleDetails, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = onOpenDetails, modifier = Modifier.fillMaxWidth()) {
                     Text(
                         if (detailsExpanded) {
                             stringResource(R.string.discover_details_close)
@@ -670,6 +696,184 @@ private fun DiscoveryCard(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DiscoverProfileDetailsSheet(
+    profile: DiscoveryProfile,
+    discoveryPreferences: DiscoveryPreferences,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = if (discoveryPreferences.showAge) {
+                        stringResource(R.string.discover_profile_name_age, profile.name, profile.age)
+                    } else {
+                        stringResource(R.string.discover_profile_name, profile.name)
+                    },
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                if (profile.city.isNotBlank()) {
+                    Text(
+                        text = if (discoveryPreferences.showDistance && profile.distanceKm > 0) {
+                            stringResource(R.string.discover_profile_city_distance, profile.city, profile.distanceKm)
+                        } else {
+                            stringResource(R.string.discover_profile_city, profile.city)
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            DetailsSection(title = stringResource(R.string.discover_details_info)) {
+                DetailsRow(label = stringResource(R.string.profile_gender), value = genderLabel(profile.gender))
+                DetailsRow(label = stringResource(R.string.profile_orientation), value = orientationLabel(profile.orientation))
+                DetailsRow(label = stringResource(R.string.profile_intent), value = intentLabel(profile.intent))
+                DetailsRow(label = stringResource(R.string.profile_smokes), value = yesNoLabel(profile.smokes))
+                DetailsRow(label = stringResource(R.string.profile_drinks), value = yesNoLabel(profile.drinks))
+            }
+
+            if (profile.bio.isNotBlank()) {
+                DetailsSection(title = stringResource(R.string.discover_details_bio)) {
+                    Text(text = profile.bio, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            if (discoveryPreferences.showInterests && profile.interests.isNotEmpty()) {
+                DetailsSection(title = stringResource(R.string.discover_interests)) {
+                    TagList(tags = profile.interests)
+                }
+            }
+
+            val visibleSocialTags = profile.socialTags.filter { tag ->
+                when {
+                    tag.startsWith("@") -> discoveryPreferences.showInstagramTag
+                    tag.contains("spotify", ignoreCase = true) -> discoveryPreferences.showSpotifyTag
+                    else -> discoveryPreferences.showInstagramTag || discoveryPreferences.showSpotifyTag
+                }
+            }
+            if (visibleSocialTags.isNotEmpty()) {
+                DetailsSection(title = stringResource(R.string.discover_social_tags)) {
+                    TagList(tags = visibleSocialTags)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailsSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f)
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            content()
+        }
+    }
+}
+
+@Composable
+private fun DetailsRow(label: String, value: String?) {
+    if (value.isNullOrBlank()) return
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun genderLabel(value: String?): String? {
+    return when (value.normalizedToken()) {
+        "male" -> stringResource(R.string.profile_gender_male)
+        "female" -> stringResource(R.string.profile_gender_female)
+        "nonbinary" -> stringResource(R.string.profile_gender_non_binary)
+        "other" -> stringResource(R.string.profile_gender_other)
+        else -> value?.trim()?.takeIf { it.isNotBlank() }
+    }
+}
+
+@Composable
+private fun orientationLabel(value: String?): String? {
+    return when (value.normalizedToken()) {
+        "straight" -> stringResource(R.string.profile_orientation_straight)
+        "gay" -> stringResource(R.string.profile_orientation_gay)
+        "lesbian" -> stringResource(R.string.profile_orientation_lesbian)
+        "bisexual" -> stringResource(R.string.profile_orientation_bisexual)
+        "pansexual" -> stringResource(R.string.profile_orientation_pansexual)
+        "other" -> stringResource(R.string.profile_orientation_other)
+        else -> value?.trim()?.takeIf { it.isNotBlank() }
+    }
+}
+
+@Composable
+private fun intentLabel(value: String?): String? {
+    return when (normalizeIntent(value.orEmpty())) {
+        "relationship" -> stringResource(R.string.profile_intent_relationship)
+        "casual" -> stringResource(R.string.profile_intent_casual)
+        "friendship" -> stringResource(R.string.profile_intent_friendship)
+        "notSure" -> stringResource(R.string.profile_intent_not_sure)
+        else -> value?.trim()?.takeIf { it.isNotBlank() }
+    }
+}
+
+@Composable
+private fun yesNoLabel(value: Boolean?): String? {
+    return when (value) {
+        true -> stringResource(R.string.discover_details_yes)
+        false -> stringResource(R.string.discover_details_no)
+        null -> null
+    }
+}
+
+private fun String?.normalizedToken(): String? {
+    val trimmed = this?.trim().orEmpty()
+    if (trimmed.isBlank()) return null
+    return trimmed.lowercase().replace(Regex("[\\s_-]+"), "")
 }
 
 @Composable

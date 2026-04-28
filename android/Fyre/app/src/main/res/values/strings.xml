@@ -201,11 +201,14 @@
     <string name="discover_profile_city">%1$s</string>
     <string name="discover_photo_counter">Foto %1$d/%2$d</string>
     <string name="discover_compatibility">%1$d%% compatibile</string>
-    <string name="discover_details_open">Swipe up per foto e dettagli</string>
+    <string name="discover_details_open">Dettagli profilo</string>
     <string name="discover_details_close">Chiudi dettagli</string>
     <string name="discover_details_title">Dettagli profilo</string>
+    <string name="discover_details_info">Informazioni</string>
     <string name="discover_details_gallery">Galleria</string>
     <string name="discover_details_bio">Bio</string>
+    <string name="discover_details_yes">Si</string>
+    <string name="discover_details_no">No</string>
     <string name="discover_verified_chip">Profilo verificato</string>
     <string name="discover_intent">Intent: %1$s</string>
     <string name="discover_interests">Interessi</string>

@@ -16,6 +16,8 @@ data class DiscoveryProfile(
     val socialTags: List<String>,
     val photoUrls: List<String> = emptyList(),
     val compatibilityScore: Int = 82,
+    val gender: String? = null,
+    val orientation: String? = null,
     val smokes: Boolean? = null,
     val drinks: Boolean? = null
 )

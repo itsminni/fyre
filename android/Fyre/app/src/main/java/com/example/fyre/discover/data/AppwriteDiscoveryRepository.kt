@@ -489,6 +489,8 @@ class AppwriteDiscoveryRepository(
             photoUrls = photoUrls,
             compatibilityScore = (row.intOrNull("compatibilityScore") ?: row.intOrNull("compatibility") ?: 82)
                 .coerceIn(1, 100),
+            gender = normalizeGender(row.stringOrNull("gender")),
+            orientation = normalizeOrientation(row.stringOrNull("orientation")),
             smokes = row.booleanOrNull("smokes"),
             drinks = row.booleanOrNull("drinks")
         )
@@ -497,6 +499,18 @@ class AppwriteDiscoveryRepository(
     private fun socialTag(value: String): String? {
         val normalized = value.trim().removePrefix("@").takeIf { it.isNotBlank() } ?: return null
         return "@$normalized"
+    }
+
+    private fun normalizeOrientation(value: String?): String? {
+        return when (value?.replace(Regex("[\\s_-]"), "")?.lowercase(Locale.ROOT)) {
+            "straight" -> "straight"
+            "gay" -> "gay"
+            "lesbian" -> "lesbian"
+            "bisexual" -> "bisexual"
+            "pansexual" -> "pansexual"
+            "other" -> "other"
+            else -> null
+        }
     }
 
     private fun Sequence<DiscoveryProfile>.rankedProfiles(): List<DiscoveryProfile> {
