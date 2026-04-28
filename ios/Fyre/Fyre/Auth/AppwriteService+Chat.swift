@@ -89,9 +89,15 @@ extension AppwriteService {
             body["attachmentName"] = uploadedAttachment.name
             body["attachmentMimeType"] = uploadedAttachment.mimeType
             body["attachmentSize"] = uploadedAttachment.size
-            body["attachmentWidth"] = uploadedAttachment.width as Any
-            body["attachmentHeight"] = uploadedAttachment.height as Any
-            body["attachmentDuration"] = uploadedAttachment.duration as Any
+            if let width = uploadedAttachment.width {
+                body["attachmentWidth"] = width
+            }
+            if let height = uploadedAttachment.height {
+                body["attachmentHeight"] = height
+            }
+            if let duration = uploadedAttachment.duration {
+                body["attachmentDuration"] = duration
+            }
         }
 
         do {
@@ -522,9 +528,37 @@ private extension AppwriteService {
     }
 
     func threadAvatarURLString(from profileRow: [String: Any]?) -> String {
-        guard let fileId = stringValue(forKey: "avatarFileId", in: profileRow), !fileId.isEmpty else {
-            return ""
+        if let fileId = threadAvatarFileId(from: profileRow),
+           let storageURL = threadAvatarStorageURL(fileId: fileId) {
+            return storageURL.absoluteString
         }
+
+        if let directURL = threadDirectAvatarURL(from: profileRow) {
+            return directURL.absoluteString
+        }
+
+        return ""
+    }
+
+    private func threadAvatarFileId(from profileRow: [String: Any]?) -> String? {
+        let fileIdKeys = [
+            "avatarFileId",
+            "profileImageFileId",
+            "profilePhotoFileId",
+            "imageFileId"
+        ]
+
+        for key in fileIdKeys {
+            if let fileId = stringValue(forKey: key, in: profileRow) {
+                return fileId
+            }
+        }
+
+        return chatStringArrayValue(forKey: "photoFileIds", in: profileRow).first
+    }
+
+    private func threadAvatarStorageURL(fileId: String) -> URL? {
+        guard !fileId.isEmpty else { return nil }
 
         var url = configuration.endpointURL
         url.appendPathComponent("storage")
@@ -538,7 +572,69 @@ private extension AppwriteService {
         components?.queryItems = [
             URLQueryItem(name: "project", value: configuration.projectId)
         ]
-        return components?.url?.absoluteString ?? ""
+        return components?.url
+    }
+
+    private func threadDirectAvatarURL(from profileRow: [String: Any]?) -> URL? {
+        let urlKeys = [
+            "avatar",
+            "avatarUrl",
+            "profileImageUrl",
+            "profilePhotoUrl",
+            "imageUrl"
+        ]
+
+        for key in urlKeys {
+            if let value = stringValue(forKey: key, in: profileRow),
+               let parsed = URL(string: value),
+               let scheme = parsed.scheme?.lowercased(),
+               scheme == "http" || scheme == "https" {
+                return parsed
+            }
+        }
+
+        let photoURLKeys = ["photos", "profilePhotos"]
+        return photoURLKeys
+            .lazy
+            .flatMap { self.chatStringArrayValue(forKey: $0, in: profileRow) }
+            .lazy
+            .compactMap { URL(string: $0) }
+            .first
+    }
+
+    private func chatStringArrayValue(forKey key: String, in dictionary: [String: Any]?) -> [String] {
+        if let values = dictionary?[key] as? [String] {
+            return values
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        if let values = dictionary?[key] as? [Any] {
+            return values
+                .compactMap { $0 as? String }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        if let rawValue = dictionary?[key] as? String {
+            let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return [] }
+
+            if trimmed.hasPrefix("["),
+               let data = trimmed.data(using: .utf8),
+               let decodedArray = try? JSONDecoder().decode([String].self, from: data) {
+                return decodedArray
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+
+            return trimmed
+                .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == "|" })
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        return []
     }
 
     func recoverRecentlySentMessage(threadId: String, text: String, replyToMessageId: String?, attachmentFileId: String?, notBefore: Date) async throws -> MessageDTO? {
