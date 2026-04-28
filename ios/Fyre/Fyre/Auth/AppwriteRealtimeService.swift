@@ -268,13 +268,18 @@ enum AppwriteRealtimeService {
             return nil
         }
 
+        var channels = [
+            configuration.messagesRealtimeChannel,
+            configuration.threadsRealtimeChannel,
+            configuration.threadParticipantsRealtimeChannel
+        ]
+        if let matchesChannel = configuration.matchesRealtimeChannel {
+            channels.append(matchesChannel)
+        }
+
         let subscription = AppwriteRealtimeSubscription(
             configuration: configuration,
-            channels: [
-                configuration.messagesRealtimeChannel,
-                configuration.threadsRealtimeChannel,
-                configuration.threadParticipantsRealtimeChannel
-            ],
+            channels: channels,
             onEvent: { event in
                 guard event.isMutation else { return }
                 onEvent(event)
