@@ -38,6 +38,7 @@ struct ProfileSetupView: View {
     @State private var hasHydratedFromUser = false
 
     private let maxProfilePhotoCount = 6
+    private let profilePhotoDragPayloadPrefix = "fyre-profile-photo:"
 
     var body: some View {
         NavigationStack {
@@ -254,78 +255,52 @@ struct ProfileSetupView: View {
     }
 
     private func profilePhotoThumbnail(data: Data, index: Int) -> some View {
-        VStack(spacing: 8) {
-            ZStack(alignment: .topTrailing) {
-                Group {
-                    if let uiImage = UIImage(data: data) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(.secondary.opacity(0.12))
-                            .overlay {
-                                Image(systemName: "photo")
-                                    .foregroundStyle(.secondary)
-                            }
-                    }
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.secondary.opacity(0.12))
+                        .overlay {
+                            Image(systemName: "photo")
+                                .foregroundStyle(.secondary)
+                        }
                 }
-                .frame(width: 86, height: 112)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(alignment: .bottomLeading) {
-                    if index == 0 {
-                        Text(L10n.tr("profile.photo.primaryBadge"))
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.orange.opacity(0.92), in: Capsule(style: .continuous))
-                            .padding(7)
-                    }
-                }
-
-                Button {
-                    removeProfilePhoto(at: index)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.bold))
+            }
+            .frame(width: 86, height: 112)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(alignment: .bottomLeading) {
+                if index == 0 {
+                    Text(L10n.tr("profile.photo.primaryBadge"))
+                        .font(.caption2.weight(.bold))
                         .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
-                        .background(.black.opacity(0.72), in: Circle())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(.orange.opacity(0.92), in: Capsule(style: .continuous))
+                        .padding(7)
                 }
-                .buttonStyle(.plain)
-                .padding(7)
-                .accessibilityLabel(L10n.tr("profile.photo.remove"))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .draggable(profilePhotoDragPayload(for: index))
+            .dropDestination(for: String.self) { payloads, _ in
+                handleProfilePhotoDrop(payloads, at: index)
             }
 
-            HStack(spacing: 6) {
-                Button {
-                    moveProfilePhoto(at: index, by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.caption.weight(.bold))
-                        .frame(width: 24, height: 24)
-                }
-                .disabled(index == 0)
-                .opacity(index == 0 ? 0.35 : 1)
-
-                Text("\(index + 1)")
+            Button {
+                removeProfilePhoto(at: index)
+            } label: {
+                Image(systemName: "xmark")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-
-                Button {
-                    moveProfilePhoto(at: index, by: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .frame(width: 24, height: 24)
-                }
-                .disabled(index >= currentProfilePhotoDataItems.count - 1)
-                .opacity(index >= currentProfilePhotoDataItems.count - 1 ? 0.35 : 1)
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .background(.black.opacity(0.72), in: Circle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.orange)
+            .padding(7)
+            .accessibilityLabel(L10n.tr("profile.photo.remove"))
         }
         .frame(width: 86)
     }
@@ -357,17 +332,39 @@ struct ProfileSetupView: View {
         }
     }
 
-    private func moveProfilePhoto(at index: Int, by delta: Int) {
-        let targetIndex = index + delta
-        guard currentProfilePhotoDataItems.indices.contains(index),
-              currentProfilePhotoDataItems.indices.contains(targetIndex) else { return }
+    private func profilePhotoDragPayload(for index: Int) -> String {
+        "\(profilePhotoDragPayloadPrefix)\(index)"
+    }
+
+    private func profilePhotoDragIndex(from payload: String) -> Int? {
+        guard payload.hasPrefix(profilePhotoDragPayloadPrefix) else { return nil }
+        return Int(payload.dropFirst(profilePhotoDragPayloadPrefix.count))
+    }
+
+    private func handleProfilePhotoDrop(_ payloads: [String], at destinationIndex: Int) -> Bool {
+        guard let sourceIndex = payloads.compactMap(profilePhotoDragIndex(from:)).first else {
+            return false
+        }
+
+        return moveProfilePhoto(from: sourceIndex, to: destinationIndex)
+    }
+
+    @discardableResult
+    private func moveProfilePhoto(from sourceIndex: Int, to destinationIndex: Int) -> Bool {
+        guard currentProfilePhotoDataItems.indices.contains(sourceIndex),
+              currentProfilePhotoDataItems.indices.contains(destinationIndex) else { return false }
+
+        guard sourceIndex != destinationIndex else { return true }
 
         var updatedImages = currentProfilePhotoDataItems
-        updatedImages.swapAt(index, targetIndex)
+        let movedImage = updatedImages.remove(at: sourceIndex)
+        updatedImages.insert(movedImage, at: destinationIndex)
 
         Task { @MainActor in
             errorMessage = await store.updateProfileImages(updatedImages)
         }
+
+        return true
     }
 
     private func labeledField(_ label: String, text: Binding<String>, isRequired: Bool = false) -> some View {
@@ -612,37 +609,48 @@ struct ProfileAvatarCropSheet: View {
     let onCancel: () -> Void
     let onComplete: (Data) -> Void
 
-    @State private var scale: CGFloat = 1.08
-    @State private var lastScale: CGFloat = 1.08
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
+    @State private var resolvedCropSide: CGFloat = 320
 
-    private let minimumScale: CGFloat = 1.08
+    private let minimumScale: CGFloat = 1
     private let maximumScale: CGFloat = 4
     private let outputSide: CGFloat = 1024
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 22) {
-                Spacer(minLength: 10)
+            GeometryReader { proxy in
+                let side = preferredCropSide(for: proxy.size.width)
 
-                cropStage(side: cropSide)
+                VStack(spacing: 22) {
+                    Spacer(minLength: 10)
 
-                zoomControl(side: cropSide)
+                    cropStage(side: side)
 
-                Button {
-                    resetCrop()
-                } label: {
-                    Label(L10n.tr("profile.photo.crop.reset"), systemImage: "arrow.counterclockwise")
-                        .font(.subheadline.weight(.semibold))
+                    zoomControl(side: side)
+
+                    Button {
+                        resetCrop()
+                    } label: {
+                        Label(L10n.tr("profile.photo.crop.reset"), systemImage: "arrow.counterclockwise")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+
+                    Spacer(minLength: 12)
                 }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-
-                Spacer(minLength: 12)
+                .onAppear {
+                    synchronizeCropSide(side)
+                }
+                .onChange(of: side) { _, newValue in
+                    synchronizeCropSide(newValue)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 24)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 24)
             .background(Color(uiColor: .systemBackground))
             .navigationTitle(L10n.tr("profile.photo.crop.title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -656,7 +664,7 @@ struct ProfileAvatarCropSheet: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L10n.tr("common.done")) {
-                        guard let data = croppedAvatarData(side: cropSide) else { return }
+                        guard let data = croppedAvatarData(side: resolvedCropSide) else { return }
                         onComplete(data)
                     }
                     .fontWeight(.semibold)
@@ -665,10 +673,17 @@ struct ProfileAvatarCropSheet: View {
         }
     }
 
-    private var cropSide: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        guard screenWidth.isFinite, screenWidth > 0 else { return 320 }
-        return min(max(screenWidth - 48, 240), 360)
+    private func preferredCropSide(for availableWidth: CGFloat) -> CGFloat {
+        guard availableWidth.isFinite, availableWidth > 0 else { return resolvedCropSide }
+        return min(max(availableWidth - 48, 240), 360)
+    }
+
+    private func synchronizeCropSide(_ side: CGFloat) {
+        let next = max(1, safeFinite(side))
+        guard abs(next - resolvedCropSide) > 0.5 else { return }
+        resolvedCropSide = next
+        offset = clampedOffset(offset, side: next, scale: scale)
+        lastOffset = offset
     }
 
     private func cropStage(side: CGFloat) -> some View {
@@ -683,13 +698,20 @@ struct ProfileAvatarCropSheet: View {
                 .offset(offset)
                 .accessibilityHidden(true)
 
-            Circle()
-                .stroke(.white, lineWidth: 2)
-                .shadow(color: .black.opacity(0.28), radius: 8, y: 2)
+            ProfileAvatarCropDimmedOverlay()
+                .fill(Color.black.opacity(0.34), style: FillStyle(eoFill: true))
+                .allowsHitTesting(false)
 
             Circle()
-                .stroke(.black.opacity(0.18), lineWidth: 1)
-                .padding(2)
+                .inset(by: 1)
+                .strokeBorder(.white.opacity(0.94), lineWidth: 2)
+                .shadow(color: .black.opacity(0.28), radius: 8, y: 2)
+                .frame(width: side, height: side)
+
+            Circle()
+                .inset(by: 3)
+                .strokeBorder(.black.opacity(0.18), lineWidth: 1)
+                .frame(width: side, height: side)
         }
         .frame(width: side, height: side)
         .clipShape(Rectangle())
@@ -878,6 +900,23 @@ struct ProfileAvatarCropSheet: View {
 
     private func safeFinite(_ value: CGFloat) -> CGFloat {
         value.isFinite ? value : 0
+    }
+}
+
+private struct ProfileAvatarCropDimmedOverlay: Shape {
+    func path(in rect: CGRect) -> Path {
+        let diameter = max(0, min(rect.width, rect.height) - 2)
+        let circleRect = CGRect(
+            x: rect.midX - (diameter / 2),
+            y: rect.midY - (diameter / 2),
+            width: diameter,
+            height: diameter
+        )
+
+        var path = Path()
+        path.addRect(rect)
+        path.addEllipse(in: circleRect)
+        return path
     }
 }
 
