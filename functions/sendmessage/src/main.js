@@ -1,5 +1,7 @@
 import { makeChatMessageContract } from "./contracts.js";
 
+const DEFAULT_MATCH_SUBJECT = "Fyre match";
+
 export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
@@ -258,15 +260,32 @@ function conversationRowPermissions(participantIds) {
 }
 
 async function repairConversationAccess(config, threadId, currentUserId, participantRows, permissions) {
-  const threadRow = await getRow(config, config.threadsTableId, threadId);
-  await updateRow(config, config.threadsTableId, threadId, {
-    threadId,
-    createdByUserId: threadRow?.createdByUserId ?? currentUserId,
-    subject: threadRow?.subject ?? null,
-    status: threadRow?.status ?? "active",
-    lastMessageText: threadRow?.lastMessageText ?? null,
-    lastMessageAt: threadRow?.lastMessageAt ?? null
-  }, permissions);
+  const threadRow = await getRowIfExists(config, config.threadsTableId, threadId);
+  if (threadRow?.$id) {
+    await updateRow(config, config.threadsTableId, threadId, {
+      threadId,
+      createdByUserId: threadRow.createdByUserId ?? currentUserId,
+      subject: threadRow.subject ?? DEFAULT_MATCH_SUBJECT,
+      status: threadRow.status ?? "active",
+      lastMessageText: threadRow.lastMessageText ?? null,
+      lastMessageAt: threadRow.lastMessageAt ?? null
+    }, permissions);
+  } else {
+    try {
+      await createRow(config, config.threadsTableId, threadId, {
+        threadId,
+        createdByUserId: currentUserId,
+        subject: DEFAULT_MATCH_SUBJECT,
+        status: "active",
+        lastMessageText: null,
+        lastMessageAt: null
+      }, permissions);
+    } catch (err) {
+      if (!isAlreadyExistsError(err)) {
+        throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
+      }
+    }
+  }
 
   for (const participantRow of participantRows) {
     const participantRowId = asString(participantRow.$id);
@@ -356,6 +375,17 @@ async function getRow(config, tableId, rowId) {
   return request(config, "GET", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`);
 }
 
+async function getRowIfExists(config, tableId, rowId) {
+  try {
+    return await getRow(config, tableId, rowId);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 async function getFile(config, fileId) {
   return request(config, "GET", `/storage/buckets/${config.chatAttachmentsBucketId}/files/${fileId}`);
 }
@@ -390,9 +420,19 @@ async function request(config, method, path, body, queries = []) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { message: text };
+    }
+  }
   if (!response.ok) {
-    throw new Error(payload.message ?? `Request failed with status ${response.status}`);
+    const requestError = new Error(payload.message ?? `Request failed with status ${response.status}`);
+    requestError.statusCode = response.status;
+    requestError.type = payload.type ?? null;
+    throw requestError;
   }
   return payload;
 }
@@ -407,6 +447,20 @@ function limit(value) {
 
 function uniqueId() {
   return crypto.randomUUID().replaceAll("-", "");
+}
+
+function isAlreadyExistsError(err) {
+  const message = String(err?.message ?? err ?? "").toLowerCase();
+  return message.includes("already exists");
+}
+
+function isNotFoundError(err) {
+  if (err?.statusCode === 404) {
+    return true;
+  }
+
+  const message = String(err?.message ?? err ?? "").toLowerCase();
+  return message.includes("not found") || message.includes("could not be found");
 }
 
 function asString(value) {
