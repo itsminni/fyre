@@ -675,7 +675,9 @@ struct ChatDetailView: View {
                 )
                 await MainActor.run {
                     reconcileOptimisticMessage(id: optimisticMessageID, with: message)
-                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                    let snapshot = currentThreadSnapshot
+                    RecentChatThreadStore.upsert(snapshot)
+                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: snapshot)
                     isSending = false
                 }
             } catch {
@@ -2541,7 +2543,9 @@ struct ChatDetailView: View {
                 return
             }
 
-            let refreshedMessages = dto.messages.map(ChatMessage.init(dto:))
+            let refreshedMessages = mergedMessagesKeepingLocalPending(
+                remoteMessages: dto.messages.map(ChatMessage.init(dto:))
+            )
             let refreshedThread = ChatThread(
                 id: dto.id,
                 remoteId: dto.remoteId,
@@ -2597,6 +2601,27 @@ struct ChatDetailView: View {
             relationshipState: relationshipState,
             messages: messages
         )
+    }
+
+    private func mergedMessagesKeepingLocalPending(remoteMessages: [ChatMessage]) -> [ChatMessage] {
+        var merged = remoteMessages
+        let remoteIds = Set(remoteMessages.map(\.remoteId))
+
+        for localMessage in messages where !remoteIds.contains(localMessage.remoteId) {
+            guard localMessage.isMe else { continue }
+
+            let hasMatchingRemoteMessage = remoteMessages.contains { remoteMessage in
+                remoteMessage.isMe
+                    && remoteMessage.text == localMessage.text
+                    && remoteMessage.replyToRemoteId == localMessage.replyToRemoteId
+                    && abs(remoteMessage.sentAt.timeIntervalSince(localMessage.sentAt)) < 30
+            }
+            if !hasMatchingRemoteMessage {
+                merged.append(localMessage)
+            }
+        }
+
+        return merged.sorted { $0.sentAt < $1.sentAt }
     }
 
     private func startRealtime() {

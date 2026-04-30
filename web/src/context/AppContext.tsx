@@ -452,6 +452,47 @@ function normalizeSocialHandle(value: string): string {
   return value.trim().replace(/^@+/, '').replace(/\s+/g, '');
 }
 
+function shouldPreferCachedThread(cachedThread: ChatThread, fetchedThread: ChatThread): boolean {
+  const cachedLastMessage = cachedThread.messages[cachedThread.messages.length - 1];
+  const fetchedLastMessage = fetchedThread.messages[fetchedThread.messages.length - 1];
+  const cachedLastMessageAt = Date.parse(cachedLastMessage?.createdAt ?? '');
+  const fetchedLastMessageAt = Date.parse(fetchedLastMessage?.createdAt ?? '');
+  const cachedTimestamp = Number.isNaN(cachedLastMessageAt) ? 0 : cachedLastMessageAt;
+  const fetchedTimestamp = Number.isNaN(fetchedLastMessageAt) ? 0 : fetchedLastMessageAt;
+
+  if (cachedTimestamp > fetchedTimestamp) {
+    return true;
+  }
+
+  return cachedThread.messages.length > fetchedThread.messages.length
+    && cachedTimestamp === fetchedTimestamp;
+}
+
+function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThread[]): ChatThread[] {
+  const merged = [...fetchedThreads];
+  const fetchedThreadIds = new Set(fetchedThreads.map((thread) => thread.id));
+
+  for (const cachedThread of cachedThreads) {
+    const existingIndex = merged.findIndex((thread) => thread.id === cachedThread.id);
+    if (existingIndex >= 0) {
+      if (shouldPreferCachedThread(cachedThread, merged[existingIndex])) {
+        merged[existingIndex] = cachedThread;
+      }
+    } else if (!fetchedThreadIds.has(cachedThread.id)) {
+      merged.unshift(cachedThread);
+    }
+  }
+
+  return merged.sort((left, right) => {
+    const leftLastMessage = left.messages[left.messages.length - 1];
+    const rightLastMessage = right.messages[right.messages.length - 1];
+    const leftTimestamp = Date.parse(leftLastMessage?.createdAt ?? left.createdAt);
+    const rightTimestamp = Date.parse(rightLastMessage?.createdAt ?? right.createdAt);
+    return (Number.isNaN(rightTimestamp) ? 0 : rightTimestamp)
+      - (Number.isNaN(leftTimestamp) ? 0 : leftTimestamp);
+  });
+}
+
 function createHistoryEntry(
   email: string,
   status: EventHistoryItem['status'],
@@ -641,7 +682,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         const threads = await appwriteService.fetchThreads();
         setPersisted((prev) => ({
           ...prev,
-          threads,
+          threads: mergeChatThreads(threads, prev.threads),
           realtimeState: 'connected'
         }));
       } catch {

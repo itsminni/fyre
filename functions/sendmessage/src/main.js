@@ -101,15 +101,7 @@ export default async ({ req, res, error }) => {
     // Update the thread preview immediately so inbox ordering stays in sync with the latest message.
     try {
       const previewText = text ?? attachmentName ?? defaultAttachmentPreview(messageType);
-      const threadRow = await getRow(config, config.threadsTableId, threadId);
-      await updateRow(config, config.threadsTableId, threadId, {
-        threadId,
-        createdByUserId: threadRow?.createdByUserId ?? currentUserId,
-        subject: threadRow?.subject ?? null,
-        status: threadRow?.status ?? "active",
-        lastMessageText: previewText,
-        lastMessageAt: now
-      }, participantPermissions);
+      await upsertThreadPreview(config, threadId, currentUserId, previewText, now, participantPermissions);
     } catch (err) {
       error(`Non-fatal thread preview update failure in ${config.threadsTableId}: ${err?.message ?? err}`);
     }
@@ -302,6 +294,46 @@ async function repairConversationAccess(config, threadId, currentUserId, partici
       muted: participantRow.muted ?? false,
       pinned: participantRow.pinned ?? false,
       notificationsEnabled: participantRow.notificationsEnabled ?? true
+    }, permissions);
+  }
+}
+
+async function upsertThreadPreview(config, threadId, currentUserId, previewText, lastMessageAt, permissions) {
+  const threadRow = await getRowIfExists(config, config.threadsTableId, threadId);
+  if (threadRow?.$id) {
+    await updateRow(config, config.threadsTableId, threadId, {
+      threadId,
+      createdByUserId: threadRow.createdByUserId ?? currentUserId,
+      subject: threadRow.subject ?? DEFAULT_MATCH_SUBJECT,
+      status: threadRow.status ?? "active",
+      lastMessageText: previewText,
+      lastMessageAt
+    }, permissions);
+    return;
+  }
+
+  try {
+    await createRow(config, config.threadsTableId, threadId, {
+      threadId,
+      createdByUserId: currentUserId,
+      subject: DEFAULT_MATCH_SUBJECT,
+      status: "active",
+      lastMessageText: previewText,
+      lastMessageAt
+    }, permissions);
+  } catch (err) {
+    if (!isAlreadyExistsError(err)) {
+      throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
+    }
+
+    const existingThread = await getRowIfExists(config, config.threadsTableId, threadId);
+    await updateRow(config, config.threadsTableId, threadId, {
+      threadId,
+      createdByUserId: existingThread?.createdByUserId ?? currentUserId,
+      subject: existingThread?.subject ?? DEFAULT_MATCH_SUBJECT,
+      status: existingThread?.status ?? "active",
+      lastMessageText: previewText,
+      lastMessageAt
     }, permissions);
   }
 }

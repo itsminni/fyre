@@ -190,7 +190,6 @@ export function EventDetailPage(): JSX.Element {
           <ul className="event-list">
             <li>{mainEventInfo.venue}</li>
             <li>{mainEventInfo.address}</li>
-            <li>{mainEventInfo.timeLabel}</li>
             <li>Contributo: {mainEventInfo.contribution}</li>
             <li>Contatto: {mainEventInfo.contact}</li>
           </ul>

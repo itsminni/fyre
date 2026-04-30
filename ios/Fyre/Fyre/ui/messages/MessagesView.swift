@@ -337,13 +337,29 @@ struct MessagesView: View {
         var merged = fetchedThreads
         let fetchedRemoteIds = Set(fetchedThreads.map(\.remoteId))
 
-        for cachedThread in RecentChatThreadStore.all() where !fetchedRemoteIds.contains(cachedThread.remoteId) {
-            if !merged.contains(where: { $0.remoteId == cachedThread.remoteId }) {
+        for cachedThread in RecentChatThreadStore.all() {
+            if let existingIndex = merged.firstIndex(where: { $0.remoteId == cachedThread.remoteId }) {
+                if shouldPreferCachedThread(cachedThread, over: merged[existingIndex]) {
+                    merged[existingIndex] = cachedThread
+                }
+            } else if !fetchedRemoteIds.contains(cachedThread.remoteId) {
                 merged.insert(cachedThread, at: 0)
             }
         }
 
         return merged
+    }
+
+    private func shouldPreferCachedThread(_ cachedThread: ChatThread, over fetchedThread: ChatThread) -> Bool {
+        let cachedLastMessageDate = cachedThread.messages.last?.sentAt ?? .distantPast
+        let fetchedLastMessageDate = fetchedThread.messages.last?.sentAt ?? .distantPast
+
+        if cachedLastMessageDate > fetchedLastMessageDate {
+            return true
+        }
+
+        return cachedThread.messages.count > fetchedThread.messages.count
+            && cachedLastMessageDate == fetchedLastMessageDate
     }
 
     private func applyRelationshipAction(_ pending: PendingRelationshipAction) {

@@ -156,7 +156,6 @@ struct EventDetailView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         EventInfoLine(icon: "building.2.fill", text: L10n.tr("events.info.club"))
                         EventInfoLine(icon: "location.fill", text: L10n.tr("events.info.address"))
-                        EventInfoLine(icon: "clock.fill", text: L10n.tr("events.info.time"))
                         EventInfoLine(icon: "eurosign.circle.fill", text: L10n.tr("events.info.contribution"))
                         EventInfoLine(icon: "phone.fill", text: L10n.tr("events.info.contact"))
                         EventInfoLine(icon: "person.2.fill", text: L10n.tr("events.rule.staff"))
