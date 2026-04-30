@@ -468,7 +468,8 @@ actor AppwriteService {
                 ],
                 jsonBody: [
                     "rowId": accountId,
-                    "data": payload
+                    "data": payload,
+                    "permissions": profilePermissions(ownerUserId: accountId)
                 ],
                 expectedStatusCodes: [201]
             )
@@ -485,7 +486,8 @@ actor AppwriteService {
                     existingRowId
                 ],
                 jsonBody: [
-                    "data": payload
+                    "data": payload,
+                    "permissions": profilePermissions(ownerUserId: accountId)
                 ],
                 expectedStatusCodes: [200]
             )
@@ -494,6 +496,14 @@ actor AppwriteService {
         var updatedUser = user
         updatedUser.appwriteUserId = accountId
         return updatedUser
+    }
+
+    private func profilePermissions(ownerUserId: String) -> [String] {
+        [
+            "read(\"user:\(ownerUserId)\")",
+            "update(\"user:\(ownerUserId)\")",
+            "delete(\"user:\(ownerUserId)\")"
+        ]
     }
 
     private func fetchCurrentUser(required: Bool) async throws -> User? {
