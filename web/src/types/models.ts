@@ -80,6 +80,9 @@ export interface ChatAttachment {
   mimeType: string;
   sizeBytes: number;
   dataUrl: string;
+  width?: number;
+  height?: number;
+  duration?: number;
 }
 
 export interface ChatMessage {
@@ -105,6 +108,7 @@ export interface ChatThread {
   createdAt: string;
   matchedAt?: string;
   lastSeenAt?: string;
+  notificationsEnabled: boolean;
   relationshipState?: RelationshipState;
   messages: ChatMessage[];
 }

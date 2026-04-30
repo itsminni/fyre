@@ -405,6 +405,12 @@ function sanitizeThread(value: unknown): ChatThread | null {
         : messages[0]?.createdAt ?? new Date().toISOString(),
     matchedAt: typeof value.matchedAt === 'string' ? value.matchedAt : undefined,
     lastSeenAt: typeof value.lastSeenAt === 'string' ? value.lastSeenAt : undefined,
+    notificationsEnabled:
+      typeof value.notificationsEnabled === 'boolean'
+        ? value.notificationsEnabled
+        : typeof value.muted === 'boolean'
+          ? !value.muted
+          : true,
     relationshipState: sanitizeRelationshipState(value.relationshipState),
     messages
   };
@@ -484,7 +490,7 @@ function sanitizeAttachments(value: unknown): ChatAttachment[] {
   }
 
   return value
-    .map((attachment) => {
+    .map((attachment): ChatAttachment | null => {
       if (!isRecord(attachment) || typeof attachment.dataUrl !== 'string') {
         return null;
       }
@@ -495,7 +501,10 @@ function sanitizeAttachments(value: unknown): ChatAttachment[] {
         name: typeof attachment.name === 'string' ? attachment.name : 'attachment',
         mimeType: typeof attachment.mimeType === 'string' ? attachment.mimeType : 'application/octet-stream',
         sizeBytes: typeof attachment.sizeBytes === 'number' ? attachment.sizeBytes : 0,
-        dataUrl: attachment.dataUrl
+        dataUrl: attachment.dataUrl,
+        width: typeof attachment.width === 'number' ? attachment.width : undefined,
+        height: typeof attachment.height === 'number' ? attachment.height : undefined,
+        duration: typeof attachment.duration === 'number' ? attachment.duration : undefined
       };
     })
     .filter((attachment): attachment is ChatAttachment => Boolean(attachment));

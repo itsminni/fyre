@@ -778,6 +778,18 @@ textarea:focus {
   margin-bottom: 2px;
 }
 
+.thread-row__muted {
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
 .thread-row__preview {
   color: var(--text-secondary);
   overflow: hidden;

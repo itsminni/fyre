@@ -186,6 +186,7 @@ export function createMockThreads(): ChatThread[] {
       createdAt: new Date(now.getTime() - 50 * FIFTEEN_MINUTES).toISOString(),
       matchedAt: new Date(now.getTime() - 60 * FIFTEEN_MINUTES).toISOString(),
       lastSeenAt: new Date(now.getTime() - 5 * 60 * 1000).toISOString(),
+      notificationsEnabled: true,
       relationshipState: 'matched',
       messages: [
         {
@@ -217,6 +218,7 @@ export function createMockThreads(): ChatThread[] {
       createdAt: new Date(now.getTime() - 122 * FIFTEEN_MINUTES).toISOString(),
       matchedAt: new Date(now.getTime() - 126 * FIFTEEN_MINUTES).toISOString(),
       lastSeenAt: new Date(now.getTime() - 45 * 60 * 1000).toISOString(),
+      notificationsEnabled: true,
       relationshipState: 'matched',
       messages: [
         {
@@ -239,6 +241,7 @@ export function createMockThreads(): ChatThread[] {
       createdAt: new Date(now.getTime() - 22 * FIFTEEN_MINUTES).toISOString(),
       matchedAt: new Date(now.getTime() - 28 * FIFTEEN_MINUTES).toISOString(),
       lastSeenAt: new Date(now.getTime() - 2 * 60 * 1000).toISOString(),
+      notificationsEnabled: true,
       relationshipState: 'matched',
       messages: [
         {

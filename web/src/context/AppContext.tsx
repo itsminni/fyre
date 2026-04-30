@@ -148,6 +148,7 @@ interface AppContextValue {
   adminRemoveMainEventParticipant(email: string, destination: ParticipantBucket): string | null;
   sendMessage(input: SendMessageInput): void;
   markThreadRead(threadId: string): void;
+  setThreadNotifications(threadId: string, enabled: boolean): Promise<string | null>;
   deleteThread(threadId: string): void;
   applyRelationshipAction(threadId: string, action: RelationshipAction): Promise<string | null>;
   submitSwipeDecision(profileId: string, decision: SwipeDecision): Promise<SwipeDecisionResult>;
@@ -571,6 +572,43 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       isCancelled = true;
     };
   }, [commitCurrentUser, refreshRemoteMainEventState]);
+
+  useEffect(() => {
+    if (!IS_BACKEND_MODE || !appwriteService || !currentUser) {
+      return;
+    }
+
+    let isStopped = false;
+
+    const markOnline = () => {
+      if (!isStopped) {
+        void appwriteService.markCurrentUserPresence(true).catch(() => undefined);
+      }
+    };
+    const markOffline = () => {
+      void appwriteService.markCurrentUserPresence(false).catch(() => undefined);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        markOnline();
+      } else {
+        markOffline();
+      }
+    };
+
+    markOnline();
+    const heartbeat = window.setInterval(markOnline, 25_000);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', markOffline);
+
+    return () => {
+      isStopped = true;
+      window.clearInterval(heartbeat);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', markOffline);
+      markOffline();
+    };
+  }, [currentUser?.appwriteUserId, currentUser?.email]);
 
   useEffect(() => {
     if (!IS_BACKEND_MODE) {
@@ -1742,6 +1780,49 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     }));
   }, []);
 
+  const setThreadNotifications = useCallback(
+    async (threadId: string, enabled: boolean): Promise<string | null> => {
+      const thread = persisted.threads.find((candidate) => candidate.id === threadId);
+      if (!thread) {
+        return 'Conversazione non trovata.';
+      }
+
+      setPersisted((prev) => ({
+        ...prev,
+        threads: prev.threads.map((candidate) =>
+          candidate.id === threadId
+            ? {
+                ...candidate,
+                notificationsEnabled: enabled
+              }
+            : candidate
+        )
+      }));
+
+      if (IS_BACKEND_MODE && appwriteService) {
+        try {
+          await appwriteService.updateThreadNotifications(threadId, enabled);
+        } catch {
+          setPersisted((prev) => ({
+            ...prev,
+            threads: prev.threads.map((candidate) =>
+              candidate.id === threadId
+                ? {
+                    ...candidate,
+                    notificationsEnabled: thread.notificationsEnabled
+                  }
+                : candidate
+            )
+          }));
+          return 'Aggiornamento notifiche chat non riuscito. Riprova.';
+        }
+      }
+
+      return null;
+    },
+    [persisted.threads]
+  );
+
   const deleteThread = useCallback((threadId: string): void => {
     setPersisted((prev) => ({
       ...prev,
@@ -1884,6 +1965,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         createdAt,
         matchedAt: createdAt,
         lastSeenAt: createdAt,
+        notificationsEnabled: true,
         relationshipState: 'matched',
         messages: [openerMessage]
       };
@@ -2288,6 +2370,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       adminRemoveMainEventParticipant,
       sendMessage,
       markThreadRead,
+      setThreadNotifications,
       deleteThread,
       applyRelationshipAction,
       submitSwipeDecision,
@@ -2337,6 +2420,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       adminRemoveMainEventParticipant,
       sendMessage,
       markThreadRead,
+      setThreadNotifications,
       deleteThread,
       applyRelationshipAction,
       submitSwipeDecision,

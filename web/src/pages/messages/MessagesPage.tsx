@@ -6,9 +6,7 @@ import { useAppStore } from '../../hooks/useAppStore';
 import { formatLastSeen } from '../../context/AppContext';
 
 const RELATIONSHIP_ACTION_LABELS = {
-  archive: 'Archivia',
-  unmatch: 'Unmatch',
-  block: 'Blocca'
+  unmatch: 'Unmatch'
 } as const;
 
 function threadPreviewText(
@@ -44,6 +42,7 @@ export function MessagesPage(): JSX.Element {
   const {
     persisted,
     applyRelationshipAction,
+    setThreadNotifications,
     markNotificationRead,
     markAllNotificationsRead,
     unreadNotificationsCount
@@ -63,6 +62,14 @@ export function MessagesPage(): JSX.Element {
     }
 
     const error = await applyRelationshipAction(threadId, action);
+    if (error) {
+      setActionFeedback(error);
+    }
+  }
+
+  async function handleThreadNotifications(threadId: string, enabled: boolean): Promise<void> {
+    setActionFeedback(null);
+    const error = await setThreadNotifications(threadId, enabled);
     if (error) {
       setActionFeedback(error);
     }
@@ -130,7 +137,12 @@ export function MessagesPage(): JSX.Element {
                   <ChatAvatar name={thread.name} isOnline={thread.isOnline} />
 
                   <div className="thread-row__meta">
-                    <p className="thread-row__name">{thread.name}</p>
+                    <p className="thread-row__name">
+                      {thread.name}
+                      {!thread.notificationsEnabled && (
+                        <span className="thread-row__muted">Silenziata</span>
+                      )}
+                    </p>
                     <p className="thread-row__preview">
                       {thread.isTyping ? 'Sta scrivendo...' : threadPreviewText(thread)}
                     </p>
@@ -150,21 +162,15 @@ export function MessagesPage(): JSX.Element {
                 <div className="thread-row__actions">
                   <Button
                     variant="ghost"
-                    onClick={() => void handleRelationshipAction(thread.id, 'archive')}
+                    onClick={() => void handleThreadNotifications(thread.id, !thread.notificationsEnabled)}
                   >
-                    Archivia
+                    {thread.notificationsEnabled ? 'Silenzia' : 'Riattiva notifiche'}
                   </Button>
                   <Button
                     variant="ghost"
                     onClick={() => void handleRelationshipAction(thread.id, 'unmatch')}
                   >
                     Unmatch
-                  </Button>
-                  <Button
-                    variant="danger"
-                    onClick={() => void handleRelationshipAction(thread.id, 'block')}
-                  >
-                    Blocca
                   </Button>
                 </div>
               </li>

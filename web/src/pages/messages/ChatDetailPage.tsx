@@ -19,22 +19,85 @@ function inferAttachmentType(mimeType: string): ChatAttachment['type'] {
   return 'file';
 }
 
+function attachmentMetadata(file: File, type: ChatAttachment['type']): Promise<Pick<ChatAttachment, 'width' | 'height' | 'duration'>> {
+  if (type === 'image') {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve({});
+      };
+      image.src = url;
+    });
+  }
+
+  if (type === 'video') {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        URL.revokeObjectURL(url);
+        resolve({
+          width: video.videoWidth || undefined,
+          height: video.videoHeight || undefined,
+          duration: Number.isFinite(video.duration) ? Math.round(video.duration) : undefined
+        });
+      };
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve({});
+      };
+      video.src = url;
+    });
+  }
+
+  if (type === 'audio') {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const audio = document.createElement('audio');
+      audio.preload = 'metadata';
+      audio.onloadedmetadata = () => {
+        URL.revokeObjectURL(url);
+        resolve({
+          duration: Number.isFinite(audio.duration) ? Math.round(audio.duration) : undefined
+        });
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve({});
+      };
+      audio.src = url;
+    });
+  }
+
+  return Promise.resolve({});
+}
+
 function fileToAttachment(file: File): Promise<ChatAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       if (typeof reader.result !== 'string') {
         reject(new Error('Formato allegato non supportato'));
         return;
       }
 
+      const type = inferAttachmentType(file.type);
+      const metadata = await attachmentMetadata(file, type);
       resolve({
         id: crypto.randomUUID(),
-        type: inferAttachmentType(file.type),
+        type,
         name: file.name,
         mimeType: file.type || 'application/octet-stream',
         sizeBytes: file.size,
-        dataUrl: reader.result
+        dataUrl: reader.result,
+        ...metadata
       });
     };
     reader.onerror = () => reject(new Error('Errore durante la lettura allegato'));
@@ -119,7 +182,7 @@ function chatSurfaceStyle(settings: ReturnType<typeof useAppStore>['persisted'][
 export function ChatDetailPage(): JSX.Element {
   const navigate = useNavigate();
   const { threadId } = useParams();
-  const { persisted, sendMessage, markThreadRead, applyRelationshipAction } = useAppStore();
+  const { persisted, sendMessage, markThreadRead, setThreadNotifications, applyRelationshipAction } = useAppStore();
   const [draft, setDraft] = useState('');
   const [replyToId, setReplyToId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -213,6 +276,18 @@ export function ChatDetailPage(): JSX.Element {
     navigate('/app/messages', { replace: true });
   }
 
+  async function handleThreadNotifications(): Promise<void> {
+    if (!thread) {
+      return;
+    }
+
+    setRelationshipFeedback(null);
+    const error = await setThreadNotifications(thread.id, !thread.notificationsEnabled);
+    if (error) {
+      setRelationshipFeedback(error);
+    }
+  }
+
   if (!thread) {
     return (
       <section className="chat-detail-page fade-in-up">
@@ -243,14 +318,11 @@ export function ChatDetailPage(): JSX.Element {
           <p>{thread.isOnline ? 'Online ora' : formatLastSeen(thread.lastSeenAt)}</p>
         </div>
         <div className="chat-detail-page__actions">
-          <Button variant="ghost" onClick={() => void handleRelationshipAction('archive')}>
-            Archivia
+          <Button variant="ghost" onClick={() => void handleThreadNotifications()}>
+            {thread.notificationsEnabled ? 'Silenzia' : 'Riattiva notifiche'}
           </Button>
           <Button variant="ghost" onClick={() => void handleRelationshipAction('unmatch')}>
             Unmatch
-          </Button>
-          <Button variant="danger" onClick={() => void handleRelationshipAction('block')}>
-            Blocca
           </Button>
         </div>
       </header>

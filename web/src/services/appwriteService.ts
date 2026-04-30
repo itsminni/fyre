@@ -275,16 +275,37 @@ export class AppwriteService {
       ? await this.uploadChatAttachment(input.attachment)
       : null;
 
-    const response = await this.executeUserFunction(this.configuration.sendMessageFunctionId, {
-      threadId: input.threadId,
-      text: trimmedText,
-      replyToMessageId: input.replyToMessageId,
-      messageType: uploadedAttachment?.type ?? undefined,
-      attachmentFileId: uploadedAttachment?.fileId ?? undefined,
-      attachmentName: uploadedAttachment?.name ?? undefined,
-      attachmentMimeType: uploadedAttachment?.mimeType ?? undefined,
-      attachmentSize: uploadedAttachment?.sizeBytes ?? undefined
-    });
+    const attemptedAt = new Date(Date.now() - 12_000);
+    let response: Record<string, unknown>;
+    try {
+      response = await this.executeUserFunction(this.configuration.sendMessageFunctionId, {
+        threadId: input.threadId,
+        text: trimmedText,
+        replyToMessageId: input.replyToMessageId,
+        messageType: uploadedAttachment?.type ?? undefined,
+        attachmentFileId: uploadedAttachment?.fileId ?? undefined,
+        attachmentName: uploadedAttachment?.name ?? undefined,
+        attachmentMimeType: uploadedAttachment?.mimeType ?? undefined,
+        attachmentSize: uploadedAttachment?.sizeBytes ?? undefined,
+        attachmentWidth: uploadedAttachment?.width ?? undefined,
+        attachmentHeight: uploadedAttachment?.height ?? undefined,
+        attachmentDuration: uploadedAttachment?.duration ?? undefined
+      });
+    } catch (error) {
+      if (error instanceof AppwriteServiceError && error.statusCode === 500) {
+        const recovered = await this.recoverRecentlySentMessage(
+          input.threadId,
+          trimmedText,
+          input.replyToMessageId,
+          uploadedAttachment?.fileId ?? null,
+          attemptedAt
+        );
+        if (recovered) {
+          return recovered;
+        }
+      }
+      throw error;
+    }
     const payload = parseChatMessageContract(response);
     const messageId = payload?.messageId ?? this.stringValue(response.messageId) ?? crypto.randomUUID();
     const createdAt = this.dateValue(payload?.createdAt) ?? this.dateValue(response.createdAt) ?? new Date();
@@ -304,7 +325,10 @@ export class AppwriteService {
               name: uploadedAttachment.name,
               mimeType: uploadedAttachment.mimeType,
               sizeBytes: uploadedAttachment.sizeBytes,
-              dataUrl: this.attachmentUrl(uploadedAttachment.fileId) ?? input.attachment?.dataUrl ?? ''
+              dataUrl: this.attachmentUrl(uploadedAttachment.fileId) ?? input.attachment?.dataUrl ?? '',
+              width: uploadedAttachment.width,
+              height: uploadedAttachment.height,
+              duration: uploadedAttachment.duration
             }
           ]
         : undefined,
@@ -346,7 +370,73 @@ export class AppwriteService {
     });
   }
 
-  async createOrGetThread(otherUserId: string, otherUserName: string | null): Promise<ChatThread | null> {
+  async updateThreadNotifications(threadId: string, enabled: boolean): Promise<void> {
+    const currentAccountId = await this.fetchCurrentAccountId(true);
+    if (!currentAccountId) {
+      throw new AppwriteServiceError('Missing current Appwrite account id', 401);
+    }
+
+    const participantRows = await this.listRows(this.configuration.threadParticipantsTableId, [
+      appwriteQueryEqual('threadId', [threadId]),
+      appwriteQueryEqual('userId', [currentAccountId])
+    ]);
+
+    const participantRow = participantRows[0];
+    const participantRowId = this.stringValue(participantRow?.$id);
+    if (!participantRowId) {
+      throw new AppwriteServiceError('Thread participant not found', 404);
+    }
+
+    const payload: Record<string, unknown> = {
+      threadId,
+      userId: currentAccountId,
+      role: this.stringValue(participantRow.role) ?? 'participant',
+      muted: !enabled,
+      pinned: this.booleanValue(participantRow.pinned) ?? false,
+      notificationsEnabled: enabled
+    };
+    const lastReadAt = this.dateValue(participantRow.lastReadAt);
+    if (lastReadAt) {
+      payload.lastReadAt = lastReadAt.toISOString();
+    }
+
+    await this.sendJsonRequest('PATCH', `${this.tableRowsPath(this.configuration.threadParticipantsTableId)}/${participantRowId}`, {
+      body: {
+        data: payload
+      },
+      expectedStatusCodes: [200]
+    });
+  }
+
+  async markCurrentUserPresence(isOnline: boolean): Promise<void> {
+    const accountId = await this.fetchCurrentAccountId(false);
+    if (!accountId) {
+      return;
+    }
+
+    const profileRow = await this.fetchProfileRow(accountId);
+    const profileRowId = this.stringValue(profileRow?.$id) ?? this.stringValue(profileRow?.userId);
+    if (!profileRowId) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const payload: Record<string, unknown> = {
+      presenceUpdatedAt: now
+    };
+    if (!isOnline) {
+      payload.lastSeenAt = now;
+    }
+
+    await this.sendJsonRequest('PATCH', `${this.tableRowsPath(this.configuration.profilesTableId)}/${profileRowId}`, {
+      body: {
+        data: payload
+      },
+      expectedStatusCodes: [200]
+    });
+  }
+
+  async createOrGetThread(otherUserId: string, otherUserName: string | null): Promise<ChatThread> {
     const payload: Record<string, unknown> = {
       otherUserId
     };
@@ -361,7 +451,7 @@ export class AppwriteService {
       throw new AppwriteServiceError('Invalid create/get thread response', 500);
     }
 
-    return this.fetchThread(threadId);
+    return this.fetchThreadAfterWrite(threadId, otherUserId, otherUserName, 'matched');
   }
 
   async submitSwipe(otherUserId: string, otherUserName: string | null, decision: 'liked' | 'passed'): Promise<ChatThread | null> {
@@ -383,10 +473,7 @@ export class AppwriteService {
 
     const threadId = this.stringValue(response.threadId);
     if (threadId) {
-      const thread = await this.fetchThread(threadId);
-      if (thread) {
-        return thread;
-      }
+      return this.fetchThreadAfterWrite(threadId, otherUserId, otherUserName, 'matched');
     }
 
     // Ensure the dedicated create/get-thread function is used in the web swipe flow too.
@@ -580,12 +667,16 @@ export class AppwriteService {
       .filter((value): value is string => Boolean(value));
     const currentParticipantRow =
       participantRows.find((row) => this.stringValue(row.userId) === resolvedCurrentAccountId) ?? null;
+    const currentUserReadAt = this.dateValue(currentParticipantRow?.lastReadAt);
 
     const otherUserId = participantUserIds.find((userId) => userId !== resolvedCurrentAccountId) ?? null;
     const relationshipState = await this.fetchRelationshipState(resolvedCurrentAccountId, otherUserId);
     if (!this.isRelationshipVisibleInInbox(relationshipState)) {
       return null;
     }
+    const otherParticipantReadAt = this.dateValue(
+      participantRows.find((row) => this.stringValue(row.userId) === otherUserId)?.lastReadAt
+    );
     const profileRow = otherUserId ? await this.fetchProfileRow(otherUserId) : null;
 
     const messageRows = await this.listRows(this.configuration.messagesTableId, [
@@ -594,9 +685,8 @@ export class AppwriteService {
     ]);
 
     const messages = messageRows
-      .map((row) => this.makeChatMessage(row, resolvedCurrentAccountId))
+      .map((row) => this.makeChatMessage(row, resolvedCurrentAccountId, otherParticipantReadAt))
       .filter((message): message is ChatMessage => message !== null);
-    const currentUserReadAt = this.dateValue(currentParticipantRow?.lastReadAt);
     const unreadCount = messages.filter((message) => {
       if (message.isMe) {
         return false;
@@ -630,6 +720,9 @@ export class AppwriteService {
       unreadCount,
       createdAt: threadCreatedAt.toISOString(),
       lastSeenAt: lastSeenAt?.toISOString() ?? presenceUpdatedAt?.toISOString() ?? undefined,
+      notificationsEnabled: currentParticipantRow
+        ? this.threadNotificationsEnabled(currentParticipantRow)
+        : true,
       relationshipState,
       messages
     };
@@ -645,7 +738,10 @@ export class AppwriteService {
 
     const relationshipRow = await this.fetchRelationshipRow(currentAccountId, otherUserId);
     if (!relationshipRow) {
-      return (await this.hasLegacyMatch(currentAccountId, otherUserId)) ? 'matched' : 'none';
+      if (await this.hasLegacyMatch(currentAccountId, otherUserId)) {
+        return 'matched';
+      }
+      return this.configuration.relationshipsTableId ? 'none' : 'matched';
     }
 
     const isCurrentUserA = this.stringValue(relationshipRow.userAId) === currentAccountId;
@@ -714,7 +810,66 @@ export class AppwriteService {
     return state === 'liked' || state === 'matched';
   }
 
-  private makeChatMessage(row: Record<string, unknown>, currentAccountId: string): ChatMessage | null {
+  private async fetchThreadAfterWrite(
+    threadId: string,
+    otherUserId: string,
+    otherUserName: string | null,
+    fallbackRelationshipState: RelationshipState
+  ): Promise<ChatThread> {
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        const thread = await this.fetchThread(threadId);
+        if (thread) {
+          return thread;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+
+      if (attempt < 5) {
+        await wait(attempt < 2 ? 250 : 500);
+      }
+    }
+
+    const currentAccountId = await this.fetchCurrentAccountId(false);
+    if (currentAccountId) {
+      const profileRow = await this.fetchProfileRow(otherUserId);
+      const fallbackName = this.displayName(
+        this.stringValue(profileRow?.firstName),
+        this.stringValue(profileRow?.lastName),
+        this.stringValue(profileRow?.email),
+        otherUserName ?? 'Match'
+      );
+      const presenceUpdatedAt = this.dateValue(profileRow?.presenceUpdatedAt);
+
+      return {
+        id: threadId,
+        name: fallbackName,
+        avatar: this.avatarUrl(this.stringValue(profileRow?.avatarFileId)) ?? fallbackName.slice(0, 1).toUpperCase(),
+        isOnline: presenceUpdatedAt ? Date.now() - presenceUpdatedAt.getTime() <= 70_000 : false,
+        unreadCount: 0,
+        createdAt: new Date().toISOString(),
+        lastSeenAt: this.dateValue(profileRow?.lastSeenAt)?.toISOString() ?? undefined,
+        notificationsEnabled: true,
+        relationshipState: fallbackRelationshipState,
+        messages: []
+      };
+    }
+
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+
+    throw new AppwriteServiceError('Invalid thread response', 500);
+  }
+
+  private makeChatMessage(
+    row: Record<string, unknown>,
+    currentAccountId: string,
+    otherParticipantReadAt: Date | null = null
+  ): ChatMessage | null {
     const id = this.stringValue(row.$id);
     if (!id) {
       return null;
@@ -722,15 +877,67 @@ export class AppwriteService {
 
     const createdAt = this.dateValue(row.createdAt) ?? this.dateValue(row.$createdAt) ?? new Date();
 
+    const isMe = this.stringValue(row.senderUserId) === currentAccountId;
+    const isReadByOther = Boolean(isMe && otherParticipantReadAt && otherParticipantReadAt >= createdAt);
+
     return {
       id,
       text: this.stringValue(row.text) ?? '',
-      isMe: this.stringValue(row.senderUserId) === currentAccountId,
+      isMe,
       time: formatTime(createdAt),
       createdAt: createdAt.toISOString(),
       replyToMessageId: this.stringValue(row.replyToMessageId) ?? undefined,
-      attachments: this.makeMessageAttachments(row)
+      attachments: this.makeMessageAttachments(row),
+      readAt: isReadByOther ? otherParticipantReadAt?.toISOString() : undefined,
+      deliveryState: isReadByOther ? 'read' : isMe ? 'sent' : 'delivered'
     };
+  }
+
+  private async recoverRecentlySentMessage(
+    threadId: string,
+    text: string,
+    replyToMessageId: string | undefined,
+    attachmentFileId: string | null,
+    notBefore: Date
+  ): Promise<ChatMessage | null> {
+    const currentAccountId = await this.fetchCurrentAccountId(false);
+    if (!currentAccountId) {
+      return null;
+    }
+
+    const rows = await this.listRows(this.configuration.messagesTableId, [
+      appwriteQueryEqual('threadId', [threadId]),
+      appwriteQueryOrderAsc('createdAt')
+    ]);
+
+    for (const row of rows.slice().reverse()) {
+      if (this.stringValue(row.senderUserId) !== currentAccountId) {
+        continue;
+      }
+
+      const rowText = this.stringValue(row.text) ?? '';
+      const rowAttachmentFileId = this.stringValue(row.attachmentFileId);
+      if (rowText !== text || rowAttachmentFileId !== attachmentFileId) {
+        continue;
+      }
+
+      const createdAt = this.dateValue(row.createdAt) ?? this.dateValue(row.$createdAt);
+      if (!createdAt || createdAt < notBefore) {
+        continue;
+      }
+
+      const message = this.makeChatMessage(row, currentAccountId);
+      if (message) {
+        return {
+          ...message,
+          isMe: true,
+          replyToMessageId: message.replyToMessageId ?? replyToMessageId,
+          deliveryState: message.deliveryState ?? 'sent'
+        };
+      }
+    }
+
+    return null;
   }
 
   private async createAccount(email: string, password: string): Promise<void> {
@@ -1400,6 +1607,9 @@ export class AppwriteService {
     name: string;
     mimeType: string;
     sizeBytes: number;
+    width?: number;
+    height?: number;
+    duration?: number;
   }> {
     if (!this.configuration.chatAttachmentsBucketId) {
       throw new AppwriteServiceError('Chat attachments bucket not configured', 400);
@@ -1422,7 +1632,10 @@ export class AppwriteService {
       type: attachment.type,
       name: attachment.name,
       mimeType: attachment.mimeType,
-      sizeBytes: attachment.sizeBytes
+      sizeBytes: attachment.sizeBytes,
+      width: attachment.width,
+      height: attachment.height,
+      duration: attachment.duration
     };
   }
 
@@ -1442,7 +1655,10 @@ export class AppwriteService {
         name: this.stringValue(row.attachmentName) ?? 'attachment',
         mimeType: this.stringValue(row.attachmentMimeType) ?? 'application/octet-stream',
         sizeBytes: this.integerValue(row.attachmentSize) ?? 0,
-        dataUrl: this.attachmentUrl(attachmentFileId) ?? ''
+        dataUrl: this.attachmentUrl(attachmentFileId) ?? '',
+        width: this.integerValue(row.attachmentWidth) ?? undefined,
+        height: this.integerValue(row.attachmentHeight) ?? undefined,
+        duration: this.integerValue(row.attachmentDuration) ?? undefined
       }
     ];
   }
@@ -1678,6 +1894,20 @@ export class AppwriteService {
       this.dateValue(row.$createdAt);
 
     return timestamp?.getTime() ?? 0;
+  }
+
+  private threadNotificationsEnabled(row: Record<string, unknown>): boolean {
+    const notificationsEnabled = this.booleanValue(row.notificationsEnabled);
+    if (notificationsEnabled !== null) {
+      return notificationsEnabled;
+    }
+
+    const muted = this.booleanValue(row.muted);
+    if (muted !== null) {
+      return !muted;
+    }
+
+    return true;
   }
 
   private toInputDate(value: Date | null): string | undefined {
