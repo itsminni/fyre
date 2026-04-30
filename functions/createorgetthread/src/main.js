@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 const DEFAULT_MATCH_SUBJECT = "Fyre match";
 const PLACEHOLDER_MATCH_SUBJECTS = new Set(["Match", DEFAULT_MATCH_SUBJECT]);
@@ -15,6 +15,7 @@ export default async ({ req, res, error }) => {
       return res.json({ message: "Invalid participant" }, 400);
     }
 
+    let knownThreadId = null;
     if (config.relationshipsTableId) {
       const relationship = await findRelationshipRow(config, currentUserId, otherUserId);
       if (!relationship) {
@@ -22,19 +23,16 @@ export default async ({ req, res, error }) => {
         if (!hasLegacyMatch) {
           return res.json({ message: "Relationship unavailable" }, 403);
         }
+        knownThreadId = asString(hasLegacyMatch.threadId);
       } else if (!relationshipAllowsThread(relationship, currentUserId, otherUserId)) {
         return res.json({ message: "Relationship unavailable" }, 403);
+      } else {
+        knownThreadId = asString(relationship.threadId);
       }
     }
 
-    const existingThreadId = await findExistingThreadIdByParticipants(config, currentUserId, otherUserId);
-    if (existingThreadId) {
-      await ensureThreadAccess(config, existingThreadId, currentUserId, otherUserId, otherUserName);
-      return res.json({ threadId: existingThreadId }, 200);
-    }
-
     const participantIds = [currentUserId, otherUserId].sort();
-    const threadId = stableThreadRowId(participantIds);
+    const threadId = knownThreadId ?? stableThreadRowId(participantIds);
     await ensureThreadAccess(config, threadId, currentUserId, otherUserId, otherUserName);
 
     return res.json({ threadId }, 200);
@@ -138,46 +136,6 @@ async function listRows(config, tableId, queries) {
   return Array.isArray(payload.rows) ? payload.rows : [];
 }
 
-async function listAllRows(config, tableId, baseQueries, pageSize = 100) {
-  const rows = [];
-  let page = 0;
-
-  while (true) {
-    const batch = await listRows(config, tableId, [
-      ...baseQueries,
-      limit(pageSize),
-      offset(page * pageSize)
-    ]);
-    rows.push(...batch);
-
-    if (batch.length < pageSize) {
-      return rows;
-    }
-
-    page += 1;
-  }
-}
-
-async function findExistingThreadIdByParticipants(config, firstUserId, secondUserId) {
-  const firstRows = await listAllRows(config, config.threadParticipantsTableId, [
-    equal("userId", [firstUserId])
-  ]);
-
-  if (!firstRows.length) {
-    return null;
-  }
-
-  if (!firstRows.some((row) => asString(row.threadId))) {
-    return null;
-  }
-
-  const secondRows = await listAllRows(config, config.threadParticipantsTableId, [
-    equal("userId", [secondUserId])
-  ]);
-
-  return sharedThreadIdFromParticipantRows(firstRows, secondRows);
-}
-
 async function createRow(config, tableId, rowId, data, permissions) {
   return request(config, "POST", `/tablesdb/${config.databaseId}/tables/${tableId}/rows`, {
     rowId,
@@ -198,9 +156,10 @@ async function ensureThreadAccess(config, threadId, currentUserId, otherUserId, 
   const permissions = participantPermissions(participantIds);
 
   await createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions);
-  await ensureThreadParticipant(config, threadId, currentUserId, permissions);
-  await ensureThreadParticipant(config, threadId, otherUserId, permissions);
-  await maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions);
+  await Promise.all([
+    ensureThreadParticipant(config, threadId, currentUserId, permissions),
+    ensureThreadParticipant(config, threadId, otherUserId, permissions)
+  ]);
 }
 
 async function createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions) {
@@ -234,24 +193,19 @@ async function createOrReuseThreadRow(config, threadId, currentUserId, otherUser
 }
 
 async function ensureThreadParticipant(config, threadId, userId, permissions) {
-  const existingParticipant = await findSingleRow(config, config.threadParticipantsTableId, [
-    equal("threadId", [threadId]),
-    equal("userId", [userId]),
-    limit(1)
-  ]);
+  const participantRowId = stableParticipantRowId(threadId, userId);
+  const existingParticipant = await getRowIfExists(config, config.threadParticipantsTableId, participantRowId);
 
   if (existingParticipant?.$id) {
     await updateRow(
       config,
       config.threadParticipantsTableId,
-      existingParticipant.$id,
+      participantRowId,
       participantPayloadFromExisting(existingParticipant, threadId, userId),
       permissions
     );
-    return existingParticipant.$id;
+    return participantRowId;
   }
-
-  const participantRowId = stableParticipantRowId(threadId, userId);
 
   try {
     const participantRow = await createRow(
@@ -280,8 +234,18 @@ async function findRelationshipRow(config, currentUserId, otherUserId) {
     return null;
   }
 
+  const userIds = [currentUserId, otherUserId].sort();
+  const stableRelationship = await getRowIfExists(
+    config,
+    config.relationshipsTableId,
+    stableRelationshipRowId(userIds)
+  );
+  if (stableRelationship?.$id) {
+    return stableRelationship;
+  }
+
   return findSingleRow(config, config.relationshipsTableId, [
-    equal("pairKey", [[currentUserId, otherUserId].sort().join(":")]),
+    equal("pairKey", [userIds.join(":")]),
     limit(1)
   ]);
 }
@@ -291,8 +255,14 @@ async function findLegacyMatch(config, currentUserId, otherUserId) {
     return null;
   }
 
+  const userIds = [currentUserId, otherUserId].sort();
+  const stableMatch = await getRowIfExists(config, config.matchesTableId, stableMatchRowId(userIds));
+  if (stableMatch?.$id) {
+    return stableMatch;
+  }
+
   return findSingleRow(config, config.matchesTableId, [
-    equal("matchKey", [[currentUserId, otherUserId].sort().join(":")]),
+    equal("matchKey", [userIds.join(":")]),
     limit(1)
   ]);
 }
@@ -326,33 +296,6 @@ async function getRowIfExists(config, tableId, rowId) {
       return null;
     }
     throw err;
-  }
-}
-
-async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions) {
-  const subject = asString(otherUserName);
-  if (!subject) {
-    return;
-  }
-
-  try {
-    const threadRow = await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${config.threadsTableId}/rows/${threadId}`);
-    const currentSubject = asString(threadRow.subject);
-
-    if (currentSubject && !PLACEHOLDER_MATCH_SUBJECTS.has(currentSubject)) {
-      return;
-    }
-
-    await updateRow(config, config.threadsTableId, threadId, {
-      threadId,
-      createdByUserId: threadRow.createdByUserId ?? currentUserId,
-      subject,
-      status: threadRow.status ?? "active",
-      lastMessageText: threadRow.lastMessageText ?? null,
-      lastMessageAt: threadRow.lastMessageAt ?? null
-    }, permissions);
-  } catch {
-    // Best-effort subject repair only; do not fail thread creation because of a cosmetic label.
   }
 }
 
@@ -430,14 +373,6 @@ function limit(value) {
   return JSON.stringify({ method: "limit", values: [value] });
 }
 
-function offset(value) {
-  return JSON.stringify({ method: "offset", values: [value] });
-}
-
-function uniqueId() {
-  return randomUUID().replaceAll("-", "");
-}
-
 function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -462,6 +397,14 @@ function stableThreadRowId(userIds) {
 
 function stableParticipantRowId(threadId, userId) {
   return stableRowId("tp", `${threadId}:${userId}`);
+}
+
+function stableMatchRowId(userIds) {
+  return stableRowId("mt", userIds.join(":"));
+}
+
+function stableRelationshipRowId(userIds) {
+  return stableRowId("rl", userIds.join(":"));
 }
 
 function stableRowId(prefix, seed) {

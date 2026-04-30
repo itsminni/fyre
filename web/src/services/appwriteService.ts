@@ -22,6 +22,7 @@ import {
 } from '../types/models';
 import { formatTime } from '../data/mockData';
 import { AppwriteConfiguration } from './appwriteConfiguration';
+import { Client } from 'appwrite';
 import {
   parseChatMessageContract,
   parseDiscoverProfilesPayload
@@ -78,6 +79,7 @@ export class AppwriteService {
   private readonly endpoint: string;
   private readonly projectId: string;
   private readonly configuration: AppwriteConfiguration;
+  private realtimeClient: Client | null = null;
 
   constructor(configuration: AppwriteConfiguration) {
     this.configuration = configuration;
@@ -434,6 +436,30 @@ export class AppwriteService {
       },
       expectedStatusCodes: [200]
     });
+  }
+
+  subscribeToChatRealtime(handler: () => void): () => void {
+    const channels = this.chatRealtimeChannels();
+    const client = this.getRealtimeClient();
+    const subscription: unknown = client.subscribe(channels, (event: unknown) => {
+      void event;
+      handler();
+    });
+
+    return () => {
+      if (typeof subscription === 'function') {
+        (subscription as () => void)();
+        return;
+      }
+
+      const close = typeof subscription === 'object' && subscription !== null
+        ? (subscription as { close?: unknown }).close
+        : null;
+
+      if (typeof close === 'function') {
+        close.call(subscription);
+      }
+    };
   }
 
   async createOrGetThread(otherUserId: string, otherUserName: string | null): Promise<ChatThread> {
@@ -1243,6 +1269,29 @@ export class AppwriteService {
       })
       .filter((item): item is EventHistoryItem => item !== null)
       .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
+  }
+
+  private getRealtimeClient(): Client {
+    if (!this.realtimeClient) {
+      this.realtimeClient = new Client()
+        .setEndpoint(this.endpoint)
+        .setProject(this.projectId);
+    }
+
+    return this.realtimeClient;
+  }
+
+  private chatRealtimeChannels(): string[] {
+    return [
+      this.tablesRealtimeChannel(this.configuration.messagesTableId),
+      this.tablesRealtimeChannel(this.configuration.threadsTableId),
+      this.tablesRealtimeChannel(this.configuration.threadParticipantsTableId),
+      this.tablesRealtimeChannel(this.configuration.profilesTableId)
+    ];
+  }
+
+  private tablesRealtimeChannel(tableId: string): string {
+    return `tablesdb.${this.configuration.databaseId}.tables.${tableId}.rows`;
   }
 
   private async executeUserFunction(functionId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {

@@ -566,6 +566,26 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     }
   }, []);
 
+  const refreshThreads = useCallback(async (): Promise<void> => {
+    if (!IS_BACKEND_MODE || !appwriteService) {
+      return;
+    }
+
+    try {
+      const threads = await appwriteService.fetchThreads();
+      setPersisted((prev) => ({
+        ...prev,
+        threads: mergeChatThreads(threads, prev.threads),
+        realtimeState: 'connected'
+      }));
+    } catch {
+      setPersisted((prev) => ({
+        ...prev,
+        realtimeState: 'disconnected'
+      }));
+    }
+  }, [appwriteService]);
+
   const commitCurrentUser = useCallback((user: User | null): void => {
     setPersisted((prev) => {
       if (!user) {
@@ -678,19 +698,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
   const hydrateMockThreadsIfMissing = useCallback(async (): Promise<void> => {
     if (IS_BACKEND_MODE && appwriteService) {
-      try {
-        const threads = await appwriteService.fetchThreads();
-        setPersisted((prev) => ({
-          ...prev,
-          threads: mergeChatThreads(threads, prev.threads),
-          realtimeState: 'connected'
-        }));
-      } catch {
-        setPersisted((prev) => ({
-          ...prev,
-          realtimeState: 'disconnected'
-        }));
-      }
+      await refreshThreads();
       return;
     }
 
@@ -703,12 +711,63 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       ...prev,
       threads
     }));
-  }, [persisted.threads.length]);
+  }, [persisted.threads.length, refreshThreads]);
 
   useEffect(() => {
     void hydrateMockDiscoverProfiles();
     void hydrateMockThreadsIfMissing();
   }, [persisted.currentUserEmail, hydrateMockDiscoverProfiles, hydrateMockThreadsIfMissing]);
+
+  useEffect(() => {
+    if (!IS_BACKEND_MODE || !appwriteService || !currentUser?.appwriteUserId) {
+      return;
+    }
+
+    let isStopped = false;
+    let pendingRefresh: number | null = null;
+    let refreshInFlight = false;
+
+    const scheduleRefresh = () => {
+      if (isStopped || pendingRefresh !== null) {
+        return;
+      }
+
+      pendingRefresh = window.setTimeout(async () => {
+        pendingRefresh = null;
+        if (isStopped || refreshInFlight) {
+          return;
+        }
+
+        refreshInFlight = true;
+        await refreshThreads();
+        refreshInFlight = false;
+      }, 500);
+    };
+
+    setPersisted((prev) => ({
+      ...prev,
+      realtimeState: 'connecting'
+    }));
+
+    let unsubscribe = () => undefined;
+    try {
+      unsubscribe = appwriteService.subscribeToChatRealtime(scheduleRefresh);
+      scheduleRefresh();
+    } catch {
+      setPersisted((prev) => ({
+        ...prev,
+        realtimeState: 'disconnected'
+      }));
+    }
+
+    return () => {
+      isStopped = true;
+      if (pendingRefresh !== null) {
+        window.clearTimeout(pendingRefresh);
+      }
+      unsubscribe();
+    };
+  }, [appwriteService, currentUser?.appwriteUserId, refreshThreads]);
 
   const isEventAdmin = useMemo(() => {
     if (!currentUser) {

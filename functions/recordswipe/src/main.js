@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 const DEFAULT_MATCH_SUBJECT = "Fyre match";
 const PLACEHOLDER_MATCH_SUBJECTS = new Set(["Match", DEFAULT_MATCH_SUBJECT]);
@@ -26,10 +26,7 @@ export default async ({ req, res, error }) => {
     }
 
     const swipeKey = `${currentUserId}:${otherUserId}`;
-    const existingSwipe = await findSingleRow(config, config.swipesTableId, [
-      equal("swipeKey", [swipeKey]),
-      limit(1)
-    ]);
+    const existingSwipe = await findSwipeRow(config, currentUserId, otherUserId);
 
     const swipePayload = {
       swipeKey,
@@ -42,7 +39,13 @@ export default async ({ req, res, error }) => {
     if (existingSwipe?.$id) {
       await updateRow(config, config.swipesTableId, existingSwipe.$id, swipePayload, swipePermissions(currentUserId));
     } else {
-      await createRow(config, config.swipesTableId, uniqueId(), swipePayload, swipePermissions(currentUserId));
+      await createOrUpdateRow(
+        config,
+        config.swipesTableId,
+        stableSwipeRowId(swipeKey),
+        swipePayload,
+        swipePermissions(currentUserId)
+      );
     }
 
     if (config.relationshipsTableId) {
@@ -61,11 +64,7 @@ export default async ({ req, res, error }) => {
     }
 
     // A match exists only when the opposite swipe was already a like.
-    const reverseSwipe = await findSingleRow(config, config.swipesTableId, [
-      equal("swipeKey", [`${otherUserId}:${currentUserId}`]),
-      equal("decision", ["liked"]),
-      limit(1)
-    ]);
+    const reverseSwipe = await findSwipeRow(config, otherUserId, currentUserId, "liked");
 
     if (!reverseSwipe?.$id) {
       return res.json({ matched: false, relationshipState: "liked" }, 200);
@@ -74,15 +73,19 @@ export default async ({ req, res, error }) => {
     const userIds = [currentUserId, otherUserId].sort();
     const matchKey = userIds.join(":");
     const permissions = participantPermissions(userIds);
-    const existingMatch = await findSingleRow(config, config.matchesTableId, [
-      equal("matchKey", [matchKey]),
-      limit(1)
-    ]);
+    const existingMatch = await findMatchRow(config, userIds);
 
     if (existingMatch?.threadId) {
       await ensureThreadAccess(config, existingMatch.threadId, currentUserId, otherUserId, otherUserName);
       if (config.relationshipsTableId) {
-        await upsertMatchedRelationship(config, currentUserId, otherUserId, existingMatch.threadId, now);
+        await upsertMatchedRelationship(
+          config,
+          existingRelationship,
+          currentUserId,
+          otherUserId,
+          existingMatch.threadId,
+          now
+        );
       }
       await updateRow(config, config.matchesTableId, existingMatch.$id, {
         matchKey,
@@ -102,7 +105,7 @@ export default async ({ req, res, error }) => {
 
     const threadId = await createThreadWithParticipants(config, currentUserId, otherUserId, otherUserName);
     if (config.relationshipsTableId) {
-      await upsertMatchedRelationship(config, currentUserId, otherUserId, threadId, now);
+      await upsertMatchedRelationship(config, existingRelationship, currentUserId, otherUserId, threadId, now);
     }
 
     if (existingMatch?.$id) {
@@ -227,12 +230,6 @@ function swipePermissions(userId) {
 
 async function createThreadWithParticipants(config, currentUserId, otherUserId, otherUserName) {
   const participantIds = [currentUserId, otherUserId].sort();
-  const existingThreadId = await findExistingThreadIdByParticipants(config, currentUserId, otherUserId);
-  if (existingThreadId) {
-    await ensureThreadAccess(config, existingThreadId, currentUserId, otherUserId, otherUserName);
-    return existingThreadId;
-  }
-
   const threadId = stableThreadRowId(participantIds);
   await ensureThreadAccess(config, threadId, currentUserId, otherUserId, otherUserName);
 
@@ -244,9 +241,10 @@ async function ensureThreadAccess(config, threadId, currentUserId, otherUserId, 
   const permissions = participantPermissions(participantIds);
 
   await createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions);
-  await ensureThreadParticipant(config, threadId, currentUserId, permissions);
-  await ensureThreadParticipant(config, threadId, otherUserId, permissions);
-  await maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions);
+  await Promise.all([
+    ensureThreadParticipant(config, threadId, currentUserId, permissions),
+    ensureThreadParticipant(config, threadId, otherUserId, permissions)
+  ]);
 }
 
 async function createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions) {
@@ -280,24 +278,19 @@ async function createOrReuseThreadRow(config, threadId, currentUserId, otherUser
 }
 
 async function ensureThreadParticipant(config, threadId, userId, permissions) {
-  const existingParticipant = await findSingleRow(config, config.threadParticipantsTableId, [
-    equal("threadId", [threadId]),
-    equal("userId", [userId]),
-    limit(1)
-  ]);
+  const participantRowId = stableParticipantRowId(threadId, userId);
+  const existingParticipant = await getRowIfExists(config, config.threadParticipantsTableId, participantRowId);
 
   if (existingParticipant?.$id) {
     await updateRow(
       config,
       config.threadParticipantsTableId,
-      existingParticipant.$id,
+      participantRowId,
       participantPayloadFromExisting(existingParticipant, threadId, userId),
       permissions
     );
-    return existingParticipant.$id;
+    return participantRowId;
   }
-
-  const participantRowId = stableParticipantRowId(threadId, userId);
 
   try {
     const participantRow = await createRow(
@@ -336,6 +329,20 @@ async function createOrReuseMatchRow(config, matchId, data, permissions) {
   return matchId;
 }
 
+async function createOrUpdateRow(config, tableId, rowId, data, permissions) {
+  try {
+    await createRow(config, tableId, rowId, data, permissions);
+  } catch (err) {
+    if (!isAlreadyExistsError(err)) {
+      throw new Error(`Failed creating row in ${tableId}: ${err?.message ?? err}`);
+    }
+
+    await updateRow(config, tableId, rowId, data, permissions);
+  }
+
+  return rowId;
+}
+
 async function upsertRelationshipForSwipe(config, existingRelationship, currentUserId, otherUserId, decision, now) {
   if (!config.relationshipsTableId) {
     return null;
@@ -367,12 +374,11 @@ async function upsertRelationshipForSwipe(config, existingRelationship, currentU
   return upsertRelationshipRow(config, existingRelationship, payload, participantPermissions(userIds));
 }
 
-async function upsertMatchedRelationship(config, currentUserId, otherUserId, threadId, now) {
+async function upsertMatchedRelationship(config, existingRelationship, currentUserId, otherUserId, threadId, now) {
   if (!config.relationshipsTableId) {
     return null;
   }
 
-  const existingRelationship = await findRelationshipRow(config, currentUserId, otherUserId);
   const userIds = [currentUserId, otherUserId].sort();
   const payload = {
     pairKey: userIds.join(":"),
@@ -407,33 +413,6 @@ async function upsertRelationshipRow(config, existingRelationship, payload, perm
   }
 
   return relationshipId;
-}
-
-async function maybeRefreshThreadSubject(config, threadId, currentUserId, otherUserName, permissions) {
-  const subject = asString(otherUserName);
-  if (!subject) {
-    return;
-  }
-
-  try {
-    const threadRow = await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${config.threadsTableId}/rows/${threadId}`);
-    const currentSubject = asString(threadRow.subject);
-
-    if (currentSubject && !PLACEHOLDER_MATCH_SUBJECTS.has(currentSubject)) {
-      return;
-    }
-
-    await updateRow(config, config.threadsTableId, threadId, {
-      threadId,
-      createdByUserId: threadRow.createdByUserId ?? currentUserId,
-      subject,
-      status: threadRow.status ?? "active",
-      lastMessageText: threadRow.lastMessageText ?? null,
-      lastMessageAt: threadRow.lastMessageAt ?? null
-    }, permissions);
-  } catch {
-    // Best-effort subject repair only; do not fail a valid match because of a cosmetic label.
-  }
 }
 
 function threadPayloadFromExisting(threadRow, threadId, currentUserId, otherUserName) {
@@ -488,8 +467,45 @@ async function findRelationshipRow(config, currentUserId, otherUserId) {
   }
 
   const pairKey = [currentUserId, otherUserId].sort().join(":");
+  const stableRelationship = await getRowIfExists(
+    config,
+    config.relationshipsTableId,
+    stableRelationshipRowId([currentUserId, otherUserId].sort())
+  );
+  if (stableRelationship?.$id) {
+    return stableRelationship;
+  }
+
   return findSingleRow(config, config.relationshipsTableId, [
     equal("pairKey", [pairKey]),
+    limit(1)
+  ]);
+}
+
+async function findSwipeRow(config, fromUserId, toUserId, decision = null) {
+  const swipeKey = `${fromUserId}:${toUserId}`;
+  const stableSwipe = await getRowIfExists(config, config.swipesTableId, stableSwipeRowId(swipeKey));
+  if (stableSwipe?.$id) {
+    return !decision || asString(stableSwipe.decision) === decision ? stableSwipe : null;
+  }
+
+  const queries = [equal("swipeKey", [swipeKey])];
+  if (decision) {
+    queries.push(equal("decision", [decision]));
+  }
+  queries.push(limit(1));
+  return findSingleRow(config, config.swipesTableId, queries);
+}
+
+async function findMatchRow(config, userIds) {
+  const matchId = stableMatchRowId(userIds);
+  const stableMatch = await getRowIfExists(config, config.matchesTableId, matchId);
+  if (stableMatch?.$id) {
+    return stableMatch;
+  }
+
+  return findSingleRow(config, config.matchesTableId, [
+    equal("matchKey", [userIds.join(":")]),
     limit(1)
   ]);
 }
@@ -511,41 +527,6 @@ function relationshipStateForUser(relationship, userId) {
     return asString(relationship.userBState) ?? "none";
   }
   return "none";
-}
-
-async function findExistingThreadIdByParticipants(config, firstUserId, secondUserId) {
-  const firstRows = await listRows(config, config.threadParticipantsTableId, [
-    equal("userId", [firstUserId]),
-    limit(100)
-  ]);
-
-  if (!firstRows.length) {
-    return null;
-  }
-
-  const firstThreadIds = new Set(
-    firstRows
-      .map((row) => asString(row.threadId))
-      .filter(Boolean)
-  );
-
-  if (!firstThreadIds.size) {
-    return null;
-  }
-
-  const secondRows = await listRows(config, config.threadParticipantsTableId, [
-    equal("userId", [secondUserId]),
-    limit(100)
-  ]);
-
-  for (const row of secondRows) {
-    const threadId = asString(row.threadId);
-    if (threadId && firstThreadIds.has(threadId)) {
-      return threadId;
-    }
-  }
-
-  return null;
 }
 
 async function listRows(config, tableId, queries) {
@@ -618,10 +599,6 @@ function limit(value) {
   return JSON.stringify({ method: "limit", values: [value] });
 }
 
-function uniqueId() {
-  return randomUUID().replaceAll("-", "");
-}
-
 function isAlreadyExistsError(err) {
   const message = String(err?.message ?? err ?? "").toLowerCase();
   return message.includes("already exists");
@@ -646,6 +623,10 @@ function stableParticipantRowId(threadId, userId) {
 
 function stableMatchRowId(userIds) {
   return stableRowId("mt", userIds.join(":"));
+}
+
+function stableSwipeRowId(swipeKey) {
+  return stableRowId("sw", swipeKey);
 }
 
 function stableRelationshipRowId(userIds) {
