@@ -80,6 +80,12 @@ private struct UnavailableBackendAPI: BackendAPI {
         throw APIError.configuration(reason)
     }
 
+    func updateThreadNotifications(threadId: String, enabled: Bool) async throws {
+        _ = threadId
+        _ = enabled
+        throw APIError.configuration(reason)
+    }
+
     func markCurrentUserPresence(isOnline: Bool) async {
         _ = isOnline
     }

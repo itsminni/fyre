@@ -44,6 +44,10 @@ struct AppwriteBackendAPI: BackendAPI {
         try await service.updateRelationship(threadId: threadId, action: action)
     }
 
+    func updateThreadNotifications(threadId: String, enabled: Bool) async throws {
+        try await service.updateThreadNotifications(threadId: threadId, enabled: enabled)
+    }
+
     func markCurrentUserPresence(isOnline: Bool) async {
         await service.markCurrentUserPresence(isOnline: isOnline)
     }

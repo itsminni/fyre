@@ -98,6 +98,8 @@ struct User: Codable, Sendable {
     var maxDistanceKm: Int?
     var latitude: Double?
     var longitude: Double?
+    var excludeSmokers: Bool?
+    var excludeDrinkers: Bool?
     var smokes: Bool?
     var drinks: Bool?
     var bio: String?
@@ -217,6 +219,8 @@ struct User: Codable, Sendable {
         case maxDistanceKm
         case latitude
         case longitude
+        case excludeSmokers
+        case excludeDrinkers
         case smokes
         case drinks
         case bio
@@ -245,6 +249,8 @@ struct User: Codable, Sendable {
         maxDistanceKm = try c.decodeIfPresent(Int.self, forKey: .maxDistanceKm)
         latitude = try c.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try c.decodeIfPresent(Double.self, forKey: .longitude)
+        excludeSmokers = try c.decodeIfPresent(Bool.self, forKey: .excludeSmokers)
+        excludeDrinkers = try c.decodeIfPresent(Bool.self, forKey: .excludeDrinkers)
         smokes = try c.decodeIfPresent(Bool.self, forKey: .smokes)
         drinks = try c.decodeIfPresent(Bool.self, forKey: .drinks)
         bio = try c.decodeIfPresent(String.self, forKey: .bio)
@@ -275,6 +281,8 @@ struct User: Codable, Sendable {
         try c.encodeIfPresent(maxDistanceKm, forKey: .maxDistanceKm)
         try c.encodeIfPresent(latitude, forKey: .latitude)
         try c.encodeIfPresent(longitude, forKey: .longitude)
+        try c.encodeIfPresent(excludeSmokers, forKey: .excludeSmokers)
+        try c.encodeIfPresent(excludeDrinkers, forKey: .excludeDrinkers)
         try c.encodeIfPresent(smokes, forKey: .smokes)
         try c.encodeIfPresent(drinks, forKey: .drinks)
         try c.encodeIfPresent(bio, forKey: .bio)
@@ -662,6 +670,8 @@ final class UserStore: @unchecked Sendable {
         minPreferredAge: Int,
         maxPreferredAge: Int,
         maxDistanceKm: Int?,
+        excludeSmokers: Bool,
+        excludeDrinkers: Bool,
         smokes: Bool,
         drinks: Bool
     ) async -> String? {
@@ -718,6 +728,8 @@ final class UserStore: @unchecked Sendable {
         user.maxDistanceKm = normalizedMaxDistanceKm
         user.latitude = resolvedLocation.latitude
         user.longitude = resolvedLocation.longitude
+        user.excludeSmokers = excludeSmokers
+        user.excludeDrinkers = excludeDrinkers
         user.smokes = smokes
         user.drinks = drinks
         user.bio = normalizedBio

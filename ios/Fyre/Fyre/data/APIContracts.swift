@@ -32,6 +32,8 @@ struct DiscoverProfileDTO: Identifiable, Sendable {
     let intent: String?
     let smokes: Bool?
     let drinks: Bool?
+    let instagramTag: String?
+    let spotifyTag: String?
     let relationshipState: RelationshipStateDTO
 }
 
@@ -45,6 +47,7 @@ struct ThreadDTO: Identifiable, Sendable {
     let currentUserReadAt: Date?
     let otherParticipantReadAt: Date?
     let participantUserIds: [String]
+    let notificationsEnabled: Bool
     let relationshipState: RelationshipStateDTO
     let messages: [MessageDTO]
 }
@@ -135,6 +138,7 @@ protocol BackendAPI: Sendable {
     func sendMessage(threadId: String, text: String, replyToMessageId: String?, attachment: OutgoingAttachmentDTO?) async throws -> MessageDTO
     func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO?
     func updateRelationship(threadId: String, action: RelationshipActionDTO) async throws
+    func updateThreadNotifications(threadId: String, enabled: Bool) async throws
     func markCurrentUserPresence(isOnline: Bool) async
     func markThreadRead(threadId: String) async
     func fetchAttachmentData(fileId: String) async throws -> Data?

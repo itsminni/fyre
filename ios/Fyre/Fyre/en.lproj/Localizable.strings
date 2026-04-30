@@ -67,6 +67,9 @@
 "messages.unmatch.action" = "Unmatch";
 "messages.unmatch.confirmTitle" = "Remove match?";
 "messages.unmatch.confirmMessage" = "Remove your relationship with %@ and hide this thread?";
+"messages.mute.action" = "Mute";
+"messages.unmute.action" = "Unmute";
+"messages.muted.label" = "Muted chat";
 "messages.block.action" = "Block";
 "messages.block.confirmTitle" = "Block user?";
 "messages.block.confirmMessage" = "Block %@ and prevent any further interaction?";
@@ -206,6 +209,8 @@
 "profile.ageRange.max" = "Maximum age";
 "profile.maxDistanceKm" = "Maximum distance";
 "profile.maxDistanceKm.hint" = "Calculated from your verified city. Leave it empty for no limit.";
+"profile.excludeSmokers" = "Hide smokers";
+"profile.excludeDrinkers" = "Hide people who drink alcohol";
 "profile.orientation" = "Orientation";
 "profile.orientation.straight" = "Straight";
 "profile.orientation.gay" = "Gay";

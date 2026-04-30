@@ -430,9 +430,10 @@ actor AppwriteService {
 
         let currentAccountId = try await fetchCurrentAccountId(required: false)
         let excludedUserIds = try await excludedDiscoverUserIds(currentAccountId: currentAccountId)
-        let currentInterests = try await fetchProfileRow(id: currentAccountId ?? "")
-            .map(interestListValue(for:))
-            ?? []
+        let currentProfileRow = try await fetchProfileRow(id: currentAccountId ?? "")
+        let currentInterests = currentProfileRow.map(interestListValue(for:)) ?? []
+        let excludeSmokers = boolValue(forKey: "excludeSmokers", in: currentProfileRow) ?? false
+        let excludeDrinkers = boolValue(forKey: "excludeDrinkers", in: currentProfileRow) ?? false
         let rows = try await listRows(
             tableId: configuration.profilesTableId,
             queries: []
@@ -442,6 +443,8 @@ actor AppwriteService {
             guard let userId = stringValue(forKey: "userId", in: row),
                   userId != currentAccountId,
                   !excludedUserIds.contains(userId),
+                  !(excludeSmokers && (boolValue(forKey: "smokes", in: row) ?? false)),
+                  !(excludeDrinkers && (boolValue(forKey: "drinks", in: row) ?? false)),
                   let _ = genderValue(for: stringValue(forKey: "gender", in: row)) else {
                 return nil
             }
@@ -554,6 +557,8 @@ actor AppwriteService {
         user.maxDistanceKm = intValue(forKey: "maxDistanceKm", in: profileRow)
         user.latitude = doubleValue(forKey: "latitude", in: profileRow)
         user.longitude = doubleValue(forKey: "longitude", in: profileRow)
+        user.excludeSmokers = boolValue(forKey: "excludeSmokers", in: profileRow)
+        user.excludeDrinkers = boolValue(forKey: "excludeDrinkers", in: profileRow)
         user.smokes = boolValue(forKey: "smokes", in: profileRow)
         user.drinks = boolValue(forKey: "drinks", in: profileRow)
         user.bio = stringValue(forKey: "bio", in: profileRow)
@@ -1345,6 +1350,8 @@ actor AppwriteService {
             "maxDistanceKm": user.normalizedMaxDistanceKm as Any? ?? NSNull(),
             "latitude": user.latitude as Any? ?? NSNull(),
             "longitude": user.longitude as Any? ?? NSNull(),
+            "excludeSmokers": user.excludeSmokers ?? false,
+            "excludeDrinkers": user.excludeDrinkers ?? false,
             "smokes": user.smokes as Any? ?? NSNull(),
             "drinks": user.drinks as Any? ?? NSNull(),
             "bio": nullOrString(user.normalizedBio),
@@ -1380,6 +1387,8 @@ actor AppwriteService {
             intent: stringValue(forKey: "intent", in: row),
             smokes: boolValue(forKey: "smokes", in: row),
             drinks: boolValue(forKey: "drinks", in: row),
+            instagramTag: socialTagValue(forKey: "instagramTag", in: row),
+            spotifyTag: socialTagValue(forKey: "spotifyTag", in: row),
             relationshipState: relationshipStateValue(for: stringValue(forKey: "relationshipState", in: row))
         )
     }
@@ -1413,6 +1422,8 @@ actor AppwriteService {
             intent: stringValue(forKey: "intent", in: row),
             smokes: boolValue(forKey: "smokes", in: row),
             drinks: boolValue(forKey: "drinks", in: row),
+            instagramTag: socialTagValue(forKey: "instagramTag", in: row),
+            spotifyTag: socialTagValue(forKey: "spotifyTag", in: row),
             relationshipState: .none
         )
     }

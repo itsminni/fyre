@@ -231,6 +231,7 @@ struct MainTabView: View {
                 currentUserReadAt: dto.currentUserReadAt,
                 otherParticipantReadAt: dto.otherParticipantReadAt,
                 participantUserIds: dto.participantUserIds,
+                notificationsEnabled: dto.notificationsEnabled,
                 relationshipState: dto.relationshipState,
                 messages: dto.messages.map(ChatMessage.init(dto:))
             )

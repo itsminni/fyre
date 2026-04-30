@@ -32,7 +32,7 @@ final class LocalNotificationCoordinator: NSObject {
     private let defaults = UserDefaults.standard
     private var realtimeSubscription: AppwriteRealtimeSubscription?
     private var currentUserId: String?
-    private var knownThreadIds = Set<String>()
+    private var notificationEnabledThreadIds = Set<String>()
     private var appwriteService: AppwriteService?
 
     private override init() {
@@ -45,7 +45,7 @@ final class LocalNotificationCoordinator: NSObject {
 
         if self.currentUserId != currentUserId {
             stopRealtime()
-            knownThreadIds.removeAll()
+            notificationEnabledThreadIds.removeAll()
             self.currentUserId = currentUserId
         }
 
@@ -60,6 +60,14 @@ final class LocalNotificationCoordinator: NSObject {
         }
 
         await syncEventReminders(upcomingEvents)
+    }
+
+    func setThreadNotifications(threadId: String, enabled: Bool) {
+        if enabled {
+            notificationEnabledThreadIds.insert(threadId)
+        } else {
+            notificationEnabledThreadIds.remove(threadId)
+        }
     }
 
     private var notificationsEnabled: Bool {
@@ -97,7 +105,7 @@ final class LocalNotificationCoordinator: NSObject {
             return
         }
 
-        if messageNotificationsEnabled && knownThreadIds.isEmpty {
+        if messageNotificationsEnabled && notificationEnabledThreadIds.isEmpty {
             await refreshKnownThreadIds()
         }
     }
@@ -131,11 +139,17 @@ final class LocalNotificationCoordinator: NSObject {
         }
 
         if event.isDelete {
-            knownThreadIds.remove(threadId)
+            notificationEnabledThreadIds.remove(threadId)
         } else {
-            let wasKnown = knownThreadIds.contains(threadId)
-            knownThreadIds.insert(threadId)
-            if event.isCreate, !wasKnown {
+            let notificationsEnabled = threadNotificationsEnabled(from: event)
+            let wasKnown = notificationEnabledThreadIds.contains(threadId)
+            if notificationsEnabled {
+                notificationEnabledThreadIds.insert(threadId)
+            } else {
+                notificationEnabledThreadIds.remove(threadId)
+            }
+
+            if event.isCreate, notificationsEnabled, !wasKnown {
                 await scheduleMatchNotification(
                     rawIdentifier: threadId,
                     threadId: threadId,
@@ -187,11 +201,11 @@ final class LocalNotificationCoordinator: NSObject {
         guard senderUserId != nil, senderUserId != currentUserId else { return }
         guard let threadId = event.stringValue(forKey: "threadId") else { return }
 
-        if !knownThreadIds.contains(threadId) {
+        if !notificationEnabledThreadIds.contains(threadId) {
             await refreshKnownThreadIds()
         }
 
-        guard knownThreadIds.contains(threadId) else { return }
+        guard notificationEnabledThreadIds.contains(threadId) else { return }
 
         let rawIdentifier = event.stringValue(forKey: "$id")
             ?? event.stringValue(forKey: "messageId")
@@ -218,15 +232,15 @@ final class LocalNotificationCoordinator: NSObject {
 
     private func refreshKnownThreadIds() async {
         guard let service = ensureAppwriteService() else {
-            knownThreadIds = []
+            notificationEnabledThreadIds = []
             return
         }
 
         do {
             let threads = try await service.fetchThreads()
-            knownThreadIds = Set(threads.map(\.remoteId))
+            notificationEnabledThreadIds = Set(threads.filter(\.notificationsEnabled).map(\.remoteId))
         } catch {
-            knownThreadIds = []
+            notificationEnabledThreadIds = []
         }
     }
 
@@ -383,6 +397,18 @@ final class LocalNotificationCoordinator: NSObject {
             || event.payload["pinned"] != nil
             || event.payload["notificationsEnabled"] != nil
             || event.payload["lastReadAt"] != nil
+    }
+
+    private func threadNotificationsEnabled(from event: AppwriteRealtimeEvent) -> Bool {
+        if let enabled = event.boolValue(forKey: "notificationsEnabled") {
+            return enabled
+        }
+
+        if let muted = event.boolValue(forKey: "muted") {
+            return !muted
+        }
+
+        return true
     }
 
     private static let eventDateFormatter: DateFormatter = {

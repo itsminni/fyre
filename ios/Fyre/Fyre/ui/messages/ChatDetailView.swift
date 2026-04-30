@@ -211,6 +211,7 @@ struct ChatDetailView: View {
     @State private var threadAvatar: String
     @State private var threadIsOnline: Bool
     @State private var otherParticipantReadAt: Date?
+    @State private var threadNotificationsEnabled: Bool
     @State private var relationshipState: RelationshipStateDTO
     @State private var messages: [ChatMessage]
     @State private var draft = ""
@@ -246,6 +247,7 @@ struct ChatDetailView: View {
         _threadAvatar = State(initialValue: thread.avatar)
         _threadIsOnline = State(initialValue: thread.isOnline)
         _otherParticipantReadAt = State(initialValue: thread.otherParticipantReadAt)
+        _threadNotificationsEnabled = State(initialValue: thread.notificationsEnabled)
         _relationshipState = State(initialValue: thread.relationshipState)
         _messages = State(initialValue: thread.messages)
     }
@@ -509,13 +511,15 @@ struct ChatDetailView: View {
     private var chatHeaderTrailingMenu: some View {
         Menu {
             Button {
-                pendingRelationshipAction = PendingRelationshipAction(action: .archive)
+                setThreadNotifications(enabled: !threadNotificationsEnabled)
             } label: {
                 relationshipMenuActionLabel(
-                    title: L10n.tr("messages.archive.action"),
-                    systemImage: "archivebox",
+                    title: threadNotificationsEnabled
+                        ? L10n.tr("messages.mute.action")
+                        : L10n.tr("messages.unmute.action"),
+                    systemImage: threadNotificationsEnabled ? "bell.slash" : "speaker.wave.2",
                     textColor: .white,
-                    iconColor: .red
+                    iconColor: .orange
                 )
             }
 
@@ -525,17 +529,6 @@ struct ChatDetailView: View {
                 relationshipMenuActionLabel(
                     title: L10n.tr("messages.unmatch.action"),
                     systemImage: "heart.slash",
-                    textColor: .red,
-                    iconColor: .red
-                )
-            }
-
-            Button {
-                pendingRelationshipAction = PendingRelationshipAction(action: .block)
-            } label: {
-                relationshipMenuActionLabel(
-                    title: L10n.tr("messages.block.action"),
-                    systemImage: "hand.raised",
                     textColor: .red,
                     iconColor: .red
                 )
@@ -2169,6 +2162,39 @@ struct ChatDetailView: View {
         }
     }
 
+    private func setThreadNotifications(enabled: Bool) {
+        let previousValue = threadNotificationsEnabled
+        threadNotificationsEnabled = enabled
+        RecentChatThreadStore.upsert(currentThreadSnapshot)
+        LocalNotificationCoordinator.shared.setThreadNotifications(threadId: thread.remoteId, enabled: enabled)
+
+        Task {
+            do {
+                try await services.backend.updateThreadNotifications(
+                    threadId: thread.remoteId,
+                    enabled: enabled
+                )
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                }
+            } catch {
+                await MainActor.run {
+#if DEBUG
+                    sendErrorMessage = error.localizedDescription
+#else
+                    sendErrorMessage = L10n.tr("chat.error.sendFailed")
+#endif
+                    threadNotificationsEnabled = previousValue
+                    RecentChatThreadStore.upsert(currentThreadSnapshot)
+                    LocalNotificationCoordinator.shared.setThreadNotifications(
+                        threadId: thread.remoteId,
+                        enabled: previousValue
+                    )
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func messageAttachmentView(
         attachment: MessageAttachmentDTO,
@@ -2526,6 +2552,7 @@ struct ChatDetailView: View {
                 currentUserReadAt: dto.currentUserReadAt,
                 otherParticipantReadAt: dto.otherParticipantReadAt,
                 participantUserIds: dto.participantUserIds,
+                notificationsEnabled: dto.notificationsEnabled,
                 relationshipState: dto.relationshipState,
                 messages: refreshedMessages
             )
@@ -2543,6 +2570,7 @@ struct ChatDetailView: View {
                 }
                 threadIsOnline = dto.isOnline
                 otherParticipantReadAt = dto.otherParticipantReadAt
+                threadNotificationsEnabled = dto.notificationsEnabled
                 relationshipState = dto.relationshipState
                 RecentChatThreadStore.upsert(refreshedThread)
             }
@@ -2565,6 +2593,7 @@ struct ChatDetailView: View {
             currentUserReadAt: thread.currentUserReadAt,
             otherParticipantReadAt: otherParticipantReadAt,
             participantUserIds: thread.participantUserIds,
+            notificationsEnabled: threadNotificationsEnabled,
             relationshipState: relationshipState,
             messages: messages
         )

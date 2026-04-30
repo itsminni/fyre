@@ -38,7 +38,7 @@
 "home.empty.description" = "Hai visto tutti i profili disponibili per ora.";
 "home.skip.accessibility" = "Salta";
 "home.swipe.error" = "Impossibile aggiornare lo swipe adesso. Riprova.";
-"home.swipe.pendingMatch" = "Like inviato. La chat si apre quando il like e reciproco.";
+"home.swipe.pendingMatch" = "Like inviato. La chat si apre quando il like è reciproco.";
 "home.commonInterests.empty" = "Nuova energia, ancora nessun interesse in comune.";
 "discover.details.title" = "Profilo";
 "discover.details.section.info" = "Informazioni";
@@ -68,6 +68,9 @@
 "messages.unmatch.action" = "Rimuovi match";
 "messages.unmatch.confirmTitle" = "Rimuovere il match?";
 "messages.unmatch.confirmMessage" = "Vuoi rimuovere la relazione con %@ e nascondere questa chat?";
+"messages.mute.action" = "Silenzia";
+"messages.unmute.action" = "Riattiva notifiche";
+"messages.muted.label" = "Chat silenziata";
 "messages.block.action" = "Blocca";
 "messages.block.confirmTitle" = "Bloccare utente?";
 "messages.block.confirmMessage" = "Vuoi bloccare %@ e impedire ulteriori interazioni?";
@@ -207,6 +210,8 @@
 "profile.ageRange.max" = "Età massima";
 "profile.maxDistanceKm" = "Distanza massima";
 "profile.maxDistanceKm.hint" = "Calcolata dalla tua città verificata. Lascia vuoto per nessun limite.";
+"profile.excludeSmokers" = "Nascondi chi fuma";
+"profile.excludeDrinkers" = "Nascondi chi beve alcol";
 "profile.orientation" = "Orientamento";
 "profile.orientation.straight" = "Etero";
 "profile.orientation.gay" = "Gay";

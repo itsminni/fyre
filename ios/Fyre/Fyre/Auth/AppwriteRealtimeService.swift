@@ -31,6 +31,29 @@ struct AppwriteRealtimeEvent {
             ?? Self.fallbackDateFormatter.date(from: rawValue)
     }
 
+    func boolValue(forKey key: String) -> Bool? {
+        if let value = payload[key] as? Bool {
+            return value
+        }
+
+        if let value = payload[key] as? NSNumber {
+            return value.boolValue
+        }
+
+        if let value = payload[key] as? String {
+            switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "1", "yes":
+                return true
+            case "false", "0", "no":
+                return false
+            default:
+                return nil
+            }
+        }
+
+        return nil
+    }
+
     var isMutation: Bool {
         events.contains { event in
             event.contains(".create") || event.contains(".update") || event.contains(".delete")

@@ -23,6 +23,8 @@ private struct SwipeProfile: Identifiable, Equatable {
     let intent: String?
     let smokes: Bool?
     let drinks: Bool?
+    let instagramTag: String?
+    let spotifyTag: String?
     let relationshipState: RelationshipStateDTO
 }
 
@@ -55,6 +57,8 @@ private struct DiscoverProfileDetailsView: View {
                         infoRow(L10n.tr("profile.intent"), value: intentLabel)
                         infoRow(L10n.tr("profile.smokes"), value: yesNo(profile.smokes))
                         infoRow(L10n.tr("profile.drinks"), value: yesNo(profile.drinks))
+                        infoRow(L10n.tr("profile.instagramTag"), value: profile.instagramTag)
+                        infoRow(L10n.tr("profile.spotifyTag"), value: profile.spotifyTag)
                     }
 
                     if let bio = normalized(profile.bio) {
@@ -512,7 +516,14 @@ struct SwipeHomeView: View {
         do {
             swipeErrorMessage = nil
             let dtos = try await services.backend.fetchDiscoverProfiles()
-            profiles = dtos.map {
+            let visibleDTOs = dtos.filter { dto in
+                let excludeSmokers = store.currentUser?.excludeSmokers ?? false
+                let excludeDrinkers = store.currentUser?.excludeDrinkers ?? false
+                return !(excludeSmokers && (dto.smokes ?? false))
+                    && !(excludeDrinkers && (dto.drinks ?? false))
+            }
+
+            profiles = visibleDTOs.map {
                 SwipeProfile(
                     id: $0.id,
                     name: $0.name,
@@ -528,6 +539,8 @@ struct SwipeHomeView: View {
                     intent: nonEmpty($0.intent),
                     smokes: $0.smokes,
                     drinks: $0.drinks,
+                    instagramTag: nonEmpty($0.instagramTag),
+                    spotifyTag: nonEmpty($0.spotifyTag),
                     relationshipState: $0.relationshipState
                 )
             }
@@ -574,6 +587,7 @@ struct SwipeHomeView: View {
                 currentUserReadAt: dto.currentUserReadAt,
                 otherParticipantReadAt: dto.otherParticipantReadAt,
                 participantUserIds: dto.participantUserIds,
+                notificationsEnabled: dto.notificationsEnabled,
                 relationshipState: dto.relationshipState,
                 messages: dto.messages.map(ChatMessage.init(dto:))
             )
@@ -747,6 +761,8 @@ struct SwipeHomeView: View {
             "\(user.resolvedMinPreferredAge)",
             "\(user.resolvedMaxPreferredAge)",
             user.normalizedMaxDistanceKm.map(String.init) ?? "none",
+            "\(user.excludeSmokers ?? false)",
+            "\(user.excludeDrinkers ?? false)",
             user.city ?? "",
             user.latitude.map { String($0) } ?? "",
             user.longitude.map { String($0) } ?? ""

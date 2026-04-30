@@ -71,6 +71,7 @@ struct ChatThread: Identifiable, Hashable {
     let currentUserReadAt: Date?
     let otherParticipantReadAt: Date?
     let participantUserIds: [String]
+    let notificationsEnabled: Bool
     let relationshipState: RelationshipStateDTO
     let messages: [ChatMessage]
 
@@ -172,13 +173,15 @@ struct MessagesView: View {
                             .buttonStyle(.plain)
                             .contextMenu {
                                 Button {
-                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .archive)
+                                    setThreadNotifications(thread, enabled: !thread.notificationsEnabled)
                                 } label: {
                                     relationshipActionLabel(
-                                        title: L10n.tr("messages.archive.action"),
-                                        systemImage: "archivebox",
+                                        title: thread.notificationsEnabled
+                                            ? L10n.tr("messages.mute.action")
+                                            : L10n.tr("messages.unmute.action"),
+                                        systemImage: thread.notificationsEnabled ? "bell.slash" : "speaker.wave.2",
                                         textColor: .primary,
-                                        iconColor: .red
+                                        iconColor: .orange
                                     )
                                 }
 
@@ -192,23 +195,17 @@ struct MessagesView: View {
                                         iconColor: .red
                                     )
                                 }
-
-                                Button {
-                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .block)
-                                } label: {
-                                    relationshipActionLabel(
-                                        title: L10n.tr("messages.block.action"),
-                                        systemImage: "hand.raised",
-                                        textColor: .red,
-                                        iconColor: .red
-                                    )
-                                }
                             }
                             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                                 Button {
-                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .archive)
+                                    setThreadNotifications(thread, enabled: !thread.notificationsEnabled)
                                 } label: {
-                                    Label(L10n.tr("messages.archive.action"), systemImage: "archivebox")
+                                    Label(
+                                        thread.notificationsEnabled
+                                            ? L10n.tr("messages.mute.action")
+                                            : L10n.tr("messages.unmute.action"),
+                                        systemImage: thread.notificationsEnabled ? "bell.slash" : "speaker.wave.2"
+                                    )
                                 }
                                 .tint(.orange)
                             }
@@ -219,13 +216,6 @@ struct MessagesView: View {
                                     Label(L10n.tr("messages.unmatch.action"), systemImage: "heart.slash")
                                 }
                                 .tint(.pink)
-
-                                Button {
-                                    pendingRelationshipAction = PendingRelationshipAction(thread: thread, action: .block)
-                                } label: {
-                                    Label(L10n.tr("messages.block.action"), systemImage: "hand.raised")
-                                }
-                                .tint(.red)
                             }
                             .listRowSeparator(index < threads.count - 1 ? .visible : .hidden)
                             .listRowSeparatorTint(separatorTint)
@@ -308,6 +298,7 @@ struct MessagesView: View {
                     currentUserReadAt: dto.currentUserReadAt,
                     otherParticipantReadAt: dto.otherParticipantReadAt,
                     participantUserIds: dto.participantUserIds,
+                    notificationsEnabled: dto.notificationsEnabled,
                     relationshipState: dto.relationshipState,
                     messages: dto.messages.map(ChatMessage.init(dto:))
                 )
@@ -378,6 +369,54 @@ struct MessagesView: View {
                 }
             }
         }
+    }
+
+    private func setThreadNotifications(_ thread: ChatThread, enabled: Bool) {
+        updateThreadNotificationsLocally(thread, enabled: enabled)
+        LocalNotificationCoordinator.shared.setThreadNotifications(threadId: thread.remoteId, enabled: enabled)
+
+        Task {
+            do {
+                try await services.backend.updateThreadNotifications(
+                    threadId: thread.remoteId,
+                    enabled: enabled
+                )
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
+                }
+            } catch {
+                await MainActor.run {
+#if DEBUG
+                    debugPrint("Thread notification update failed for \(thread.remoteId): \(error.localizedDescription)")
+#endif
+                    updateThreadNotificationsLocally(thread, enabled: thread.notificationsEnabled)
+                    LocalNotificationCoordinator.shared.setThreadNotifications(
+                        threadId: thread.remoteId,
+                        enabled: thread.notificationsEnabled
+                    )
+                }
+            }
+        }
+    }
+
+    private func updateThreadNotificationsLocally(_ thread: ChatThread, enabled: Bool) {
+        let updatedThread = ChatThread(
+            id: thread.id,
+            remoteId: thread.remoteId,
+            name: thread.name,
+            avatar: thread.avatar,
+            isOnline: thread.isOnline,
+            lastSeenAt: thread.lastSeenAt,
+            currentUserReadAt: thread.currentUserReadAt,
+            otherParticipantReadAt: thread.otherParticipantReadAt,
+            participantUserIds: thread.participantUserIds,
+            notificationsEnabled: enabled,
+            relationshipState: thread.relationshipState,
+            messages: thread.messages
+        )
+
+        upsertThread(updatedThread)
+        RecentChatThreadStore.upsert(updatedThread)
     }
 
     private var separatorTint: Color {
@@ -505,6 +544,13 @@ private struct ChatThreadRow: View {
                     Text(thread.name)
                         .font(.headline)
                         .lineLimit(1)
+
+                    if !thread.notificationsEnabled {
+                        Image(systemName: "bell.slash.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(L10n.tr("messages.muted.label"))
+                    }
 
                     Spacer(minLength: 8)
 

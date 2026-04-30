@@ -28,6 +28,8 @@ struct AccountView: View {
         let minPreferredAge: Int
         let maxPreferredAge: Int
         let maxDistanceKm: Int?
+        let excludeSmokers: Bool
+        let excludeDrinkers: Bool
         let smokes: Bool
         let drinks: Bool
     }
@@ -104,6 +106,8 @@ struct AccountView: View {
     @State private var minPreferredAge = 20
     @State private var maxPreferredAge = 32
     @State private var maxDistanceKm: Int? = 50
+    @State private var excludeSmokers = false
+    @State private var excludeDrinkers = false
     @State private var smokes = false
     @State private var drinks = false
     @State private var profileMessage: String?
@@ -123,10 +127,16 @@ struct AccountView: View {
     @State private var hasLoadedProfileForm = false
     @State private var isSavingProfile = false
     @State private var isLoggingOut = false
+    @State private var draggingProfilePhotoIndex: Int?
+    @State private var profilePhotoDropIndex: Int?
+    @State private var profilePhotoDragTranslation: CGFloat = 0
 
     private let supportEmail = "support@example.com"
     private let maxProfilePhotoCount = 6
-    private let profilePhotoDragPayloadPrefix = "fyre-profile-photo:"
+    private let profilePhotoThumbnailWidth: CGFloat = 92
+    private let profilePhotoThumbnailHeight: CGFloat = 118
+    private let profilePhotoThumbnailSpacing: CGFloat = 12
+    private let profilePhotoThumbnailCornerRadius: CGFloat = 18
 
     private static let birthDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -504,6 +514,9 @@ struct AccountView: View {
                         )
 
                         ProfileDistanceField(maxDistanceKm: $maxDistanceKm)
+
+                        ProfileToggleField(title: L10n.tr("profile.excludeSmokers"), isOn: $excludeSmokers)
+                        ProfileToggleField(title: L10n.tr("profile.excludeDrinkers"), isOn: $excludeDrinkers)
                     }
                 }
 
@@ -958,7 +971,7 @@ struct AccountView: View {
                     .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: profilePhotoThumbnailSpacing) {
                         ForEach(Array(currentProfilePhotoDataItems.enumerated()), id: \.offset) { index, data in
                             profilePhotoThumbnail(data: data, index: index)
                         }
@@ -981,7 +994,7 @@ struct AccountView: View {
                         .resizable()
                         .scaledToFill()
                 } else {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: profilePhotoThumbnailCornerRadius, style: .continuous)
                         .fill(.white.opacity(0.05))
                         .overlay {
                             Image(systemName: "photo")
@@ -989,8 +1002,8 @@ struct AccountView: View {
                         }
                 }
             }
-            .frame(width: 92, height: 118)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .frame(width: profilePhotoThumbnailWidth, height: profilePhotoThumbnailHeight)
+            .clipShape(RoundedRectangle(cornerRadius: profilePhotoThumbnailCornerRadius, style: .continuous))
             .overlay(alignment: .bottomLeading) {
                 if index == 0 {
                     Text(L10n.tr("profile.photo.primaryBadge"))
@@ -1003,14 +1016,17 @@ struct AccountView: View {
                 }
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: profilePhotoThumbnailCornerRadius, style: .continuous)
                     .stroke(.white.opacity(0.10), lineWidth: 1)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .draggable(profilePhotoDragPayload(for: index))
-            .dropDestination(for: String.self) { payloads, _ in
-                handleProfilePhotoDrop(payloads, at: index)
-            }
+            .contentShape(RoundedRectangle(cornerRadius: profilePhotoThumbnailCornerRadius, style: .continuous))
+            .offset(x: profilePhotoReorderOffset(for: index))
+            .scaleEffect(draggingProfilePhotoIndex == index ? 1.04 : 1)
+            .shadow(color: .black.opacity(draggingProfilePhotoIndex == index ? 0.28 : 0), radius: 14, y: 8)
+            .zIndex(draggingProfilePhotoIndex == index ? 1 : 0)
+            .highPriorityGesture(profilePhotoReorderGesture(for: index))
+            .animation(.spring(response: 0.26, dampingFraction: 0.84), value: draggingProfilePhotoIndex)
+            .animation(.spring(response: 0.26, dampingFraction: 0.84), value: profilePhotoDropIndex)
 
             Button {
                 removeProfilePhoto(at: index)
@@ -1025,28 +1041,11 @@ struct AccountView: View {
             .padding(8)
             .accessibilityLabel(L10n.tr("profile.photo.remove"))
         }
-        .frame(width: 92)
+        .frame(width: profilePhotoThumbnailWidth)
     }
 
     private var remainingProfilePhotoCapacity: Int {
         max(0, maxProfilePhotoCount - currentProfilePhotoDataItems.count)
-    }
-
-    private func profilePhotoDragPayload(for index: Int) -> String {
-        "\(profilePhotoDragPayloadPrefix)\(index)"
-    }
-
-    private func profilePhotoDragIndex(from payload: String) -> Int? {
-        guard payload.hasPrefix(profilePhotoDragPayloadPrefix) else { return nil }
-        return Int(payload.dropFirst(profilePhotoDragPayloadPrefix.count))
-    }
-
-    private func handleProfilePhotoDrop(_ payloads: [String], at destinationIndex: Int) -> Bool {
-        guard let sourceIndex = payloads.compactMap(profilePhotoDragIndex(from:)).first else {
-            return false
-        }
-
-        return moveProfilePhoto(from: sourceIndex, to: destinationIndex)
     }
 
     @discardableResult
@@ -1073,6 +1072,81 @@ struct AccountView: View {
         }
 
         return true
+    }
+
+    private func profilePhotoReorderGesture(for index: Int) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.22)
+            .sequenced(before: DragGesture(minimumDistance: 1))
+            .onChanged { value in
+                switch value {
+                case .first(true):
+                    guard draggingProfilePhotoIndex == nil else { return }
+                    draggingProfilePhotoIndex = index
+                    profilePhotoDropIndex = index
+                    profilePhotoDragTranslation = 0
+                case let .second(true, drag):
+                    guard currentProfilePhotoDataItems.indices.contains(index) else { return }
+                    draggingProfilePhotoIndex = draggingProfilePhotoIndex ?? index
+                    profilePhotoDragTranslation = drag?.translation.width ?? 0
+                    profilePhotoDropIndex = profilePhotoDestinationIndex(
+                        from: draggingProfilePhotoIndex ?? index,
+                        translation: profilePhotoDragTranslation
+                    )
+                default:
+                    break
+                }
+            }
+            .onEnded { value in
+                let sourceIndex = draggingProfilePhotoIndex ?? index
+                var translation = profilePhotoDragTranslation
+
+                if case let .second(true, drag) = value, let drag {
+                    translation = drag.translation.width
+                }
+
+                let destinationIndex = profilePhotoDestinationIndex(from: sourceIndex, translation: translation)
+                resetProfilePhotoReorderState()
+                moveProfilePhoto(from: sourceIndex, to: destinationIndex)
+            }
+    }
+
+    private func profilePhotoDestinationIndex(from sourceIndex: Int, translation: CGFloat) -> Int {
+        guard currentProfilePhotoDataItems.indices.contains(sourceIndex) else { return sourceIndex }
+
+        let stride = profilePhotoThumbnailWidth + profilePhotoThumbnailSpacing
+        let offset = Int((translation / stride).rounded())
+        let lastIndex = currentProfilePhotoDataItems.count - 1
+        return min(max(sourceIndex + offset, 0), lastIndex)
+    }
+
+    private func profilePhotoReorderOffset(for index: Int) -> CGFloat {
+        guard let sourceIndex = draggingProfilePhotoIndex,
+              let destinationIndex = profilePhotoDropIndex,
+              currentProfilePhotoDataItems.indices.contains(index) else { return 0 }
+
+        let stride = profilePhotoThumbnailWidth + profilePhotoThumbnailSpacing
+
+        if index == sourceIndex {
+            return profilePhotoDragTranslation
+        }
+
+        if sourceIndex < destinationIndex,
+           (sourceIndex + 1)...destinationIndex ~= index {
+            return -stride
+        }
+
+        if destinationIndex < sourceIndex,
+           destinationIndex..<sourceIndex ~= index {
+            return stride
+        }
+
+        return 0
+    }
+
+    private func resetProfilePhotoReorderState() {
+        draggingProfilePhotoIndex = nil
+        profilePhotoDropIndex = nil
+        profilePhotoDragTranslation = 0
     }
 
     private func displayValue(_ value: String) -> String {
@@ -1148,6 +1222,8 @@ struct AccountView: View {
         minPreferredAge = store.currentUser?.resolvedMinPreferredAge ?? 20
         maxPreferredAge = store.currentUser?.resolvedMaxPreferredAge ?? 32
         maxDistanceKm = store.currentUser?.normalizedMaxDistanceKm
+        excludeSmokers = store.currentUser?.excludeSmokers ?? false
+        excludeDrinkers = store.currentUser?.excludeDrinkers ?? false
         smokes = store.currentUser?.smokes ?? false
         drinks = store.currentUser?.drinks ?? false
         isHydratingProfileForm = false
@@ -1212,6 +1288,8 @@ struct AccountView: View {
             minPreferredAge: minPreferredAge,
             maxPreferredAge: maxPreferredAge,
             maxDistanceKm: maxDistanceKm,
+            excludeSmokers: excludeSmokers,
+            excludeDrinkers: excludeDrinkers,
             smokes: smokes,
             drinks: drinks
         )
@@ -1233,6 +1311,8 @@ struct AccountView: View {
             minPreferredAge: user.resolvedMinPreferredAge,
             maxPreferredAge: user.resolvedMaxPreferredAge,
             maxDistanceKm: user.normalizedMaxDistanceKm,
+            excludeSmokers: user.excludeSmokers ?? false,
+            excludeDrinkers: user.excludeDrinkers ?? false,
             smokes: user.smokes ?? false,
             drinks: user.drinks ?? false
         )
@@ -1382,6 +1462,8 @@ struct AccountView: View {
             minPreferredAge: minPreferredAge,
             maxPreferredAge: maxPreferredAge,
             maxDistanceKm: maxDistanceKm,
+            excludeSmokers: excludeSmokers,
+            excludeDrinkers: excludeDrinkers,
             smokes: smokes,
             drinks: drinks
         )

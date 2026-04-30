@@ -277,6 +277,49 @@ extension AppwriteService {
         }
     }
 
+    func updateThreadNotifications(threadId: String, enabled: Bool) async throws {
+        guard let currentAccountId = try await fetchCurrentAccountId(required: true) else {
+            throw AppwriteServiceError.invalidResponse
+        }
+        let participantRows = try await listRows(
+            tableId: configuration.threadParticipantsTableId,
+            queries: [
+                AppwriteQuery.equal("threadId", values: [threadId]),
+                AppwriteQuery.equal("userId", values: [currentAccountId])
+            ]
+        )
+
+        guard let participantRow = participantRows.first,
+              let participantRowId = stringValue(forKey: "$id", in: participantRow) else {
+            throw AppwriteServiceError.invalidResponse
+        }
+
+        var payload: [String: Any] = [
+            "threadId": threadId,
+            "userId": currentAccountId,
+            "role": stringValue(forKey: "role", in: participantRow) ?? "participant",
+            "muted": !enabled,
+            "pinned": boolValue(forKey: "pinned", in: participantRow) ?? false,
+            "notificationsEnabled": enabled
+        ]
+        if let lastReadAt = dateValue(forKey: "lastReadAt", in: participantRow) {
+            payload["lastReadAt"] = ISO8601DateFormatter().string(from: lastReadAt)
+        }
+
+        _ = try await sendRequest(
+            method: "PATCH",
+            pathComponents: [
+                "tablesdb",
+                configuration.databaseId,
+                "tables",
+                configuration.threadParticipantsTableId,
+                "rows",
+                participantRowId
+            ],
+            jsonBody: ["data": payload]
+        )
+    }
+
     func fetchAttachmentData(fileId: String) async throws -> Data? {
         guard let bucketId = configuration.chatAttachmentsBucketId, !bucketId.isEmpty else {
             throw AppwriteServiceError.missingConfiguration("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID")
@@ -331,9 +374,11 @@ extension AppwriteService {
         guard await relationshipState.isVisibleInInbox else {
             return nil
         }
-        let currentUserReadAt = participantRows
+        let currentParticipantRow = participantRows
             .first(where: { stringValue(forKey: "userId", in: $0) == resolvedCurrentAccountId })
+        let currentUserReadAt = currentParticipantRow
             .flatMap { dateValue(forKey: "lastReadAt", in: $0) }
+        let notificationsEnabled = currentParticipantRow.map(threadNotificationsEnabled(from:)) ?? true
         let otherParticipantReadAt = participantRows
             .first(where: { stringValue(forKey: "userId", in: $0) == otherUserId })
             .flatMap { dateValue(forKey: "lastReadAt", in: $0) }
@@ -379,6 +424,7 @@ extension AppwriteService {
             currentUserReadAt: currentUserReadAt,
             otherParticipantReadAt: otherParticipantReadAt,
             participantUserIds: participantUserIds,
+            notificationsEnabled: notificationsEnabled,
             relationshipState: relationshipState,
             messages: sortedMessages
         )
@@ -429,6 +475,7 @@ private extension AppwriteService {
                 currentUserReadAt: nil,
                 otherParticipantReadAt: nil,
                 participantUserIds: [currentAccountId, otherUserId],
+                notificationsEnabled: true,
                 relationshipState: fallbackRelationshipState,
                 messages: []
             )
@@ -538,6 +585,18 @@ private extension AppwriteService {
         }
 
         return ""
+    }
+
+    func threadNotificationsEnabled(from participantRow: [String: Any]) -> Bool {
+        if let enabled = boolValue(forKey: "notificationsEnabled", in: participantRow) {
+            return enabled
+        }
+
+        if let muted = boolValue(forKey: "muted", in: participantRow) {
+            return !muted
+        }
+
+        return true
     }
 
     private func threadAvatarFileId(from profileRow: [String: Any]?) -> String? {
