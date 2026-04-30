@@ -20,6 +20,10 @@ struct MainTabView: View {
         let thread: ChatThread
     }
 
+    private enum DefaultsKey {
+        static let seenMatchThreadIdsPrefix = "main_seen_match_thread_ids"
+    }
+
     @Environment(AppServices.self) private var services
     @Environment(UserStore.self) private var store
     @State private var selectedTab: MainTab = .home
@@ -80,9 +84,11 @@ struct MainTabView: View {
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: matchBanner)
         .task {
+            RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
             await refreshUnreadMessageCount()
         }
         .onAppear {
+            RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
             startRealtime()
         }
         .onDisappear {
@@ -105,16 +111,16 @@ struct MainTabView: View {
     }
 
     private func handleMatchedThread(_ thread: ChatThread) {
-        let alreadyTracked = unreadMatchThreadIds.contains(thread.remoteId)
+        RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
+        _ = markMatchThreadSeen(thread.remoteId)
         RecentChatThreadStore.upsert(thread)
         unreadMatchThreadIds.insert(thread.remoteId)
-        if !alreadyTracked {
-            showMatchBanner(for: thread)
-        }
+        showMatchBanner(for: thread)
         scheduleUnreadBadgeReload()
     }
 
     private func openMessageThread(_ thread: ChatThread) {
+        RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
         RecentChatThreadStore.upsert(thread)
         unreadMatchThreadIds.remove(thread.remoteId)
         dismissMatchBanner()
@@ -237,6 +243,7 @@ struct MainTabView: View {
             )
             RecentChatThreadStore.upsert(thread)
             unreadMatchThreadIds.insert(thread.remoteId)
+            _ = markMatchThreadSeen(thread.remoteId)
             NotificationCenter.default.post(name: .fyreThreadsDidChange, object: thread)
             showMatchBanner(for: thread)
         } catch {
@@ -253,6 +260,7 @@ struct MainTabView: View {
             unreadMessageCount = threads.reduce(0) { total, thread in
                 total + unreadMessageCount(in: thread)
             }
+            surfaceNewMatchedThreads(from: threads)
         } catch {
 #if DEBUG
             debugPrint("Unread badge refresh failed: \(error.localizedDescription)")
@@ -266,6 +274,60 @@ struct MainTabView: View {
             guard let currentUserReadAt = thread.currentUserReadAt else { return true }
             return message.sentAt > currentUserReadAt
         }.count
+    }
+
+    @MainActor
+    private func surfaceNewMatchedThreads(from threadDTOs: [ThreadDTO]) {
+        var firstThreadToShow: ChatThread?
+
+        for dto in threadDTOs where dto.relationshipState == .matched && dto.messages.isEmpty {
+            guard markMatchThreadSeen(dto.remoteId) else { continue }
+
+            let thread = ChatThread(
+                id: dto.id,
+                remoteId: dto.remoteId,
+                name: dto.name,
+                avatar: dto.avatar,
+                isOnline: dto.isOnline,
+                lastSeenAt: dto.lastSeenAt,
+                currentUserReadAt: dto.currentUserReadAt,
+                otherParticipantReadAt: dto.otherParticipantReadAt,
+                participantUserIds: dto.participantUserIds,
+                notificationsEnabled: dto.notificationsEnabled,
+                relationshipState: dto.relationshipState,
+                messages: dto.messages.map(ChatMessage.init(dto:))
+            )
+
+            RecentChatThreadStore.upsert(thread)
+            unreadMatchThreadIds.insert(thread.remoteId)
+            firstThreadToShow = firstThreadToShow ?? thread
+        }
+
+        if let firstThreadToShow {
+            NotificationCenter.default.post(name: .fyreThreadsDidChange, object: firstThreadToShow)
+            showMatchBanner(for: firstThreadToShow)
+        }
+    }
+
+    private func markMatchThreadSeen(_ threadId: String) -> Bool {
+        let trimmed = threadId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        var seenThreadIds = UserDefaults.standard.stringArray(forKey: seenMatchThreadIdsKey) ?? []
+        guard !seenThreadIds.contains(trimmed) else { return false }
+
+        seenThreadIds.append(trimmed)
+        if seenThreadIds.count > 200 {
+            seenThreadIds.removeFirst(seenThreadIds.count - 200)
+        }
+        UserDefaults.standard.set(seenThreadIds, forKey: seenMatchThreadIdsKey)
+        return true
+    }
+
+    private var seenMatchThreadIdsKey: String {
+        let userId = store.currentUser?.appwriteUserId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let scope = userId?.isEmpty == false ? userId ?? "anonymous" : "anonymous"
+        return "\(DefaultsKey.seenMatchThreadIdsPrefix).\(scope)"
     }
 }
 

@@ -136,7 +136,7 @@ export class AppwriteService {
     let nextAvatarFileId = user.avatarFileId ?? null;
     if (user.profileImageData && user.profileImageData.trim().length > 0 && !nextAvatarFileId) {
       nextAvatarFileId = this.makeRandomIdentifier();
-      await this.uploadAvatarDataUrl(user.profileImageData, nextAvatarFileId);
+      await this.uploadAvatarDataUrl(user.profileImageData, nextAvatarFileId, accountId);
     }
 
     const payload = this.makeProfilePayload({
@@ -149,7 +149,8 @@ export class AppwriteService {
       await this.sendJsonRequest('POST', this.tableRowsPath(this.configuration.profilesTableId), {
         body: {
           rowId: accountId,
-          data: payload
+          data: payload,
+          permissions: this.profilePermissions(accountId)
         },
         expectedStatusCodes: [201]
       });
@@ -157,7 +158,8 @@ export class AppwriteService {
       const existingRowId = this.stringValue(existingProfileRow.$id) ?? accountId;
       await this.sendJsonRequest('PATCH', `${this.tableRowsPath(this.configuration.profilesTableId)}/${existingRowId}`, {
         body: {
-          data: payload
+          data: payload,
+          permissions: this.profilePermissions(accountId)
         },
         expectedStatusCodes: [200]
       });
@@ -176,7 +178,7 @@ export class AppwriteService {
     const previousAvatarFileId = user.avatarFileId ?? null;
     const nextAvatarFileId = this.makeRandomIdentifier();
 
-    await this.uploadAvatarDataUrl(profileImageData, nextAvatarFileId);
+    await this.uploadAvatarDataUrl(profileImageData, nextAvatarFileId, accountId);
 
     try {
       const updated = await this.updateProfile({
@@ -494,6 +496,10 @@ export class AppwriteService {
 
     const matched = this.booleanValue(response.matched) ?? false;
     if (!matched) {
+      if (decision === 'liked') {
+        return this.fetchMatchedThreadAfterSwipe(otherUserId, otherUserName);
+      }
+
       return null;
     }
 
@@ -691,6 +697,10 @@ export class AppwriteService {
     const participantUserIds = participantRows
       .map((row) => this.stringValue(row.userId))
       .filter((value): value is string => Boolean(value));
+    if (!participantUserIds.includes(resolvedCurrentAccountId)) {
+      return null;
+    }
+
     const currentParticipantRow =
       participantRows.find((row) => this.stringValue(row.userId) === resolvedCurrentAccountId) ?? null;
     const currentUserReadAt = this.dateValue(currentParticipantRow?.lastReadAt);
@@ -830,6 +840,41 @@ export class AppwriteService {
     ]);
 
     return rows.length > 0;
+  }
+
+  private async hasMatchedRelationshipWithCurrentUser(otherUserId: string): Promise<boolean> {
+    const currentAccountId = await this.fetchCurrentAccountId(false);
+    if (!currentAccountId) {
+      return false;
+    }
+
+    const relationshipState = await this.fetchRelationshipState(currentAccountId, otherUserId);
+    if (relationshipState === 'matched') {
+      return true;
+    }
+
+    return this.hasLegacyMatch(currentAccountId, otherUserId);
+  }
+
+  private async fetchMatchedThreadAfterSwipe(
+    otherUserId: string,
+    otherUserName: string | null
+  ): Promise<ChatThread | null> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        if (await this.hasMatchedRelationshipWithCurrentUser(otherUserId)) {
+          return this.createOrGetThread(otherUserId, otherUserName);
+        }
+      } catch {
+        // Keep parity with iOS: a transient relationship read failure should not fail the swipe flow.
+      }
+
+      if (attempt < 4) {
+        await wait(250);
+      }
+    }
+
+    return null;
   }
 
   private isRelationshipVisibleInInbox(state: RelationshipState): boolean {
@@ -1282,12 +1327,20 @@ export class AppwriteService {
   }
 
   private chatRealtimeChannels(): string[] {
-    return [
+    const channels = [
       this.tablesRealtimeChannel(this.configuration.messagesTableId),
       this.tablesRealtimeChannel(this.configuration.threadsTableId),
       this.tablesRealtimeChannel(this.configuration.threadParticipantsTableId),
       this.tablesRealtimeChannel(this.configuration.profilesTableId)
     ];
+    if (this.configuration.matchesTableId) {
+      channels.push(this.tablesRealtimeChannel(this.configuration.matchesTableId));
+    }
+    if (this.configuration.relationshipsTableId) {
+      channels.push(this.tablesRealtimeChannel(this.configuration.relationshipsTableId));
+    }
+
+    return channels;
   }
 
   private tablesRealtimeChannel(tableId: string): string {
@@ -1664,11 +1717,19 @@ export class AppwriteService {
       throw new AppwriteServiceError('Chat attachments bucket not configured', 400);
     }
 
+    const currentUserId = await this.fetchCurrentAccountId(true);
+    if (!currentUserId) {
+      throw new AppwriteServiceError('Missing current Appwrite account id', 401);
+    }
+
     const fileId = this.makeRandomIdentifier();
     const file = dataUrlToFile(attachment.dataUrl, attachment.name, attachment.mimeType);
     const formData = new FormData();
     formData.append('fileId', fileId);
     formData.append('file', file);
+    for (const permission of this.ownerFilePermissions(currentUserId)) {
+      formData.append('permissions[]', permission);
+    }
 
     await this.sendRequest('POST', `/storage/buckets/${this.configuration.chatAttachmentsBucketId}/files`, {
       body: formData,
@@ -1733,11 +1794,14 @@ export class AppwriteService {
     return 'file';
   }
 
-  private async uploadAvatarDataUrl(dataUrl: string, fileId: string): Promise<void> {
+  private async uploadAvatarDataUrl(dataUrl: string, fileId: string, ownerUserId: string): Promise<void> {
     const file = dataUrlToFile(dataUrl, `avatar-${fileId}.jpg`);
     const formData = new FormData();
     formData.append('fileId', fileId);
     formData.append('file', file);
+    for (const permission of this.ownerFilePermissions(ownerUserId)) {
+      formData.append('permissions[]', permission);
+    }
 
     await this.sendRequest('POST', `/storage/buckets/${this.configuration.avatarsBucketId}/files`, {
       body: formData,
@@ -1957,6 +2021,22 @@ export class AppwriteService {
     }
 
     return true;
+  }
+
+  private profilePermissions(ownerUserId: string): string[] {
+    return [
+      `read("user:${ownerUserId}")`,
+      `update("user:${ownerUserId}")`,
+      `delete("user:${ownerUserId}")`
+    ];
+  }
+
+  private ownerFilePermissions(ownerUserId: string): string[] {
+    return [
+      `read("user:${ownerUserId}")`,
+      `update("user:${ownerUserId}")`,
+      `delete("user:${ownerUserId}")`
+    ];
   }
 
   private toInputDate(value: Date | null): string | undefined {

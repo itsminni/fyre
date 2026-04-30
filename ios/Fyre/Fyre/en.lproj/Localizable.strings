@@ -95,6 +95,7 @@
 "chat.voice.permissionDenied" = "Enable microphone access in Settings to send voice messages.";
 "chat.voice.startFailed" = "Unable to start recording right now.";
 "chat.voice.stopFailed" = "Unable to finish the voice recording.";
+"chat.voice.playbackFailed" = "Unable to play this voice message.";
 "chat.message.placeholder" = "Message";
 "chat.messageInfo.title" = "Message info";
 "chat.messageInfo.content" = "Content";

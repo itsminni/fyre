@@ -118,7 +118,19 @@ extension AppwriteService {
             throw error
         }
 
-        let remoteMessageId = stringValue(forKey: "messageId", in: response) ?? UUID().uuidString
+        guard let remoteMessageId = stringValue(forKey: "messageId", in: response) else {
+            if let recoveredMessage = try await recoverRecentlySentMessage(
+                threadId: threadId,
+                text: trimmed,
+                replyToMessageId: replyToMessageId,
+                attachmentFileId: uploadedAttachment?.fileId,
+                notBefore: attemptedAt.addingTimeInterval(-12)
+            ) {
+                return recoveredMessage
+            }
+
+            throw AppwriteServiceError.invalidResponse
+        }
         let createdAt = dateValue(forKey: "createdAt", in: response) ?? Date()
         let responseText = stringValue(forKey: "text", in: response) ?? trimmed
         let responseMessageType = MessageTypeDTO(
@@ -170,10 +182,24 @@ extension AppwriteService {
         )
 
         let isMatch = boolValue(forKey: "matched", in: response) ?? false
-        guard isMatch else { return nil }
+        guard isMatch else {
+            guard decision == .liked else { return nil }
+            let responseRelationshipState = stringValue(forKey: "relationshipState", in: response)
+                .flatMap(RelationshipStateDTO.init(rawValue:))
+            guard response.isEmpty || responseRelationshipState == .matched else {
+                return nil
+            }
+            return try await fetchMatchedThreadAfterSwipe(
+                otherUserId: otherUserId,
+                otherUserName: otherUserName
+            )
+        }
 
         guard let threadId = stringValue(forKey: "threadId", in: response) else {
-            throw AppwriteServiceError.invalidResponse
+            return try await fetchMatchedThreadAfterSwipe(
+                otherUserId: otherUserId,
+                otherUserName: otherUserName
+            )
         }
 
         return try await fetchThreadAfterWrite(
@@ -353,9 +379,7 @@ extension AppwriteService {
             return nil
         }
 
-        guard let threadRow = try await fetchRowIfAccessible(tableId: configuration.threadsTableId, rowId: threadId) else {
-            return nil
-        }
+        let threadRow = try await fetchRowIfAccessible(tableId: configuration.threadsTableId, rowId: threadId)
 
         let participantRows = try await listRows(
             tableId: configuration.threadParticipantsTableId,
@@ -364,7 +388,10 @@ extension AppwriteService {
             ]
         )
 
-        let participantUserIds = participantRows.compactMap { stringValue(forKey: "userId", in: $0) }
+        let participantUserIds = Array(Set(participantRows.compactMap { stringValue(forKey: "userId", in: $0) })).sorted()
+        guard participantUserIds.contains(resolvedCurrentAccountId) else {
+            return nil
+        }
         let otherUserId = participantUserIds.first(where: { $0 != resolvedCurrentAccountId })
         let relationshipState = try await fetchRelationshipState(
             currentAccountId: resolvedCurrentAccountId,
@@ -432,6 +459,56 @@ extension AppwriteService {
 }
 
 private extension AppwriteService {
+    func fetchMatchedThreadAfterSwipe(otherUserId: String, otherUserName: String?) async throws -> ThreadDTO? {
+        var lastError: Error?
+
+        for attempt in 0..<5 {
+            do {
+                if try await hasMatchedRelationshipWithCurrentUser(otherUserId: otherUserId) {
+                    let threadId = try await createOrGetThread(otherUserId: otherUserId)
+                    return try await fetchThreadAfterWrite(
+                        threadId: threadId,
+                        otherUserId: otherUserId,
+                        otherUserName: otherUserName,
+                        fallbackRelationshipState: .matched
+                    )
+                }
+            } catch {
+                lastError = error
+            }
+
+            if attempt < 4 {
+                try await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+
+#if DEBUG
+        if let lastError {
+            debugPrint("Swipe match fallback failed: \(lastError.localizedDescription)")
+        }
+#endif
+        return nil
+    }
+
+    func hasMatchedRelationshipWithCurrentUser(otherUserId: String) async throws -> Bool {
+        guard let currentAccountId = try await fetchCurrentAccountId(required: false) else {
+            return false
+        }
+
+        let relationshipState = try await fetchRelationshipState(
+            currentAccountId: currentAccountId,
+            otherUserId: otherUserId
+        )
+        if relationshipState == .matched {
+            return true
+        }
+
+        return try await hasLegacyMatch(
+            currentAccountId: currentAccountId,
+            otherUserId: otherUserId
+        )
+    }
+
     func fetchThreadAfterWrite(
         threadId: String,
         otherUserId: String,
@@ -490,7 +567,7 @@ private extension AppwriteService {
 
     func fetchRelationshipState(currentAccountId: String, otherUserId: String?) async throws -> RelationshipStateDTO {
         guard let otherUserId, !otherUserId.isEmpty else {
-            return .matched
+            return .none
         }
 
         guard let relationshipRow = try await fetchRelationshipRow(

@@ -9,7 +9,7 @@ import SwiftUI
 import UIKit
 
 // Simple chat models used only for the UI layer in this test
-struct ChatMessage: Identifiable, Hashable {
+struct ChatMessage: Identifiable, Hashable, Codable {
     let id: UUID
     let remoteId: String
     let text: String
@@ -61,7 +61,7 @@ struct ChatMessage: Identifiable, Hashable {
     }
 }
 
-struct ChatThread: Identifiable, Hashable {
+struct ChatThread: Identifiable, Hashable, Codable {
     let id: UUID
     let remoteId: String
     let name: String
@@ -109,17 +109,75 @@ struct ChatThread: Identifiable, Hashable {
 @MainActor
 enum RecentChatThreadStore {
     private static var cachedThreads: [String: ChatThread] = [:]
+    private static var activeCacheKey = cacheKey(for: nil)
+
+    static func configure(currentUserId: String?) {
+        let cacheKey = cacheKey(for: currentUserId)
+        guard cacheKey != activeCacheKey || cachedThreads.isEmpty else { return }
+
+        activeCacheKey = cacheKey
+        cachedThreads = loadThreads(forKey: cacheKey)
+    }
 
     static func all() -> [ChatThread] {
         Array(cachedThreads.values)
     }
 
     static func upsert(_ thread: ChatThread) {
-        cachedThreads[thread.remoteId] = thread
+        cachedThreads[thread.remoteId] = mergedThread(incoming: thread, existing: cachedThreads[thread.remoteId])
+        persist()
+    }
+
+    static func thread(remoteId: String) -> ChatThread? {
+        cachedThreads[remoteId]
     }
 
     static func remove(remoteId: String) {
         cachedThreads.removeValue(forKey: remoteId)
+        persist()
+    }
+
+    private static func mergedThread(incoming: ChatThread, existing: ChatThread?) -> ChatThread {
+        guard let existing else { return incoming }
+        guard incoming.messages.isEmpty, !existing.messages.isEmpty else { return incoming }
+
+        return ChatThread(
+            id: incoming.id,
+            remoteId: incoming.remoteId,
+            name: incoming.name,
+            avatar: incoming.avatar,
+            isOnline: incoming.isOnline,
+            lastSeenAt: incoming.lastSeenAt,
+            currentUserReadAt: incoming.currentUserReadAt,
+            otherParticipantReadAt: incoming.otherParticipantReadAt,
+            participantUserIds: incoming.participantUserIds,
+            notificationsEnabled: incoming.notificationsEnabled,
+            relationshipState: incoming.relationshipState,
+            messages: existing.messages
+        )
+    }
+
+    private static func cacheKey(for currentUserId: String?) -> String {
+        let trimmed = currentUserId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let scopedUserId = trimmed.isEmpty ? "anonymous" : trimmed
+        return "fyre_recent_chat_threads_v1_\(scopedUserId)"
+    }
+
+    private static func loadThreads(forKey key: String) -> [String: ChatThread] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let threads = try? JSONDecoder().decode([ChatThread].self, from: data) else {
+            return [:]
+        }
+
+        return threads.reduce(into: [:]) { result, thread in
+            result[thread.remoteId] = thread
+        }
+    }
+
+    private static func persist() {
+        let threads = Array(cachedThreads.values)
+        guard let data = try? JSONEncoder().encode(threads) else { return }
+        UserDefaults.standard.set(data, forKey: activeCacheKey)
     }
 }
 
@@ -131,6 +189,7 @@ struct MessagesView: View {
     }
 
     @Environment(AppServices.self) private var services
+    @Environment(UserStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
     // Local UI state for the list of threads
     @State private var threads: [ChatThread] = []
@@ -179,7 +238,7 @@ struct MessagesView: View {
                                         title: thread.notificationsEnabled
                                             ? L10n.tr("messages.mute.action")
                                             : L10n.tr("messages.unmute.action"),
-                                        systemImage: thread.notificationsEnabled ? "bell.slash" : "speaker.wave.2",
+                                        systemImage: thread.notificationsEnabled ? "bell.slash" : "bell",
                                         textColor: .primary,
                                         iconColor: .orange
                                     )
@@ -204,7 +263,7 @@ struct MessagesView: View {
                                         thread.notificationsEnabled
                                             ? L10n.tr("messages.mute.action")
                                             : L10n.tr("messages.unmute.action"),
-                                        systemImage: thread.notificationsEnabled ? "bell.slash" : "speaker.wave.2"
+                                        systemImage: thread.notificationsEnabled ? "bell.slash" : "bell"
                                     )
                                 }
                                 .tint(.orange)
@@ -244,6 +303,7 @@ struct MessagesView: View {
             await loadThreads()
         }
         .onAppear {
+            RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
             consumeExternalOpenThreadIfNeeded()
             startRealtime()
         }
@@ -276,6 +336,7 @@ struct MessagesView: View {
 
     private func loadThreads() async {
         do {
+            RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
             let dtos = try await services.backend.fetchThreads()
             let existingNames = Dictionary(uniqueKeysWithValues: threads.map { ($0.remoteId, $0.name) })
             let fetchedThreads = dtos.map { dto in
@@ -321,15 +382,18 @@ struct MessagesView: View {
 
     private func openThread(_ thread: ChatThread) {
         RecentChatThreadStore.upsert(thread)
-        upsertThread(thread)
-        selectedThread = thread
+        let resolvedThread = RecentChatThreadStore.thread(remoteId: thread.remoteId) ?? thread
+        upsertThread(resolvedThread)
+        selectedThread = resolvedThread
     }
 
     private func upsertThread(_ thread: ChatThread) {
+        RecentChatThreadStore.upsert(thread)
+        let resolvedThread = RecentChatThreadStore.thread(remoteId: thread.remoteId) ?? thread
         if let existingIndex = threads.firstIndex(where: { $0.remoteId == thread.remoteId }) {
-            threads[existingIndex] = thread
+            threads[existingIndex] = resolvedThread
         } else {
-            threads.insert(thread, at: 0)
+            threads.insert(resolvedThread, at: 0)
         }
     }
 
@@ -725,17 +789,18 @@ struct ChatAvatarView: View {
 
     @ViewBuilder
     private var fallbackAvatarContent: some View {
-        if let uiImage = UIImage(named: avatarKey) {
+        let trimmedAvatarKey = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedAvatarKey.isEmpty, let uiImage = UIImage(named: trimmedAvatarKey) {
             Image(uiImage: uiImage)
                 .resizable()
                 .scaledToFill()
-        } else if !avatarKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  UIImage(systemName: avatarKey) != nil {
+        } else if !trimmedAvatarKey.isEmpty,
+                  UIImage(systemName: trimmedAvatarKey) != nil {
             ZStack {
                 Circle()
                     .fill(placeholderAvatarFill)
 
-                Image(systemName: avatarKey)
+                Image(systemName: trimmedAvatarKey)
                     .resizable()
                     .scaledToFit()
                     .foregroundStyle(placeholderIconColor)

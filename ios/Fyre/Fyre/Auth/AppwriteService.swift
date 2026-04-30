@@ -838,9 +838,12 @@ actor AppwriteService {
     }
 
     private func shouldBypassDirectFunctionInvoke(functionId: String) -> Bool {
-        // Relationship mutations are easier to trace in Appwrite when they always create executions,
-        // and they do not rely on the direct invoke response body.
-        configuration.eventAdminFunctionId == functionId
+        // These functions currently reject generated domain invokes, so skip the failing direct
+        // request and go straight to the execution API.
+        configuration.discoverProfilesFunctionId == functionId
+            || configuration.recordSwipeFunctionId == functionId
+            || configuration.sendMessageFunctionId == functionId
+            || configuration.eventAdminFunctionId == functionId
             || configuration.manageRelationshipFunctionId == functionId
     }
 

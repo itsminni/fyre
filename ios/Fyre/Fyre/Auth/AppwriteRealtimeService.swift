@@ -54,6 +54,22 @@ struct AppwriteRealtimeEvent {
         return nil
     }
 
+    func intValue(forKey key: String) -> Int? {
+        if let value = payload[key] as? Int {
+            return value
+        }
+
+        if let value = payload[key] as? NSNumber {
+            return value.intValue
+        }
+
+        if let value = payload[key] as? String {
+            return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        return nil
+    }
+
     var isMutation: Bool {
         events.contains { event in
             event.contains(".create") || event.contains(".update") || event.contains(".delete")

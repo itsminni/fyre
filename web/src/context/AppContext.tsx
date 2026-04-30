@@ -749,7 +749,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       realtimeState: 'connecting'
     }));
 
-    let unsubscribe = () => undefined;
+    let unsubscribe: () => void = () => undefined;
     try {
       unsubscribe = appwriteService.subscribeToChatRealtime(scheduleRefresh);
       scheduleRefresh();

@@ -237,6 +237,8 @@ struct ChatDetailView: View {
     @State private var pendingRelationshipAction: PendingRelationshipAction?
     @State private var messageReadInfoMessage: ChatMessage?
     @State private var keyboardOverlap: CGFloat = 0
+    @State private var localAudioDataByFileId: [String: Data] = [:]
+    @State private var localAttachmentDataByFileId: [String: Data] = [:]
     @FocusState private var isInputFocused: Bool
     @StateObject private var audioPlayback = ChatAudioPlaybackController()
     @StateObject private var voiceRecorder = ChatVoiceRecorder()
@@ -517,7 +519,7 @@ struct ChatDetailView: View {
                     title: threadNotificationsEnabled
                         ? L10n.tr("messages.mute.action")
                         : L10n.tr("messages.unmute.action"),
-                    systemImage: threadNotificationsEnabled ? "bell.slash" : "speaker.wave.2",
+                    systemImage: threadNotificationsEnabled ? "bell.slash" : "bell",
                     textColor: .white,
                     iconColor: .orange
                 )
@@ -646,6 +648,13 @@ struct ChatDetailView: View {
             attachment: pendingAttachment
         )
         // Clear optimistically for a snappy composer, then restore the draft if the send fails.
+        if let fileId = optimisticMessage.attachment?.fileId,
+           let attachmentData = attachment?.data {
+            localAttachmentDataByFileId[fileId] = attachmentData
+            if attachment?.type == .audio {
+                localAudioDataByFileId[fileId] = attachmentData
+            }
+        }
         draft = ""
         pendingAttachment = nil
         sendErrorMessage = nil
@@ -683,6 +692,10 @@ struct ChatDetailView: View {
             } catch {
                 await MainActor.run {
                     messages.removeAll { $0.id == optimisticMessageID }
+                    if let fileId = optimisticMessage.attachment?.fileId {
+                        localAudioDataByFileId.removeValue(forKey: fileId)
+                        localAttachmentDataByFileId.removeValue(forKey: fileId)
+                    }
                     draft = sendsVoiceOnlyMessage ? "" : text
                     pendingAttachment = attachment
                     replyingToMessage = replyTarget
@@ -776,6 +789,7 @@ struct ChatDetailView: View {
 
     private func reconcileOptimisticMessage(id: UUID, with confirmed: ChatMessage) {
         if let existingIndex = messages.firstIndex(where: { $0.id == id }) {
+            transferLocalAttachmentCache(from: messages[existingIndex], to: confirmed)
             messages[existingIndex] = confirmed
             messages.sort { $0.sentAt < $1.sentAt }
             return
@@ -995,6 +1009,13 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private var composerStatusAndReplyContent: some View {
+        if let playbackErrorMessage = audioPlayback.playbackErrorMessage {
+            Text(playbackErrorMessage)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
         if let sendErrorMessage {
             Text(sendErrorMessage)
                 .font(.caption)
@@ -2205,7 +2226,10 @@ struct ChatDetailView: View {
     ) -> some View {
         switch messageType {
         case .image:
-            RemoteChatAttachmentImage(fileId: attachment.fileId)
+            RemoteChatAttachmentImage(
+                fileId: attachment.fileId,
+                localData: localAttachmentDataByFileId[attachment.fileId]
+            )
                 .frame(
                     maxWidth: isEmbeddedInBubble ? max(messageMaxWidth - 24, 180) : min(messageMaxWidth + 24, 292),
                     maxHeight: 292
@@ -2236,6 +2260,7 @@ struct ChatDetailView: View {
         case .audio:
             let playbackKey = remoteAudioPlaybackKey(for: attachment)
             let isPlaying = audioPlayback.activeKey == playbackKey
+            let localAudioData = localAudioDataByFileId[attachment.fileId]
             audioAttachmentCard(
                 duration: audioPlayback.displayDuration(for: playbackKey, fallbackDuration: attachment.duration),
                 currentTime: audioPlayback.currentTime(for: playbackKey),
@@ -2244,11 +2269,17 @@ struct ChatDetailView: View {
                 isCompact: false
             ) {
                 Task {
-                    await audioPlayback.toggleRemoteAttachment(
-                        attachment,
-                        key: playbackKey
-                    ) {
-                        try await services.backend.fetchAttachmentData(fileId: attachment.fileId)
+                    if let localAudioData {
+                        await audioPlayback.toggleAudioData(localAudioData, key: playbackKey)
+                    } else if isLocalAttachmentFileId(attachment.fileId) {
+                        audioPlayback.reportPlaybackUnavailable()
+                    } else {
+                        await audioPlayback.toggleRemoteAttachment(
+                            attachment,
+                            key: playbackKey
+                        ) {
+                            try await services.backend.fetchAttachmentData(fileId: attachment.fileId)
+                        }
                     }
                 }
             }
@@ -2340,8 +2371,8 @@ struct ChatDetailView: View {
         let progress = resolvedDuration > 0 ? CGFloat(min(max(currentTime / resolvedDuration, 0), 1)) : 0
         let remainingTime = isPlaying && resolvedDuration > 0 ? max(0, resolvedDuration - currentTime) : resolvedDuration
 
-        return HStack(spacing: isCompact ? 8 : 10) {
-            Button(action: action) {
+        return Button(action: action) {
+            HStack(spacing: isCompact ? 8 : 10) {
                 ZStack {
                     Circle()
                         .fill(audioPlayerButtonFill)
@@ -2358,28 +2389,30 @@ struct ChatDetailView: View {
                             .offset(x: isPlaying ? 0 : 1)
                     }
                 }
+
+                VoiceWaveformProgressView(
+                    progress: progress,
+                    isPlaying: isPlaying,
+                    tint: .orange,
+                    trackTint: audioPlayerWaveformTrackTint
+                )
+                .frame(maxWidth: .infinity)
+
+                Text(formatAudioDuration(Int(remainingTime.rounded())))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(audioPlayerSecondaryText)
+                    .frame(minWidth: 38, alignment: .trailing)
             }
-            .buttonStyle(.plain)
-
-            VoiceWaveformProgressView(
-                progress: progress,
-                isPlaying: isPlaying,
-                tint: .orange,
-                trackTint: audioPlayerWaveformTrackTint
-            )
-            .frame(maxWidth: .infinity)
-
-            Text(formatAudioDuration(Int(remainingTime.rounded())))
-                .font(.caption.monospacedDigit().weight(.semibold))
-                .foregroundStyle(audioPlayerSecondaryText)
-                .frame(minWidth: 38, alignment: .trailing)
+            .padding(.horizontal, isCompact ? 9 : 11)
+            .padding(.vertical, isCompact ? 7 : 9)
+            .frame(maxWidth: isCompact ? 214 : min(messageMaxWidth, 256), alignment: .leading)
+            .background(audioPlayerChrome)
+            .contentShape(Capsule(style: .continuous))
         }
-        .padding(.horizontal, isCompact ? 9 : 11)
-        .padding(.vertical, isCompact ? 7 : 9)
-        .frame(maxWidth: isCompact ? 214 : min(messageMaxWidth, 256), alignment: .leading)
-        .background(audioPlayerChrome)
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(L10n.tr("chat.attachment.audio"))
+        .accessibilityAddTraits(.isButton)
     }
 
     @ViewBuilder
@@ -2448,7 +2481,16 @@ struct ChatDetailView: View {
 
         Task {
             do {
-                guard let data = try await services.backend.fetchAttachmentData(fileId: attachment.fileId),
+                let data: Data?
+                if let localData = localAttachmentDataByFileId[attachment.fileId] {
+                    data = localData
+                } else if isLocalAttachmentFileId(attachment.fileId) {
+                    data = nil
+                } else {
+                    data = try await services.backend.fetchAttachmentData(fileId: attachment.fileId)
+                }
+
+                guard let data,
                       !data.isEmpty else {
                     throw AttachmentPreviewError.unavailable
                 }
@@ -2610,18 +2652,42 @@ struct ChatDetailView: View {
         for localMessage in messages where !remoteIds.contains(localMessage.remoteId) {
             guard localMessage.isMe else { continue }
 
-            let hasMatchingRemoteMessage = remoteMessages.contains { remoteMessage in
+            let matchingRemoteMessage = remoteMessages.first { remoteMessage in
                 remoteMessage.isMe
                     && remoteMessage.text == localMessage.text
                     && remoteMessage.replyToRemoteId == localMessage.replyToRemoteId
                     && abs(remoteMessage.sentAt.timeIntervalSince(localMessage.sentAt)) < 30
             }
-            if !hasMatchingRemoteMessage {
+            if let matchingRemoteMessage {
+                transferLocalAttachmentCache(from: localMessage, to: matchingRemoteMessage)
+            } else {
                 merged.append(localMessage)
             }
         }
 
         return merged.sorted { $0.sentAt < $1.sentAt }
+    }
+
+    private func transferLocalAttachmentCache(from localMessage: ChatMessage, to remoteMessage: ChatMessage) {
+        guard localMessage.messageType == remoteMessage.messageType,
+              let localFileId = localMessage.attachment?.fileId,
+              let remoteFileId = remoteMessage.attachment?.fileId,
+              localFileId != remoteFileId else {
+            return
+        }
+
+        if let data = localAttachmentDataByFileId[localFileId] {
+            localAttachmentDataByFileId[remoteFileId] = data
+            localAttachmentDataByFileId.removeValue(forKey: localFileId)
+        }
+
+        guard localMessage.messageType == .audio,
+              let audioData = localAudioDataByFileId[localFileId] else {
+            return
+        }
+
+        localAudioDataByFileId[remoteFileId] = audioData
+        localAudioDataByFileId.removeValue(forKey: localFileId)
     }
 
     private func startRealtime() {
@@ -2714,10 +2780,10 @@ struct ChatDetailView: View {
             fileId: fileId,
             name: event.stringValue(forKey: "attachmentName"),
             mimeType: event.stringValue(forKey: "attachmentMimeType"),
-            size: event.payload["attachmentSize"] as? Int,
-            width: event.payload["attachmentWidth"] as? Int,
-            height: event.payload["attachmentHeight"] as? Int,
-            duration: event.payload["attachmentDuration"] as? Int
+            size: event.intValue(forKey: "attachmentSize"),
+            width: event.intValue(forKey: "attachmentWidth"),
+            height: event.intValue(forKey: "attachmentHeight"),
+            duration: event.intValue(forKey: "attachmentDuration")
         )
     }
 
@@ -3065,6 +3131,7 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
     @Published private(set) var loadingKey: String?
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
+    @Published private(set) var playbackErrorMessage: String?
 
     private var player: AVAudioPlayer?
     private var progressTimer: Timer?
@@ -3075,20 +3142,30 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
     }
 
     func togglePendingAttachment(_ attachment: PendingChatAttachment, key: String) async {
+        await toggleAudioData(attachment.data, key: key)
+    }
+
+    func toggleAudioData(_ data: Data, key: String) async {
         if activeKey == key {
             stop()
             return
         }
 
         do {
+            playbackErrorMessage = nil
             try configurePlaybackSession()
-            let player = try AVAudioPlayer(data: attachment.data)
-            play(player: player, key: key)
+            let player = try AVAudioPlayer(data: data)
+            try play(player: player, key: key)
         } catch {
+            playbackErrorMessage = L10n.tr("chat.voice.playbackFailed")
 #if DEBUG
             debugPrint("Pending audio playback failed: \(error.localizedDescription)")
 #endif
         }
+    }
+
+    func reportPlaybackUnavailable() {
+        playbackErrorMessage = AttachmentPreviewError.unavailable.localizedDescription
     }
 
     func toggleRemoteAttachment(
@@ -3104,17 +3181,20 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
         loadingKey = key
 
         do {
+            playbackErrorMessage = nil
             guard let data = try await loader(), !data.isEmpty else {
                 loadingKey = nil
+                playbackErrorMessage = AttachmentPreviewError.unavailable.localizedDescription
                 return
             }
 
             try configurePlaybackSession()
             let player = try AVAudioPlayer(data: data)
             loadingKey = nil
-            play(player: player, key: key)
+            try play(player: player, key: key)
         } catch {
             loadingKey = nil
+            playbackErrorMessage = L10n.tr("chat.voice.playbackFailed")
 #if DEBUG
             debugPrint("Remote audio playback failed for \(attachment.fileId): \(error.localizedDescription)")
 #endif
@@ -3136,14 +3216,16 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
         stop()
     }
 
-    private func play(player: AVAudioPlayer, key: String) {
+    private func play(player: AVAudioPlayer, key: String) throws {
         stop()
         self.player = player
         self.player?.delegate = self
         self.player?.prepareToPlay()
         currentTime = 0
         duration = player.duration
-        self.player?.play()
+        guard self.player?.play() == true else {
+            throw ChatVoicePlaybackError.startFailed
+        }
         activeKey = key
         startProgressTimer()
     }
@@ -3181,6 +3263,17 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
         guard let player else { return }
         currentTime = player.currentTime
         duration = player.duration
+    }
+}
+
+private enum ChatVoicePlaybackError: LocalizedError {
+    case startFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .startFailed:
+            return L10n.tr("chat.voice.playbackFailed")
+        }
     }
 }
 
@@ -3358,7 +3451,7 @@ private struct PendingChatAttachment {
         )
     }
 
-    static func voiceMessage(data: Data, fileName: String, mimeType: String = "audio/m4a", duration: Int) -> PendingChatAttachment {
+    static func voiceMessage(data: Data, fileName: String, mimeType: String = "audio/mp4", duration: Int) -> PendingChatAttachment {
         PendingChatAttachment(
             data: data,
             fileName: normalizedFileName(from: fileName, contentType: .mpeg4Audio),
@@ -3526,11 +3619,18 @@ private final class FullScreenCameraPickerController: UIImagePickerController {
 private struct RemoteChatAttachmentImage: View {
     @Environment(AppServices.self) private var services
     let fileId: String
+    var localData: Data? = nil
     @State private var image: UIImage?
 
     var body: some View {
         Group {
-            if let image {
+            if let localImage {
+                Image(uiImage: localImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .scaledToFill()
+            } else if let image {
                 Image(uiImage: image)
                     .resizable()
                     .interpolation(.high)
@@ -3545,7 +3645,7 @@ private struct RemoteChatAttachmentImage: View {
             }
         }
         .task(id: fileId) {
-            guard image == nil else { return }
+            guard localData == nil, image == nil, !isLocalAttachmentFileId(fileId) else { return }
             do {
                 if let data = try await services.backend.fetchAttachmentData(fileId: fileId),
                    let loadedImage = UIImage(data: data) {
@@ -3558,6 +3658,19 @@ private struct RemoteChatAttachmentImage: View {
             }
         }
     }
+
+    private var localImage: UIImage? {
+        guard let localData,
+              let image = UIImage(data: localData) else {
+            return nil
+        }
+
+        return image.preparingForDisplay() ?? image
+    }
+}
+
+private func isLocalAttachmentFileId(_ fileId: String) -> Bool {
+    fileId.hasPrefix("local-")
 }
 
 private struct ChatAttachmentPreview: Identifiable {

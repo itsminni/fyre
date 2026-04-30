@@ -52,7 +52,7 @@ struct ThreadDTO: Identifiable, Sendable {
     let messages: [MessageDTO]
 }
 
-enum MessageTypeDTO: String, Sendable {
+enum MessageTypeDTO: String, Sendable, Codable {
     case text
     case image
     case video
@@ -60,7 +60,7 @@ enum MessageTypeDTO: String, Sendable {
     case file
 }
 
-struct MessageAttachmentDTO: Sendable, Hashable {
+struct MessageAttachmentDTO: Sendable, Hashable, Codable {
     let fileId: String
     let name: String?
     let mimeType: String?
