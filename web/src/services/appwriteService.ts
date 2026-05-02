@@ -538,13 +538,21 @@ export class AppwriteService {
       decision
     });
 
+    const matched = this.booleanValue(response.matched) ?? false;
     const threadId = this.stringValue(response.threadId);
     if (threadId) {
       return this.fetchThreadAfterWrite(threadId, otherUserId, otherUserName, 'matched');
     }
 
-    const matched = this.booleanValue(response.matched) ?? false;
     if (!matched) {
+      const relationshipState = this.relationshipStateValue(this.stringValue(response.relationshipState));
+      if (
+        decision === 'liked' &&
+        (Object.keys(response).length === 0 || relationshipState === 'matched')
+      ) {
+        return this.fetchMatchedThreadAfterSwipe(otherUserId, otherUserName);
+      }
+
       return null;
     }
 
@@ -880,6 +888,41 @@ export class AppwriteService {
     ]);
 
     return rows.length > 0;
+  }
+
+  private async hasMatchedRelationshipWithCurrentUser(otherUserId: string): Promise<boolean> {
+    const currentAccountId = await this.fetchCurrentAccountId(false);
+    if (!currentAccountId) {
+      return false;
+    }
+
+    const relationshipState = await this.fetchRelationshipState(currentAccountId, otherUserId);
+    if (relationshipState === 'matched') {
+      return true;
+    }
+
+    return this.hasLegacyMatch(currentAccountId, otherUserId);
+  }
+
+  private async fetchMatchedThreadAfterSwipe(
+    otherUserId: string,
+    otherUserName: string | null
+  ): Promise<ChatThread | null> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        if (await this.hasMatchedRelationshipWithCurrentUser(otherUserId)) {
+          return this.createOrGetThread(otherUserId, otherUserName);
+        }
+      } catch {
+        // A transient relationship read failure should not fail the swipe flow.
+      }
+
+      if (attempt < 4) {
+        await wait(250);
+      }
+    }
+
+    return null;
   }
 
   private isRelationshipVisibleInInbox(state: RelationshipState): boolean {
@@ -1392,6 +1435,7 @@ export class AppwriteService {
   private shouldBypassDirectFunctionInvoke(functionId: string): boolean {
     return (
       this.configuration.discoverProfilesFunctionId === functionId ||
+      this.configuration.recordSwipeFunctionId === functionId ||
       this.configuration.sendMessageFunctionId === functionId ||
       this.configuration.eventAdminFunctionId === functionId ||
       this.configuration.manageRelationshipFunctionId === functionId
