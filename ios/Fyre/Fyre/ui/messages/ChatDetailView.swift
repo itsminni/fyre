@@ -2371,48 +2371,49 @@ struct ChatDetailView: View {
         let progress = resolvedDuration > 0 ? CGFloat(min(max(currentTime / resolvedDuration, 0), 1)) : 0
         let remainingTime = isPlaying && resolvedDuration > 0 ? max(0, resolvedDuration - currentTime) : resolvedDuration
 
-        return Button(action: action) {
-            HStack(spacing: isCompact ? 8 : 10) {
-                ZStack {
-                    Circle()
-                        .fill(audioPlayerButtonFill)
-                        .frame(width: isCompact ? 32 : 38, height: isCompact ? 32 : 38)
+        return HStack(spacing: isCompact ? 8 : 10) {
+            ZStack {
+                Circle()
+                    .fill(audioPlayerButtonFill)
+                    .frame(width: isCompact ? 32 : 38, height: isCompact ? 32 : 38)
 
-                    if isLoading {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.orange)
-                    } else {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: isCompact ? 13 : 15, weight: .bold))
-                            .foregroundStyle(.orange)
-                            .offset(x: isPlaying ? 0 : 1)
-                    }
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.orange)
+                } else {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: isCompact ? 13 : 15, weight: .bold))
+                        .foregroundStyle(.orange)
+                        .offset(x: isPlaying ? 0 : 1)
                 }
-
-                VoiceWaveformProgressView(
-                    progress: progress,
-                    isPlaying: isPlaying,
-                    tint: .orange,
-                    trackTint: audioPlayerWaveformTrackTint
-                )
-                .frame(maxWidth: .infinity)
-
-                Text(formatAudioDuration(Int(remainingTime.rounded())))
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(audioPlayerSecondaryText)
-                    .frame(minWidth: 38, alignment: .trailing)
             }
-            .padding(.horizontal, isCompact ? 9 : 11)
-            .padding(.vertical, isCompact ? 7 : 9)
-            .frame(maxWidth: isCompact ? 214 : min(messageMaxWidth, 256), alignment: .leading)
-            .background(audioPlayerChrome)
-            .contentShape(Capsule(style: .continuous))
+
+            VoiceWaveformProgressView(
+                progress: progress,
+                isPlaying: isPlaying,
+                tint: .orange,
+                trackTint: audioPlayerWaveformTrackTint
+            )
+            .frame(maxWidth: .infinity)
+
+            Text(formatAudioDuration(Int(remainingTime.rounded())))
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(audioPlayerSecondaryText)
+                .frame(minWidth: 38, alignment: .trailing)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, isCompact ? 9 : 11)
+        .padding(.vertical, isCompact ? 7 : 9)
+        .frame(maxWidth: isCompact ? 214 : min(messageMaxWidth, 256), alignment: .leading)
+        .background(audioPlayerChrome)
+        .contentShape(Capsule(style: .continuous))
+        .highPriorityGesture(TapGesture().onEnded { action() })
         .accessibilityElement(children: .combine)
         .accessibilityLabel(L10n.tr("chat.attachment.audio"))
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            action()
+        }
     }
 
     @ViewBuilder
