@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useI18n } from '../../i18n';
 import { MainEventSnapshot } from '../../types/models';
 
 interface EventPreviewCardProps {
@@ -10,7 +11,8 @@ export function EventPreviewCard({
   snapshot,
   registrationBadge
 }: EventPreviewCardProps): JSX.Element {
-  const dateLabel = new Intl.DateTimeFormat('it-IT', {
+  const { language, t } = useI18n();
+  const dateLabel = new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'it-IT', {
     weekday: 'long',
     day: '2-digit',
     month: 'long',
@@ -20,27 +22,30 @@ export function EventPreviewCard({
 
   return (
     <article className="event-preview-card">
-      <div className="event-preview-card__hero">
-        <img src="/images/party-poster.png" alt="Poster evento" />
+      <Link className="event-preview-card__hero" to="/app/events/main" aria-label={t('events.preview.openDetail')}>
+        <img src="/images/party-poster.png" alt={t('events.preview.posterAlt')} />
         <div className="event-preview-card__overlay">
           {registrationBadge && <span className="event-badge">{registrationBadge}</span>}
           <h3>{snapshot.title}</h3>
           <p>{dateLabel}</p>
         </div>
-      </div>
+      </Link>
 
       <div className="event-preview-card__body">
         <p className="event-preview-card__meta">EVENT_VENUE_REDACTED</p>
         <p className="event-preview-card__meta">
-          Posti rimanenti - M: {snapshot.remainingMaleSlots}, F: {snapshot.remainingFemaleSlots}
+          {t('events.preview.remainingSlots', {
+            male: snapshot.remainingMaleSlots,
+            female: snapshot.remainingFemaleSlots
+          })}
         </p>
         <p className="event-preview-card__meta">
-          Iscritti: {snapshot.totalCount}/{snapshot.maxParticipants} - Waiting: {snapshot.waitingListCount}
+          {t('events.preview.registrations', {
+            total: snapshot.totalCount,
+            max: snapshot.maxParticipants,
+            waiting: snapshot.waitingListCount
+          })}
         </p>
-
-        <Link className="event-preview-card__link" to="/app/events/main">
-          Apri dettaglio evento
-        </Link>
       </div>
     </article>
   );

@@ -134,48 +134,80 @@ function attachmentLabel(attachment: ChatAttachment): string {
   }
 }
 
-function bubblePalette(name: string, isOutgoing: boolean): { background: string; border: string } {
-  if (isOutgoing) {
-    switch (name) {
-      case 'ocean':
-        return { background: 'rgba(70, 130, 180, 0.26)', border: 'rgba(70, 130, 180, 0.32)' };
-      case 'graphite':
-        return { background: 'rgba(48, 54, 64, 0.76)', border: 'rgba(150, 160, 180, 0.18)' };
-      case 'default':
-        return { background: 'rgba(255, 106, 59, 0.16)', border: 'rgba(255, 106, 59, 0.28)' };
-      default:
-        return { background: 'rgba(244, 114, 182, 0.18)', border: 'rgba(255, 148, 114, 0.3)' };
-    }
+function formatAttachmentSize(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    return '';
   }
 
-  switch (name) {
-    case 'ocean':
-      return { background: 'rgba(80, 130, 180, 0.12)', border: 'rgba(80, 130, 180, 0.2)' };
-    case 'sunset':
-      return { background: 'rgba(255, 173, 96, 0.12)', border: 'rgba(255, 173, 96, 0.22)' };
-    case 'default':
-      return { background: 'rgba(255, 255, 255, 0.14)', border: 'rgba(255, 255, 255, 0.16)' };
-    default:
-      return { background: 'rgba(28, 32, 38, 0.74)', border: 'rgba(255, 255, 255, 0.08)' };
+  if (sizeBytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
   }
+
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function chatSurfaceStyle(settings: ReturnType<typeof useAppStore>['persisted']['settings']): CSSProperties {
-  const outgoing = bubblePalette(settings.outgoingBubblePalette, true);
-  const incoming = bubblePalette(settings.incomingBubblePalette, false);
+function formatAttachmentDuration(duration: number | undefined): string {
+  if (!duration || !Number.isFinite(duration)) {
+    return '';
+  }
 
+  const minutes = Math.floor(duration / 60);
+  const seconds = Math.max(0, Math.round(duration % 60));
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function ChatAttachmentItem({ attachment }: { attachment: ChatAttachment }): JSX.Element {
+  const subtitle = [formatAttachmentDuration(attachment.duration), formatAttachmentSize(attachment.sizeBytes)]
+    .filter(Boolean)
+    .join(' - ');
+
+  if (attachment.type === 'image') {
+    return (
+      <a className="chat-attachment-media" href={attachment.dataUrl} download={attachment.name} target="_blank" rel="noreferrer">
+        <img src={attachment.dataUrl} alt={attachment.name} />
+      </a>
+    );
+  }
+
+  if (attachment.type === 'video') {
+    return (
+      <div className="chat-attachment-player">
+        <video controls preload="metadata" src={attachment.dataUrl} />
+        <a href={attachment.dataUrl} download={attachment.name} target="_blank" rel="noreferrer">
+          {attachment.name}
+        </a>
+      </div>
+    );
+  }
+
+  if (attachment.type === 'audio') {
+    return (
+      <div className="chat-audio-player">
+        <div className="chat-audio-player__icon" aria-hidden="true">&gt;</div>
+        <div className="chat-audio-player__body">
+          <audio controls preload="metadata" src={attachment.dataUrl} />
+          <span>{subtitle || attachment.name}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <a className="chat-attachment-file" href={attachment.dataUrl} download={attachment.name} target="_blank" rel="noreferrer">
+      <span>{attachment.name}</span>
+      {subtitle && <small>{subtitle}</small>}
+    </a>
+  );
+}
+
+// Bubble palette logic removed for web — bubbles use fixed palette in CSS now.
+
+function chatSurfaceStyle(settings: ReturnType<typeof useAppStore>['persisted']['settings']): CSSProperties {
+  // Only expose send-button colors to allow minimal customization on web.
   return {
-    '--chat-background-1': settings.chatBackgroundColor1,
-    '--chat-background-2': settings.chatBackgroundColor2,
-    '--chat-background-3': settings.chatBackgroundColor3,
-    '--chat-background-brightness': String(1 + settings.chatBackgroundBrightness),
     '--chat-send-1': settings.sendButtonColor1,
     '--chat-send-2': settings.sendButtonColor2,
-    '--chat-send-3': settings.sendButtonColor3,
-    '--chat-bubble-outgoing-bg': outgoing.background,
-    '--chat-bubble-outgoing-border': outgoing.border,
-    '--chat-bubble-incoming-bg': incoming.background,
-    '--chat-bubble-incoming-border': incoming.border
+    '--chat-send-3': settings.sendButtonColor3
   } as CSSProperties;
 }
 
@@ -211,7 +243,7 @@ export function ChatDetailPage(): JSX.Element {
 
     markThreadRead(thread.id);
     endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  }, [markThreadRead, thread, thread?.messages.length]);
+  }, [markThreadRead, thread?.id, thread?.messages.length]);
 
   async function onAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
@@ -225,7 +257,7 @@ export function ChatDetailPage(): JSX.Element {
       const loaded = await Promise.all(Array.from(files).map((file) => fileToAttachment(file)));
       setAttachments((prev) => [...prev, ...loaded]);
     } catch {
-      setUploadError('Impossibile allegare uno o piu file.');
+      setUploadError('Impossibile allegare uno o più file.');
     } finally {
       event.target.value = '';
     }
@@ -296,17 +328,14 @@ export function ChatDetailPage(): JSX.Element {
         </Link>
         <div className="empty-panel">
           <h3>Chat non trovata</h3>
-          <p>Questa conversazione non esiste piu nella lista locale.</p>
+          <p>Questa conversazione non esiste più.</p>
         </div>
       </section>
     );
   }
 
   return (
-    <section
-      className={`chat-detail-page fade-in-up chat-detail-page--${persisted.settings.chatBackgroundStyle}`}
-      style={themedSurfaceStyle}
-    >
+    <section className="chat-detail-page fade-in-up" style={themedSurfaceStyle}>
       <Link className="chat-back-link" to="/app/messages">
         Torna ai messaggi
       </Link>
@@ -356,15 +385,7 @@ export function ChatDetailPage(): JSX.Element {
                 <ul className="chat-attachments-list">
                   {message.attachments.map((attachment) => (
                     <li key={attachment.id}>
-                      {attachment.type === 'image' ? (
-                        <a href={attachment.dataUrl} download={attachment.name} target="_blank" rel="noreferrer">
-                          <img src={attachment.dataUrl} alt={attachment.name} />
-                        </a>
-                      ) : (
-                        <a href={attachment.dataUrl} download={attachment.name} target="_blank" rel="noreferrer">
-                          Scarica {attachment.name}
-                        </a>
-                      )}
+                      <ChatAttachmentItem attachment={attachment} />
                     </li>
                   ))}
                 </ul>

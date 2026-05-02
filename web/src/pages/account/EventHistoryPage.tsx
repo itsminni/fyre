@@ -1,17 +1,19 @@
 import { Navigate } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { useAppStore } from '../../hooks/useAppStore';
+import { TranslationKey, useI18n } from '../../i18n';
 import { EventHistoryStatus } from '../../types/models';
 
-const historyStatusLabels: Record<EventHistoryStatus, string> = {
-  confirmed: 'Confermato',
-  waitlisted: 'In waiting list',
-  cancelled: 'Annullato',
-  promoted: 'Promosso dalla waiting list'
+const historyStatusLabelKeys: Record<EventHistoryStatus, TranslationKey> = {
+  confirmed: 'eventStatus.confirmed',
+  waitlisted: 'eventStatus.waitlisted',
+  cancelled: 'eventStatus.cancelled',
+  promoted: 'eventStatus.promoted'
 };
 
 export function EventHistoryPage(): JSX.Element {
   const { currentUser, currentUserUpcomingEventHistory } = useAppStore();
+  const { language, t } = useI18n();
 
   if (!currentUser) {
     return <Navigate to="/" replace />;
@@ -20,25 +22,25 @@ export function EventHistoryPage(): JSX.Element {
   return (
     <section className="event-history-page fade-in-up">
       <header className="section-header">
-        <p className="section-header__eyebrow">Account</p>
-        <h2>Tutti gli eventi futuri</h2>
+        <p className="section-header__eyebrow">{t('account.title')}</p>
+        <h2>{t('events.history.title')}</h2>
       </header>
 
       <Card>
         {currentUserUpcomingEventHistory.length === 0 ? (
-          <p className="text-muted">Nessuna attivita eventi futuri.</p>
+          <p className="text-muted">{t('account.events.empty')}</p>
         ) : (
           <ul className="history-list history-list--full">
             {currentUserUpcomingEventHistory.map((item) => (
               <li key={item.id}>
                 <p>{item.eventTitle}</p>
                 <small>
-                  {new Intl.DateTimeFormat('it-IT', {
+                  {new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'it-IT', {
                     dateStyle: 'medium',
                     timeStyle: 'short'
                   }).format(new Date(item.eventDate))}
                   {' - '}
-                  {historyStatusLabels[item.status]}
+                  {t(historyStatusLabelKeys[item.status])}
                 </small>
               </li>
             ))}

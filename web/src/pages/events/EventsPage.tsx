@@ -1,30 +1,24 @@
-import { Link } from 'react-router-dom';
 import { EventPreviewCard } from '../../components/events/EventPreviewCard';
 import { useAppStore } from '../../hooks/useAppStore';
+import { useI18n } from '../../i18n';
 
 export function EventsPage(): JSX.Element {
-  const { mainEventFlags, mainEventSnapshot, isEventAdminEnabled } = useAppStore();
+  const { mainEventFlags, mainEventSnapshot } = useAppStore();
+  const { t } = useI18n();
 
   const registrationBadge = mainEventFlags.isRegistered
-    ? 'Confermato'
+    ? t('events.badge.confirmed')
     : mainEventFlags.isWaiting
-      ? 'In attesa'
+      ? t('events.badge.pending')
       : undefined;
 
   return (
     <section className="events-page fade-in-up">
       <header className="section-header">
-        <p className="section-header__eyebrow">Eventi</p>
-        <h2>Main Event</h2>
+        <h2>{t('events.title')}</h2>
       </header>
 
       <EventPreviewCard snapshot={mainEventSnapshot} registrationBadge={registrationBadge} />
-
-      {isEventAdminEnabled && (
-        <Link className="inline-link" to="/app/events/admin">
-          Apri console admin evento
-        </Link>
-      )}
     </section>
   );
 }

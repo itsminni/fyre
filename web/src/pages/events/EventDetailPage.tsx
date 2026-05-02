@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { useCountdown } from '../../hooks/useCountdown';
 import { useAppStore } from '../../hooks/useAppStore';
+import { useI18n } from '../../i18n';
 import { UserGender } from '../../types/models';
 
 const genderOptions: UserGender[] = ['male', 'female'];
@@ -23,6 +24,7 @@ export function EventDetailPage(): JSX.Element {
     adminAddMainEventParticipant,
     adminRemoveMainEventParticipant
   } = useAppStore();
+  const { language, t } = useI18n();
   const [feedback, setFeedback] = useState<{ text: string; isError: boolean } | null>(null);
 
   const [adminTitle, setAdminTitle] = useState(mainEventConfig.title);
@@ -66,7 +68,7 @@ export function EventDetailPage(): JSX.Element {
 
   const eventDateLabel = useMemo(
     () =>
-      new Intl.DateTimeFormat('it-IT', {
+      new Intl.DateTimeFormat(language === 'en' ? 'en-US' : 'it-IT', {
         weekday: 'long',
         day: '2-digit',
         month: 'long',
@@ -74,7 +76,7 @@ export function EventDetailPage(): JSX.Element {
         hour: '2-digit',
         minute: '2-digit'
       }).format(eventDate),
-    [eventDate]
+    [eventDate, language]
   );
 
   const cancellationCountdown = useCountdown(
@@ -85,10 +87,10 @@ export function EventDetailPage(): JSX.Element {
   );
 
   const actionLabel = mainEventFlags.isRegistered
-    ? 'Annulla iscrizione'
+    ? t('events.action.cancel')
     : mainEventFlags.isWaiting
-      ? 'Esci dalla waiting list'
-      : 'Partecipa all evento';
+      ? t('events.action.leaveWaitlist')
+      : t('events.action.join');
 
   async function onPrimaryAction() {
     const result =
@@ -165,11 +167,11 @@ export function EventDetailPage(): JSX.Element {
   return (
     <section className="event-detail-page fade-in-up">
       <article className="event-hero">
-        <img src="/images/party-poster.png" alt="Evento principale" />
+        <img src="/images/party-poster.png" alt={t('events.preview.posterAlt')} />
         <div className="event-hero__overlay">
           {(mainEventFlags.isRegistered || mainEventFlags.isWaiting) && (
             <span className="event-badge">
-              {mainEventFlags.isRegistered ? 'Confermato' : 'In attesa'}
+              {mainEventFlags.isRegistered ? t('events.badge.confirmed') : t('events.badge.pending')}
             </span>
           )}
           <h2>{mainEventSnapshot.title}</h2>
@@ -178,24 +180,24 @@ export function EventDetailPage(): JSX.Element {
       </article>
 
       <div className="event-detail-grid">
-        <Card title="Evento principale" subtitle={mainEventInfo.description}>
+        <Card title={t('events.detail.event')} subtitle={mainEventInfo.description}>
           <ul className="event-list">
-            <li>Buffet serale incluso</li>
-            <li>Drink di benvenuto incluso</li>
-            <li>Dress code: {mainEventInfo.dressCode}</li>
+            <li>{t('events.detail.includedBuffet')}</li>
+            <li>{t('events.detail.includedDrink')}</li>
+            <li>{t('events.detail.dressCode', { dressCode: mainEventInfo.dressCode })}</li>
           </ul>
         </Card>
 
-        <Card title="Info evento">
+        <Card title={t('events.detail.info')}>
           <ul className="event-list">
             <li>{mainEventInfo.venue}</li>
             <li>{mainEventInfo.address}</li>
-            <li>Contributo: {mainEventInfo.contribution}</li>
-            <li>Contatto: {mainEventInfo.contact}</li>
+            <li>{t('events.detail.contribution', { contribution: mainEventInfo.contribution })}</li>
+            <li>{t('events.detail.contact', { contact: mainEventInfo.contact })}</li>
           </ul>
         </Card>
 
-        <Card title="Regole">
+        <Card title={t('events.detail.rules')}>
           <ul className="event-list">
             {mainEventInfo.rules.map((rule) => (
               <li key={rule}>{rule}</li>
@@ -203,44 +205,54 @@ export function EventDetailPage(): JSX.Element {
           </ul>
         </Card>
 
-        <Card title="Stato live">
+        <Card title={t('events.detail.liveStatus')}>
           <div className="event-metric-grid">
             <EventMetricTile
-              title="Capienza"
+              title={t('events.detail.capacity')}
               value={`${mainEventSnapshot.totalCount}/${mainEventSnapshot.maxParticipants}`}
               caption={`Waiting list: ${mainEventSnapshot.waitingListCount}`}
             />
             <EventMetricTile
-              title="Uomini"
+              title={t('events.detail.men')}
               value={String(mainEventSnapshot.maleCount)}
-              caption={`Limite ${mainEventSnapshot.maleLimit} • rimasti ${mainEventSnapshot.remainingMaleSlots}`}
+              caption={t('events.detail.limitRemaining', {
+                limit: mainEventSnapshot.maleLimit,
+                remaining: mainEventSnapshot.remainingMaleSlots
+              })}
             />
             <EventMetricTile
-              title="Donne"
+              title={t('events.detail.women')}
               value={String(mainEventSnapshot.femaleCount)}
-              caption={`Limite ${mainEventSnapshot.femaleLimit} • rimasti ${mainEventSnapshot.remainingFemaleSlots}`}
+              caption={t('events.detail.limitRemaining', {
+                limit: mainEventSnapshot.femaleLimit,
+                remaining: mainEventSnapshot.remainingFemaleSlots
+              })}
             />
           </div>
 
-          <p className="event-countdown">Disdetta disponibile per: {cancellationCountdown}</p>
-          <p className="event-countdown">Iscrizioni aperte ancora per: {registrationCountdown}</p>
+          <p className="event-countdown">
+            {t('events.detail.cancellationCountdown', { countdown: cancellationCountdown })}
+          </p>
+          <p className="event-countdown">
+            {t('events.detail.registrationCountdown', { countdown: registrationCountdown })}
+          </p>
         </Card>
       </div>
 
       {isEventAdmin && (
         <Card
-          title="Amministrazione evento"
-          subtitle="Aggiorna dati evento e gestisci partecipanti/waiting list come su iOS."
+          title={t('events.admin.title')}
+          subtitle={t('events.admin.subtitle')}
           className="event-admin-card"
         >
           <form className="event-admin-form" onSubmit={onAdminSave}>
             <label>
-              Titolo evento
+              {t('events.admin.eventTitle')}
               <input value={adminTitle} onChange={(event) => setAdminTitle(event.target.value)} />
             </label>
 
             <label>
-              Data e ora
+              {t('events.admin.dateTime')}
               <input
                 type="datetime-local"
                 value={adminDate}
@@ -249,7 +261,7 @@ export function EventDetailPage(): JSX.Element {
             </label>
 
             <label>
-              Capienza totale
+              {t('events.admin.capacityTotal')}
               <input
                 type="number"
                 min={2}
@@ -259,7 +271,7 @@ export function EventDetailPage(): JSX.Element {
             </label>
 
             <label>
-              Capienza per genere
+              {t('events.admin.capacityGender')}
               <input
                 type="number"
                 min={1}
@@ -269,22 +281,22 @@ export function EventDetailPage(): JSX.Element {
             </label>
 
             <label>
-              Venue
+              {t('events.admin.venue')}
               <input value={adminVenue} onChange={(event) => setAdminVenue(event.target.value)} />
             </label>
 
             <label>
-              Indirizzo
+              {t('events.admin.address')}
               <input value={adminAddress} onChange={(event) => setAdminAddress(event.target.value)} />
             </label>
 
             <label>
-              Orario
+              {t('events.admin.time')}
               <input value={adminTimeLabel} onChange={(event) => setAdminTimeLabel(event.target.value)} />
             </label>
 
             <label>
-              Contributo
+              {t('events.admin.contribution')}
               <input
                 value={adminContribution}
                 onChange={(event) => setAdminContribution(event.target.value)}
@@ -292,12 +304,12 @@ export function EventDetailPage(): JSX.Element {
             </label>
 
             <label>
-              Contatto
+              {t('events.admin.contact')}
               <input value={adminContact} onChange={(event) => setAdminContact(event.target.value)} />
             </label>
 
             <label>
-              Dress code
+              {t('events.admin.dressCode')}
               <input
                 value={adminDressCode}
                 onChange={(event) => setAdminDressCode(event.target.value)}
@@ -305,7 +317,7 @@ export function EventDetailPage(): JSX.Element {
             </label>
 
             <label>
-              Descrizione
+              {t('events.admin.description')}
               <textarea
                 rows={3}
                 value={adminDescription}
@@ -314,16 +326,16 @@ export function EventDetailPage(): JSX.Element {
             </label>
 
             <label>
-              Regole (una per riga)
+              {t('events.admin.rules')}
               <textarea rows={4} value={adminRules} onChange={(event) => setAdminRules(event.target.value)} />
             </label>
 
-            <Button type="submit">Salva modifiche evento</Button>
+            <Button type="submit">{t('events.admin.save')}</Button>
           </form>
 
           <form className="event-admin-form event-admin-form--participants" onSubmit={onAddParticipant}>
             <label>
-              Email partecipante
+              {t('events.admin.participantEmail')}
               <input
                 type="email"
                 value={participantEmail}
@@ -333,40 +345,40 @@ export function EventDetailPage(): JSX.Element {
             </label>
 
             <label>
-              Genere
+              {t('account.gender')}
               <select
                 value={participantGender}
                 onChange={(event) => setParticipantGender(event.target.value as UserGender)}
               >
                 {genderOptions.map((option) => (
                   <option key={option} value={option}>
-                    {option === 'male' ? 'Uomo' : 'Donna'}
+                    {option === 'male' ? t('gender.male') : t('gender.female')}
                   </option>
                 ))}
               </select>
             </label>
 
             <label>
-              Destinazione
+              {t('events.admin.destination')}
               <select
                 value={participantDestination}
                 onChange={(event) =>
                   setParticipantDestination(event.target.value as 'participants' | 'waitingList')
                 }
               >
-                <option value="participants">Partecipanti</option>
+                <option value="participants">{t('events.admin.participants')}</option>
                 <option value="waitingList">Waiting list</option>
               </select>
             </label>
 
             <Button type="submit" variant="secondary">
-              Aggiungi
+              {t('events.admin.add')}
             </Button>
           </form>
 
           <div className="event-admin-lists">
             <div>
-              <h4>Partecipanti ({persisted.mainEventState.participants.length})</h4>
+              <h4>{t('events.admin.participants')} ({persisted.mainEventState.participants.length})</h4>
               <ul>
                 {persisted.mainEventState.participants.map((participant) => (
                   <li key={participant.email}>
@@ -375,7 +387,7 @@ export function EventDetailPage(): JSX.Element {
                       variant="ghost"
                       onClick={() => onRemoveParticipant(participant.email, 'participants')}
                     >
-                      Rimuovi
+                      {t('events.admin.remove')}
                     </Button>
                   </li>
                 ))}
@@ -392,7 +404,7 @@ export function EventDetailPage(): JSX.Element {
                       variant="ghost"
                       onClick={() => onRemoveParticipant(participant.email, 'waitingList')}
                     >
-                      Rimuovi
+                      {t('events.admin.remove')}
                     </Button>
                   </li>
                 ))}

@@ -1,20 +1,15 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChatAvatar } from '../../components/messages/ChatAvatar';
-import { Button } from '../../components/ui/Button';
 import { useAppStore } from '../../hooks/useAppStore';
-import { formatLastSeen } from '../../context/AppContext';
-
-const RELATIONSHIP_ACTION_LABELS = {
-  unmatch: 'Unmatch'
-} as const;
+import { useI18n } from '../../i18n';
 
 function threadPreviewText(
-  thread: ReturnType<typeof useAppStore>['persisted']['threads'][number]
+  thread: ReturnType<typeof useAppStore>['persisted']['threads'][number],
+  t: ReturnType<typeof useI18n>['t']
 ): string {
   const lastMessage = thread.messages[thread.messages.length - 1];
   if (!lastMessage) {
-    return 'Nessun messaggio';
+    return t('messages.noMessages');
   }
 
   if (lastMessage.text.trim()) {
@@ -25,161 +20,103 @@ function threadPreviewText(
     const [attachment] = lastMessage.attachments;
     switch (attachment.type) {
       case 'image':
-        return 'Foto allegata';
+        return t('messages.photo');
       case 'video':
-        return 'Video allegato';
+        return t('messages.video');
       case 'audio':
-        return 'Messaggio vocale';
+        return t('messages.audio');
       default:
         return attachment.name;
     }
   }
 
-  return 'Nessun messaggio';
+  return t('messages.noMessages');
+}
+
+function formatThreadTime(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) {
+    return '--:--';
+  }
+
+  const now = new Date();
+  const isToday =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+
+  return isToday
+    ? new Intl.DateTimeFormat('it-IT', { hour: '2-digit', minute: '2-digit' }).format(date)
+    : new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: '2-digit' }).format(date);
+}
+
+function outgoingStatusLabel(
+  thread: ReturnType<typeof useAppStore>['persisted']['threads'][number],
+  t: ReturnType<typeof useI18n>['t']
+): string | null {
+  const lastMessage = thread.messages[thread.messages.length - 1];
+  if (!lastMessage || !lastMessage.isMe) {
+    return null;
+  }
+
+  if (lastMessage.deliveryState === 'read' || Boolean(lastMessage.readAt)) {
+    return t('messages.read');
+  }
+
+  if (lastMessage.deliveryState === 'sending') {
+    return t('messages.sending');
+  }
+
+  return t('messages.sent');
 }
 
 export function MessagesPage(): JSX.Element {
-  const {
-    persisted,
-    applyRelationshipAction,
-    setThreadNotifications,
-    markNotificationRead,
-    markAllNotificationsRead,
-    unreadNotificationsCount
-  } = useAppStore();
-  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
-
-  async function handleRelationshipAction(
-    threadId: string,
-    action: keyof typeof RELATIONSHIP_ACTION_LABELS
-  ): Promise<void> {
-    setActionFeedback(null);
-    const confirmed = window.confirm(
-      `${RELATIONSHIP_ACTION_LABELS[action]} questa conversazione?`
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    const error = await applyRelationshipAction(threadId, action);
-    if (error) {
-      setActionFeedback(error);
-    }
-  }
-
-  async function handleThreadNotifications(threadId: string, enabled: boolean): Promise<void> {
-    setActionFeedback(null);
-    const error = await setThreadNotifications(threadId, enabled);
-    if (error) {
-      setActionFeedback(error);
-    }
-  }
+  const { persisted } = useAppStore();
+  const { t } = useI18n();
 
   return (
     <section className="messages-page fade-in-up">
       <header className="section-header">
-        <p className="section-header__eyebrow">Messaggi</p>
-        <h2>Chat recenti</h2>
+        <h2>{t('messages.title')}</h2>
       </header>
-
-      <article className="inbox-panel">
-        <div className="inbox-panel__header">
-          <div>
-            <h3>Notifiche</h3>
-            <p>{unreadNotificationsCount > 0 ? `${unreadNotificationsCount} non lette` : 'Tutto letto'}</p>
-          </div>
-          <Button variant="ghost" onClick={markAllNotificationsRead}>
-            Segna tutte lette
-          </Button>
-        </div>
-
-        {persisted.notifications.length === 0 ? (
-          <p className="text-muted">Nessuna notifica al momento.</p>
-        ) : (
-          <ul className="inbox-panel__list">
-            {persisted.notifications.slice(0, 6).map((notification) => (
-              <li
-                key={notification.id}
-                className={notification.readAt ? 'inbox-item' : 'inbox-item inbox-item--unread'}
-              >
-                <button
-                  className="inbox-item__button"
-                  onClick={() => markNotificationRead(notification.id)}
-                >
-                  <strong>{notification.title}</strong>
-                  <p>{notification.body}</p>
-                  <small>
-                    {new Intl.DateTimeFormat('it-IT', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    }).format(new Date(notification.createdAt))}
-                  </small>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </article>
 
       {persisted.threads.length === 0 ? (
         <div className="empty-panel">
-          <h3>Nessuna chat</h3>
-          <p>Inizia a matchare per vedere i messaggi.</p>
+          <h3>{t('messages.empty.title')}</h3>
+          <p>{t('messages.empty.body')}</p>
         </div>
       ) : (
         <ul className="thread-list">
           {persisted.threads.map((thread) => {
+            const lastMessage = thread.messages[thread.messages.length - 1];
+            const statusLabel = outgoingStatusLabel(thread, t);
+
             return (
               <li key={thread.id} className="thread-row">
                 <Link to={`/app/messages/${thread.id}`} className="thread-row__content">
                   <ChatAvatar name={thread.name} isOnline={thread.isOnline} />
 
                   <div className="thread-row__meta">
-                    <p className="thread-row__name">
-                      {thread.name}
-                      {!thread.notificationsEnabled && (
-                        <span className="thread-row__muted">Silenziata</span>
-                      )}
-                    </p>
+                    <p className="thread-row__name">{thread.name}</p>
                     <p className="thread-row__preview">
-                      {thread.isTyping ? 'Sta scrivendo...' : threadPreviewText(thread)}
+                      {thread.isTyping ? t('messages.typing') : threadPreviewText(thread, t)}
                     </p>
                   </div>
 
                   <div className="thread-row__status">
-                    <p>{thread.messages[thread.messages.length - 1]?.time ?? '--:--'}</p>
-                    {thread.isOnline ? (
-                      <span className="thread-status-online">Online</span>
+                    <p>{lastMessage ? formatThreadTime(lastMessage.createdAt) : '--:--'}</p>
+                    {thread.unreadCount > 0 ? (
+                      <strong>{thread.unreadCount > 99 ? '99+' : thread.unreadCount}</strong>
                     ) : (
-                      <span className="thread-status-lastseen">{formatLastSeen(thread.lastSeenAt)}</span>
+                      statusLabel && <span className="thread-status-lastseen">{statusLabel}</span>
                     )}
-                    {thread.unreadCount > 0 && <strong>{thread.unreadCount} nuovi</strong>}
                   </div>
                 </Link>
-
-                <div className="thread-row__actions">
-                  <Button
-                    variant="ghost"
-                    onClick={() => void handleThreadNotifications(thread.id, !thread.notificationsEnabled)}
-                  >
-                    {thread.notificationsEnabled ? 'Silenzia' : 'Riattiva notifiche'}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => void handleRelationshipAction(thread.id, 'unmatch')}
-                  >
-                    Unmatch
-                  </Button>
-                </div>
               </li>
             );
           })}
         </ul>
       )}
-
-      {actionFeedback && <p className="form-feedback form-feedback--error">{actionFeedback}</p>}
     </section>
   );
 }

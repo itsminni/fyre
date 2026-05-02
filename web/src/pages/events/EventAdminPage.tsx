@@ -176,7 +176,7 @@ export function EventAdminPage(): JSX.Element {
 
     if (!payload.title) {
       setFeedback({
-        text: 'Il titolo evento non puo essere vuoto.',
+        text: 'Il titolo evento non può essere vuoto.',
         isError: true
       });
       return;
@@ -272,7 +272,7 @@ export function EventAdminPage(): JSX.Element {
 
         <div className="empty-panel">
           <h3>Funzione non disponibile</h3>
-          <p>La funzione admin evento non risulta configurata per il web.</p>
+          <p>Il pannello admin evento non risulta configurato.</p>
           <Link className="inline-link" to="/app/events">
             Torna agli eventi
           </Link>
@@ -302,7 +302,7 @@ export function EventAdminPage(): JSX.Element {
       {!isLoading && !hasState && (
         <div className="empty-panel">
           <h3>Nessun dato admin</h3>
-          <p>{feedback?.text ?? 'Non e stato possibile caricare il pannello admin.'}</p>
+          <p>{feedback?.text ?? 'Non è stato possibile caricare il pannello admin.'}</p>
           <Button variant="secondary" onClick={() => void reloadState()}>
             Riprova
           </Button>
