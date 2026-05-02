@@ -151,6 +151,7 @@ export type TranslationKey =
   | 'account.instagramTag'
   | 'account.spotifyTag'
   | 'account.saveProfile'
+  | 'account.autosave.saved'
   | 'account.profileVisibility.title'
   | 'account.profileVisibility.subtitle'
   | 'account.bio'
@@ -405,6 +406,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'account.instagramTag': 'Tag Instagram',
     'account.spotifyTag': 'Tag Spotify',
     'account.saveProfile': 'Salva profilo',
+    'account.autosave.saved': 'Modifiche salvate automaticamente.',
     'account.profileVisibility.title': 'Preferenze profilo',
     'account.profileVisibility.subtitle': 'Scegli quali informazioni mostrare agli altri profili.',
     'account.bio': 'Bio',
@@ -658,6 +660,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'account.instagramTag': 'Instagram tag',
     'account.spotifyTag': 'Spotify tag',
     'account.saveProfile': 'Save profile',
+    'account.autosave.saved': 'Changes saved automatically.',
     'account.profileVisibility.title': 'Profile preferences',
     'account.profileVisibility.subtitle': 'Choose which details are shown to other profiles.',
     'account.bio': 'Bio',

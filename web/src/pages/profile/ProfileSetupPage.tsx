@@ -814,8 +814,7 @@ export function ProfileSetupPage(): JSX.Element {
                   {t('account.maxDistance')}
                   <input
                     type="number"
-                    min={5}
-                    max={300}
+                    min={0}
                     value={maxDistanceKm}
                     placeholder={t('profileSetup.maxDistance.placeholder')}
                     onChange={(event) => setMaxDistanceKm(event.target.value)}

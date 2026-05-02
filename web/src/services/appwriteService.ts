@@ -529,7 +529,7 @@ export class AppwriteService {
   async submitSwipe(otherUserId: string, otherUserName: string | null, decision: 'liked' | 'passed'): Promise<ChatThread | null> {
     const functionId = this.configuration.recordSwipeFunctionId;
     if (!functionId) {
-      return null;
+      throw new AppwriteServiceError('Missing record swipe function configuration', 500);
     }
 
     const response = await this.executeUserFunction(functionId, {
@@ -1436,6 +1436,7 @@ export class AppwriteService {
     return (
       this.configuration.discoverProfilesFunctionId === functionId ||
       this.configuration.recordSwipeFunctionId === functionId ||
+      this.configuration.createOrGetThreadFunctionId === functionId ||
       this.configuration.sendMessageFunctionId === functionId ||
       this.configuration.eventAdminFunctionId === functionId ||
       this.configuration.manageRelationshipFunctionId === functionId

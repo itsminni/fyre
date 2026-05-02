@@ -1,4 +1,4 @@
-import { CSSProperties, ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { CSSProperties, ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -96,6 +96,20 @@ function ageInputValue(value: number | undefined, fallback: number): string {
   return String(value ?? fallback);
 }
 
+function distanceInputValue(value: number | undefined): string {
+  return value == null || value <= 0 ? '' : String(value);
+}
+
+function parseDistanceInput(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -133,6 +147,9 @@ export function AccountPage(): JSX.Element {
   const [profileFeedback, setProfileFeedback] = useState<FeedbackState | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<FeedbackState | null>(null);
   const [securityFeedback, setSecurityFeedback] = useState<FeedbackState | null>(null);
+  const accountAutosaveReadyRef = useRef(false);
+  const accountAutosaveTimerRef = useRef<number | null>(null);
+  const lastAccountAutosaveKeyRef = useRef('');
 
   const [orientation, setOrientation] = useState<UserOrientation>(currentUser?.orientation ?? 'straight');
   const [showMe, setShowMe] = useState<UserShowMe>(currentUser?.showMe ?? 'everyone');
@@ -150,7 +167,7 @@ export function AccountPage(): JSX.Element {
   const [ageRangeMax, setAgeRangeMax] = useState(
     ageInputValue(currentUser?.ageRangeMax ?? currentUser?.maxPreferredAge, 40)
   );
-  const [maxDistanceKm, setMaxDistanceKm] = useState(currentUser?.maxDistanceKm ?? 40);
+  const [maxDistanceKm, setMaxDistanceKm] = useState(distanceInputValue(currentUser?.maxDistanceKm));
   const [intent, setIntent] = useState<MatchIntent>(currentUser?.intent ?? 'relationship');
   const [hobbies, setHobbies] = useState(currentUser?.hobbies ?? '');
   const [passions, setPassions] = useState(currentUser?.passions ?? '');
@@ -178,7 +195,7 @@ export function AccountPage(): JSX.Element {
     setBio(currentUser.bio ?? '');
     setAgeRangeMin(ageInputValue(currentUser.ageRangeMin ?? currentUser.minPreferredAge, 24));
     setAgeRangeMax(ageInputValue(currentUser.ageRangeMax ?? currentUser.maxPreferredAge, 40));
-    setMaxDistanceKm(currentUser.maxDistanceKm ?? 40);
+    setMaxDistanceKm(distanceInputValue(currentUser.maxDistanceKm));
     setIntent(currentUser.intent ?? 'relationship');
     setHobbies(currentUser.hobbies ?? '');
     setPassions(currentUser.passions ?? '');
@@ -190,7 +207,174 @@ export function AccountPage(): JSX.Element {
     setWebsite(currentUser.website ?? '');
     setFavoriteSong(currentUser.favoriteSong ?? '');
     setFavoriteMovie(currentUser.favoriteMovie ?? '');
+    accountAutosaveReadyRef.current = false;
+    lastAccountAutosaveKeyRef.current = '';
   }, [currentUser]);
+
+  const accountAutosaveKey = useMemo(
+    () =>
+      JSON.stringify({
+        userEmail: currentUser?.email ?? null,
+        orientation,
+        showMe,
+        preferredGenders: [...preferredGenders].sort(),
+        smokes,
+        drinks,
+        excludeSmokers,
+        excludeDrinkers,
+        bio,
+        ageRangeMin,
+        ageRangeMax,
+        maxDistanceKm,
+        intent,
+        hobbies,
+        passions,
+        lookingFor,
+        instagram,
+        instagramTag,
+        telegram,
+        spotifyTag,
+        website,
+        favoriteSong,
+        favoriteMovie
+      }),
+    [
+      currentUser?.email,
+      orientation,
+      showMe,
+      preferredGenders,
+      smokes,
+      drinks,
+      excludeSmokers,
+      excludeDrinkers,
+      bio,
+      ageRangeMin,
+      ageRangeMax,
+      maxDistanceKm,
+      intent,
+      hobbies,
+      passions,
+      lookingFor,
+      instagram,
+      instagramTag,
+      telegram,
+      spotifyTag,
+      website,
+      favoriteSong,
+      favoriteMovie
+    ]
+  );
+
+  const savePreferences = useCallback(async () => {
+    setProfileFeedback(null);
+    if (!currentUser) {
+      return;
+    }
+
+    const user = currentUser;
+
+    if (user.gender && willUserLoseEventRegistrations(user.gender, orientation)) {
+      const confirmed = window.confirm(
+        'Cambiare orientamento rimuoverà eventuali iscrizioni evento correnti. Continuare?'
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    const parsedAgeRangeMin = ageRangeMin.trim().length > 0 ? Number(ageRangeMin) : 18;
+    const parsedAgeRangeMax = ageRangeMax.trim().length > 0 ? Number(ageRangeMax) : 99;
+    const parsedMaxDistanceKm = parseDistanceInput(maxDistanceKm);
+
+    const error = await updateAccountPreferences({
+      orientation,
+      showMe,
+      preferredGenders,
+      smokes,
+      drinks,
+      excludeSmokers,
+      excludeDrinkers,
+      bio,
+      ageRangeMin: parsedAgeRangeMin,
+      ageRangeMax: parsedAgeRangeMax,
+      maxDistanceKm: parsedMaxDistanceKm,
+      intent,
+      hobbies,
+      passions,
+      lookingFor,
+      instagram,
+      instagramTag,
+      telegram,
+      spotifyTag,
+      website,
+      favoriteSong,
+      favoriteMovie
+    });
+
+    setProfileFeedback(
+      error
+        ? { isError: true, message: error }
+        : { isError: false, message: t('account.autosave.saved') }
+    );
+  }, [
+    ageRangeMax,
+    ageRangeMin,
+    bio,
+    currentUser,
+    drinks,
+    excludeDrinkers,
+    excludeSmokers,
+    favoriteMovie,
+    favoriteSong,
+    hobbies,
+    instagram,
+    instagramTag,
+    intent,
+    lookingFor,
+    maxDistanceKm,
+    orientation,
+    passions,
+    preferredGenders,
+    showMe,
+    smokes,
+    spotifyTag,
+    t,
+    telegram,
+    updateAccountPreferences,
+    website,
+    willUserLoseEventRegistrations
+  ]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    if (!accountAutosaveReadyRef.current) {
+      accountAutosaveReadyRef.current = true;
+      lastAccountAutosaveKeyRef.current = accountAutosaveKey;
+      return;
+    }
+
+    if (accountAutosaveKey === lastAccountAutosaveKeyRef.current) {
+      return;
+    }
+
+    if (accountAutosaveTimerRef.current != null) {
+      window.clearTimeout(accountAutosaveTimerRef.current);
+    }
+
+    accountAutosaveTimerRef.current = window.setTimeout(() => {
+      lastAccountAutosaveKeyRef.current = accountAutosaveKey;
+      void savePreferences();
+    }, 700);
+
+    return () => {
+      if (accountAutosaveTimerRef.current != null) {
+        window.clearTimeout(accountAutosaveTimerRef.current);
+      }
+    };
+  }, [accountAutosaveKey, currentUser, savePreferences]);
 
   const options = useMemo(
     () => [
@@ -237,58 +421,6 @@ export function AccountPage(): JSX.Element {
     } finally {
       event.target.value = '';
     }
-  }
-
-  async function savePreferences() {
-    setProfileFeedback(null);
-    if (!currentUser) {
-      return;
-    }
-
-    const user = currentUser;
-
-    if (user.gender && willUserLoseEventRegistrations(user.gender, orientation)) {
-      const confirmed = window.confirm(
-        'Cambiare orientamento rimuoverà eventuali iscrizioni evento correnti. Continuare?'
-      );
-      if (!confirmed) {
-        return;
-      }
-    }
-
-    const parsedAgeRangeMin = ageRangeMin.trim().length > 0 ? Number(ageRangeMin) : 18;
-    const parsedAgeRangeMax = ageRangeMax.trim().length > 0 ? Number(ageRangeMax) : 99;
-
-    const error = await updateAccountPreferences({
-      orientation,
-      showMe,
-      preferredGenders,
-      smokes,
-      drinks,
-      excludeSmokers,
-      excludeDrinkers,
-      bio,
-      ageRangeMin: parsedAgeRangeMin,
-      ageRangeMax: parsedAgeRangeMax,
-      maxDistanceKm,
-      intent,
-      hobbies,
-      passions,
-      lookingFor,
-      instagram,
-      instagramTag,
-      telegram,
-      spotifyTag,
-      website,
-      favoriteSong,
-      favoriteMovie
-    });
-
-    setProfileFeedback(
-      error
-        ? { isError: true, message: error }
-        : { isError: false, message: 'Preferenze account aggiornate.' }
-    );
   }
 
   async function handleEnablePushNotifications() {
@@ -431,12 +563,6 @@ export function AccountPage(): JSX.Element {
               </label>
             </div>
 
-            <Button onClick={savePreferences}>{t('account.saveProfile')}</Button>
-            {profileFeedback && (
-              <p className={profileFeedback.isError ? 'form-feedback form-feedback--error' : 'form-feedback'}>
-                {profileFeedback.message}
-              </p>
-            )}
           </Card>
 
           <Card title={t('account.discovery.title')} subtitle={t('account.discovery.subtitle')}>
@@ -516,10 +642,10 @@ export function AccountPage(): JSX.Element {
                 {t('account.maxDistance')}
                 <input
                   type="number"
-                  min={5}
-                  max={300}
+                  min={0}
                   value={maxDistanceKm}
-                  onChange={(event) => setMaxDistanceKm(Number(event.target.value))}
+                  placeholder={t('profileSetup.maxDistance.placeholder')}
+                  onChange={(event) => setMaxDistanceKm(event.target.value)}
                 />
               </label>
             </div>
@@ -560,7 +686,6 @@ export function AccountPage(): JSX.Element {
               </label>
             </div>
 
-            <Button onClick={savePreferences}>{t('account.savePreferences')}</Button>
             {profileFeedback && (
               <p className={profileFeedback.isError ? 'form-feedback form-feedback--error' : 'form-feedback'}>
                 {profileFeedback.message}
@@ -816,9 +941,6 @@ export function AccountPage(): JSX.Element {
                 {t('account.security.emailChange')}
               </Button>
 
-              <Button variant="danger" onClick={logOut}>
-                {t('account.security.logout')}
-              </Button>
             </div>
 
             {securityFeedback && (

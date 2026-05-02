@@ -96,7 +96,8 @@ export function loadAppwriteConfiguration(): AppwriteConfiguration | null {
     registerForEventFunctionId: requiredEnvValue('VITE_APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID'),
     cancelEventRegistrationFunctionId: requiredEnvValue('VITE_APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID'),
     createOrGetThreadFunctionId: requiredEnvValue('VITE_APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID'),
-    sendMessageFunctionId: requiredEnvValue('VITE_APPWRITE_SEND_MESSAGE_FUNCTION_ID')
+    sendMessageFunctionId: requiredEnvValue('VITE_APPWRITE_SEND_MESSAGE_FUNCTION_ID'),
+    recordSwipeFunctionId: requiredEnvValue('VITE_APPWRITE_RECORD_SWIPE_FUNCTION_ID')
   };
 
   const missingKeys = Object.entries(requiredValues)
@@ -125,7 +126,8 @@ export function loadAppwriteConfiguration(): AppwriteConfiguration | null {
     registerForEventFunctionId,
     cancelEventRegistrationFunctionId,
     createOrGetThreadFunctionId,
-    sendMessageFunctionId
+    sendMessageFunctionId,
+    recordSwipeFunctionId
   } = requiredValues as Record<keyof typeof requiredValues, string>;
 
   return {
@@ -148,7 +150,7 @@ export function loadAppwriteConfiguration(): AppwriteConfiguration | null {
     eventAdminFunctionId: optionalEnvValue('VITE_APPWRITE_EVENT_ADMIN_FUNCTION_ID'),
     createOrGetThreadFunctionId,
     sendMessageFunctionId,
-    recordSwipeFunctionId: optionalEnvValue('VITE_APPWRITE_RECORD_SWIPE_FUNCTION_ID'),
+    recordSwipeFunctionId,
     discoverProfilesFunctionId: optionalEnvValue('VITE_APPWRITE_DISCOVER_PROFILES_FUNCTION_ID'),
     manageRelationshipFunctionId: optionalEnvValue('VITE_APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID'),
     createOrGetThreadFunctionDomain: optionalUrlEnvValue('VITE_APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_DOMAIN'),

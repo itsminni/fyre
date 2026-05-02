@@ -1408,13 +1408,18 @@ actor AppwriteService {
         let name = fullName.isEmpty ? (ThreadNaming.discoverFallbackName(email: email) ?? ThreadNaming.placeholderTitle) : fullName
         let interests = interestListValue(for: row)
         let commonInterests = interests.filter { currentUserInterests.contains($0) }
-        let fallbackScore = min(100, max(48 + (commonInterests.count * 8), 48))
+        let photos = discoverPhotoURLs(from: row)
+        let hasBio = !(stringValue(forKey: "bio", in: row) ?? "").isEmpty
+        let fallbackScore = min(
+            86,
+            max(28 + (min(commonInterests.count, 4) * 11) + (photos.isEmpty ? 0 : 4) + (hasBio ? 3 : 0), 28)
+        )
 
         return DiscoverProfileDTO(
             id: userId,
             name: name,
             age: ageValue(from: dateValue(forKey: "birthDate", in: row)),
-            photos: discoverPhotoURLs(from: row),
+            photos: photos,
             compatibilityScore: fallbackScore,
             distance: intValue(forKey: "distanceKm", in: row),
             commonInterests: Array(commonInterests.prefix(4)),

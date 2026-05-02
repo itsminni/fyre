@@ -464,6 +464,18 @@ function normalizeSocialHandle(value: string): string {
   return value.trim().replace(/^@+/, '').replace(/\s+/g, '');
 }
 
+function normalizeMaxDistanceKm(value: number | undefined): number | undefined {
+  if (value == null || value <= 0) {
+    return undefined;
+  }
+
+  if (!Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.max(Math.floor(value), 5);
+}
+
 function shouldPreferCachedThread(cachedThread: ChatThread, fetchedThread: ChatThread): boolean {
   const cachedLastMessage = cachedThread.messages[cachedThread.messages.length - 1];
   const fetchedLastMessage = fetchedThread.messages[fetchedThread.messages.length - 1];
@@ -482,6 +494,7 @@ function shouldPreferCachedThread(cachedThread: ChatThread, fetchedThread: ChatT
 
 function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThread[]): ChatThread[] {
   const merged = [...fetchedThreads];
+  const fetchedThreadIds = new Set(fetchedThreads.map((thread) => thread.id));
 
   for (const cachedThread of cachedThreads) {
     const existingIndex = merged.findIndex((thread) => thread.id === cachedThread.id);
@@ -489,6 +502,8 @@ function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThrea
       if (shouldPreferCachedThread(cachedThread, merged[existingIndex])) {
         merged[existingIndex] = cachedThread;
       }
+    } else if (!fetchedThreadIds.has(cachedThread.id)) {
+      merged.unshift(cachedThread);
     }
   }
 
@@ -1241,9 +1256,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'La fascia d\'età non è valida.';
       }
 
-      if (input.maxDistanceKm != null && (input.maxDistanceKm < 5 || input.maxDistanceKm > 300)) {
-        return 'La distanza massima deve essere tra 5 e 300 km.';
-      }
+      const normalizedMaxDistanceKm = normalizeMaxDistanceKm(input.maxDistanceKm);
 
       const preferredGenders = normalizePreferredGenders(input.preferredGenders);
       if (preferredGenders.length === 0) {
@@ -1276,7 +1289,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         bio: input.bio.trim(),
         ageRangeMin: input.ageRangeMin,
         ageRangeMax: input.ageRangeMax,
-        maxDistanceKm: input.maxDistanceKm,
+        maxDistanceKm: normalizedMaxDistanceKm,
         intent: input.intent,
         hobbies: input.hobbies.trim(),
         passions: '',
@@ -1367,9 +1380,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Fascia d\'età non valida.';
       }
 
-      if (input.maxDistanceKm != null && (input.maxDistanceKm < 5 || input.maxDistanceKm > 300)) {
-        return 'Distanza non valida.';
-      }
+      const normalizedMaxDistanceKm = normalizeMaxDistanceKm(input.maxDistanceKm);
 
       const preferredGenders = normalizePreferredGenders(input.preferredGenders);
       if (preferredGenders.length === 0) {
@@ -1395,7 +1406,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         bio: input.bio.trim(),
         ageRangeMin: input.ageRangeMin,
         ageRangeMax: input.ageRangeMax,
-        maxDistanceKm: input.maxDistanceKm,
+        maxDistanceKm: normalizedMaxDistanceKm,
         intent: input.intent,
         hobbies: input.hobbies.trim(),
         passions: '',

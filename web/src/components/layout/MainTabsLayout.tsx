@@ -10,12 +10,12 @@ interface MainTabItem {
 }
 
 export function MainTabsLayout(): JSX.Element {
-  const {
-    unreadNotificationsCount,
-    unreadThreadsCount
-  } = useAppStore();
+  const { persisted, unreadThreadsCount } = useAppStore();
   const { t } = useI18n();
-  const unreadCount = unreadNotificationsCount + unreadThreadsCount;
+  const unreadMatchNotificationsCount = persisted.notifications.filter(
+    (notification) => !notification.readAt && notification.type === 'match' && notification.threadId
+  ).length;
+  const messagesBadgeCount = unreadThreadsCount + unreadMatchNotificationsCount;
 
   const tabs = useMemo<MainTabItem[]>(
     () => [
@@ -45,6 +45,11 @@ export function MainTabsLayout(): JSX.Element {
                 }
               >
                 {tab.label}
+                {tab.to === '/app/messages' && messagesBadgeCount > 0 ? (
+                  <span className="app-topbar__nav-badge">
+                    {messagesBadgeCount > 99 ? '99+' : messagesBadgeCount}
+                  </span>
+                ) : null}
               </NavLink>
             ))}
           </nav>
@@ -52,14 +57,9 @@ export function MainTabsLayout(): JSX.Element {
           <div className="app-topbar__meta">
             <LanguageSwitch />
 
-            <NavLink to="/app/account" className="app-topbar__app-icon" aria-label="Profile">
+            <div className="app-topbar__app-icon" aria-hidden="true">
               <img src="/images/fyre-app-icon.png" alt="" aria-hidden />
-              {unreadCount > 0 ? (
-                <span className="app-topbar__counter-badge">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              ) : null}
-            </NavLink>
+            </div>
           </div>
         </div>
       </header>

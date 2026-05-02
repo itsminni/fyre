@@ -8,6 +8,8 @@ const DEFAULT_MIN_AGE = 18;
 const DEFAULT_MAX_AGE = 35;
 const RECENT_PRESENCE_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_SHARED_INTERESTS = 4;
+const MIN_COMPATIBILITY_SCORE = 24;
+const MAX_COMPATIBILITY_SCORE = 96;
 
 export default async ({ req, res, error }) => {
   try {
@@ -179,6 +181,22 @@ export function buildCandidateEntry(row, currentUserId, currentUser, excludedUse
     return null;
   }
 
+  if (currentUser.excludeSmokers && candidate.smokes === true) {
+    return null;
+  }
+
+  if (currentUser.excludeDrinkers && candidate.drinks === true) {
+    return null;
+  }
+
+  if (candidate.excludeSmokers && currentUser.smokes === true) {
+    return null;
+  }
+
+  if (candidate.excludeDrinkers && currentUser.drinks === true) {
+    return null;
+  }
+
   const distanceKm = distanceKmBetween(currentUser, candidate);
   if (distanceKm != null && Number.isFinite(currentUser.maxDistanceKm) && distanceKm > currentUser.maxDistanceKm) {
     return null;
@@ -192,21 +210,26 @@ export function buildCandidateEntry(row, currentUserId, currentUser, excludedUse
 }
 
 function candidateScore(row, candidate, currentUser, distanceKm) {
-  const sharedInterests = candidate.interests.filter((interest) => currentUser.interests.includes(interest)).length;
-  const interestsScore = Math.min(sharedInterests, MAX_SHARED_INTERESTS) * 14;
-  const distanceComponent = distanceScore(distanceKm);
-  const completenessComponent = profileCompletenessScore(row);
-  const activityBoost = isRecentlyActive(row.presenceUpdatedAt) ? 4 : 0;
-  const deterministicScore = interestsScore + distanceComponent + completenessComponent + activityBoost;
-  const boostMin = Math.max(1, Math.round(deterministicScore * 0.05));
-  const boostMax = Math.max(boostMin, Math.round(deterministicScore * 0.1));
-  const rankingBoost = seededIntegerFromString(
+  const deterministicScore =
+    10
+    + interestCompatibilityScore(currentUser.interests, candidate.interests)
+    + intentCompatibilityScore(currentUser.intent, candidate.intent)
+    + distanceCompatibilityScore(distanceKm, currentUser.maxDistanceKm, candidate.maxDistanceKm)
+    + ageCompatibilityScore(currentUser, candidate)
+    + lifestyleCompatibilityScore(currentUser, candidate)
+    + profileCompletenessScore(row)
+    + (isRecentlyActive(row.presenceUpdatedAt) ? 3 : 0);
+  const rankingVariation = seededIntegerFromString(
     `${asString(row.userId) ?? "candidate"}:${currentUser.gender ?? "unknown"}:${currentUser.city ?? "unknown"}`,
-    boostMin,
-    boostMax
+    -2,
+    2
   );
 
-  return Math.max(1, Math.round(deterministicScore + rankingBoost));
+  return clamp(
+    Math.round(deterministicScore + rankingVariation),
+    MIN_COMPATIBILITY_SCORE,
+    MAX_COMPATIBILITY_SCORE
+  );
 }
 
 function projectDiscoverProfile(config, row, candidate, currentUser, distanceKm, score, relationshipState) {
@@ -225,7 +248,7 @@ function projectDiscoverProfile(config, row, candidate, currentUser, distanceKm,
     photos,
     photoFileIds: discoverPhotoFileIds(row),
     avatarFileId: asString(row.avatarFileId),
-    compatibilityScore: Math.min(99, Math.max(42, score)),
+    compatibilityScore: clamp(score, MIN_COMPATIBILITY_SCORE, MAX_COMPATIBILITY_SCORE),
     distanceKm: roundedDistance(distanceKm),
     distance: roundedDistance(distanceKm),
     commonInterests: commonInterests.slice(0, MAX_SHARED_INTERESTS),
@@ -248,7 +271,9 @@ function makeUserContext(row) {
     latitude: numberValue(row.latitude),
     longitude: numberValue(row.longitude),
     smokes: asNullableBool(row.smokes),
-    drinks: asNullableBool(row.drinks)
+    drinks: asNullableBool(row.drinks),
+    excludeSmokers: asBool(row.excludeSmokers),
+    excludeDrinkers: asBool(row.excludeDrinkers)
   };
 }
 
@@ -387,6 +412,9 @@ function normalizeDistanceKm(value) {
   if (!Number.isFinite(numeric)) {
     return null;
   }
+  if (numeric <= 0) {
+    return null;
+  }
   return Math.max(5, Math.trunc(numeric));
 }
 
@@ -412,23 +440,100 @@ function normalizeSocialTag(value) {
   return sanitized.slice(0, 64);
 }
 
+function interestCompatibilityScore(currentInterests, candidateInterests) {
+  if (currentInterests.length === 0 && candidateInterests.length === 0) {
+    return 6;
+  }
+
+  if (currentInterests.length === 0 || candidateInterests.length === 0) {
+    return 3;
+  }
+
+  const currentSet = new Set(currentInterests);
+  const sharedCount = candidateInterests.filter((interest) => currentSet.has(interest)).length;
+  const unionCount = new Set([...currentInterests, ...candidateInterests]).size;
+  const sharedDepth = Math.min(sharedCount / MAX_SHARED_INTERESTS, 1);
+  const overlapRatio = unionCount > 0 ? sharedCount / unionCount : 0;
+
+  return Math.round((sharedDepth * 18) + (overlapRatio * 8));
+}
+
+function intentCompatibilityScore(currentIntent, candidateIntent) {
+  if (!currentIntent || !candidateIntent) {
+    return 5;
+  }
+
+  if (currentIntent === candidateIntent) {
+    return 16;
+  }
+
+  const pairKey = [currentIntent, candidateIntent].sort().join(":");
+  const compatibilityByPair = {
+    "casual:notSure": 10,
+    "friendship:notSure": 9,
+    "notSure:relationship": 9,
+    "friendship:relationship": 7,
+    "casual:friendship": 6,
+    "casual:relationship": 2
+  };
+
+  return compatibilityByPair[pairKey] ?? 4;
+}
+
+function ageCompatibilityScore(currentUser, candidate) {
+  return Math.round(
+    (ageRangeFitScore(candidate.age, currentUser.minAge, currentUser.maxAge) * 7)
+    + (ageRangeFitScore(currentUser.age, candidate.minAge, candidate.maxAge) * 7)
+  );
+}
+
+function ageRangeFitScore(age, minAge, maxAge) {
+  if (!Number.isFinite(age) || !Number.isFinite(minAge) || !Number.isFinite(maxAge)) {
+    return 0.5;
+  }
+
+  const range = Math.max(maxAge - minAge, 1);
+  const midpoint = minAge + (range / 2);
+  const distanceFromMidpoint = Math.abs(age - midpoint);
+  const normalizedDistance = distanceFromMidpoint / Math.max(range / 2, 1);
+
+  return clamp(1 - (normalizedDistance * 0.55), 0.35, 1);
+}
+
+function lifestyleCompatibilityScore(currentUser, candidate) {
+  return Math.min(
+    10,
+    2
+    + lifestyleTraitScore(currentUser.smokes, candidate.smokes)
+    + lifestyleTraitScore(currentUser.drinks, candidate.drinks)
+  );
+}
+
+function lifestyleTraitScore(currentValue, candidateValue) {
+  if (currentValue == null || candidateValue == null) {
+    return 2;
+  }
+
+  return currentValue === candidateValue ? 4 : 1;
+}
+
 function profileCompletenessScore(row) {
   let score = 0;
 
   if (isProfileReady(row)) {
-    score += 8;
+    score += 3;
   }
 
   if (discoverPhotoFileIds(row).length > 0) {
-    score += 4;
+    score += 2;
   }
 
   if (interestTokens(row.interests).length > 0) {
-    score += 3;
+    score += 1;
   }
 
   if (asString(row.bio)) {
-    score += 3;
+    score += 2;
   }
 
   return score;
@@ -459,26 +564,43 @@ function distanceKmBetween(lhs, rhs) {
   return earthRadiusKm * arc;
 }
 
-function distanceScore(distanceKm) {
+function distanceCompatibilityScore(distanceKm, currentMaxDistanceKm, candidateMaxDistanceKm) {
   if (!Number.isFinite(distanceKm)) {
-    return 6;
+    return 8;
   }
+
+  const distanceLimit = [currentMaxDistanceKm, candidateMaxDistanceKm]
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((lhs, rhs) => lhs - rhs)[0];
+
+  if (Number.isFinite(distanceLimit)) {
+    const ratio = distanceKm / Math.max(distanceLimit, 5);
+    return Math.round(clamp(18 - (ratio * 14), 4, 18));
+  }
+
   if (distanceKm <= 5) {
-    return 24;
-  }
-  if (distanceKm <= 15) {
     return 18;
   }
+  if (distanceKm <= 15) {
+    return 15;
+  }
   if (distanceKm <= 35) {
-    return 12;
+    return 11;
   }
   if (distanceKm <= 60) {
-    return 8;
+    return 7;
   }
   if (distanceKm <= 100) {
     return 4;
   }
+  if (distanceKm <= 250) {
+    return 2;
+  }
   return 0;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function roundedDistance(distanceKm) {

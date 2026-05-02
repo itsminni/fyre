@@ -23,6 +23,17 @@ const CHAT_ATTACHMENT_EXTENSIONS = [
 ] as const;
 const CHAT_ATTACHMENT_ACCEPT = CHAT_ATTACHMENT_EXTENSIONS.map((extension) => `.${extension}`).join(',');
 const CHAT_ATTACHMENT_EXTENSION_SET = new Set<string>(CHAT_ATTACHMENT_EXTENSIONS);
+type VoiceRecorderState = 'idle' | 'recording' | 'processing';
+
+interface VoiceRecorderResources {
+  stream: MediaStream;
+  audioContext: AudioContext;
+  source: MediaStreamAudioSourceNode;
+  processor: ScriptProcessorNode;
+  gain: GainNode;
+  startedAt: number;
+  sampleRate: number;
+}
 
 function inferAttachmentType(mimeType: string): ChatAttachment['type'] {
   if (mimeType.startsWith('image/')) {
@@ -102,6 +113,63 @@ function fileExtension(fileName: string): string {
   return extension;
 }
 
+function getAudioContextConstructor(): typeof AudioContext | null {
+  const candidate = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+  return candidate.AudioContext ?? candidate.webkitAudioContext ?? null;
+}
+
+function encodeWav(samples: Float32Array[], sampleRate: number): Blob {
+  const sampleCount = samples.reduce((count, chunk) => count + chunk.length, 0);
+  const buffer = new ArrayBuffer(44 + sampleCount * 2);
+  const view = new DataView(buffer);
+
+  const writeString = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + sampleCount * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, sampleCount * 2, true);
+
+  let offset = 44;
+  for (const chunk of samples) {
+    for (let index = 0; index < chunk.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, chunk[index]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+  }
+
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('Formato audio non supportato'));
+    };
+    reader.onerror = () => reject(new Error('Impossibile leggere audio'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function fileToAttachment(file: File): Promise<ChatAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -179,6 +247,68 @@ function formatAttachmentDuration(duration: number | undefined): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
+function VoiceMessagePlayer({ attachment }: { attachment: ChatAttachment }): JSX.Element {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(attachment.duration ?? 0);
+  const resolvedDuration = duration || attachment.duration || 0;
+  const progress = resolvedDuration > 0 ? Math.min(100, (currentTime / resolvedDuration) * 100) : 0;
+
+  function togglePlayback(): void {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    if (audio.paused) {
+      void audio.play();
+    } else {
+      audio.pause();
+    }
+  }
+
+  return (
+    <div className="voice-message-player">
+      <button
+        className="voice-message-player__button"
+        type="button"
+        onClick={togglePlayback}
+        aria-label={isPlaying ? 'Pausa audio' : 'Riproduci audio'}
+      >
+        {isPlaying ? 'II' : '>'}
+      </button>
+      <div className="voice-message-player__body">
+        <div className="voice-message-player__track" aria-hidden="true">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+        <div className="voice-message-player__meta">
+          <span>{formatAttachmentDuration(currentTime) || '0:00'}</span>
+          <span>{formatAttachmentDuration(resolvedDuration) || formatAttachmentSize(attachment.sizeBytes)}</span>
+        </div>
+      </div>
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        src={attachment.dataUrl}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false);
+          setCurrentTime(0);
+        }}
+        onLoadedMetadata={(event) => {
+          const nextDuration = event.currentTarget.duration;
+          if (Number.isFinite(nextDuration)) {
+            setDuration(nextDuration);
+          }
+        }}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+      />
+    </div>
+  );
+}
+
 function ChatAttachmentItem({ attachment }: { attachment: ChatAttachment }): JSX.Element {
   const subtitle = [formatAttachmentDuration(attachment.duration), formatAttachmentSize(attachment.sizeBytes)]
     .filter(Boolean)
@@ -205,12 +335,9 @@ function ChatAttachmentItem({ attachment }: { attachment: ChatAttachment }): JSX
 
   if (attachment.type === 'audio') {
     return (
-      <div className="chat-audio-player">
-        <div className="chat-audio-player__icon" aria-hidden="true">&gt;</div>
-        <div className="chat-audio-player__body">
-          <audio controls preload="metadata" src={attachment.dataUrl} />
-          <span>{subtitle || attachment.name}</span>
-        </div>
+      <div className="chat-audio-player" title={attachment.name}>
+        <VoiceMessagePlayer attachment={attachment} />
+        {subtitle && <span className="chat-audio-player__caption">{subtitle}</span>}
       </div>
     );
   }
@@ -243,7 +370,11 @@ export function ChatDetailPage(): JSX.Element {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [relationshipFeedback, setRelationshipFeedback] = useState<string | null>(null);
+  const [voiceRecorderState, setVoiceRecorderState] = useState<VoiceRecorderState>('idle');
+  const [voiceRecorderElapsed, setVoiceRecorderElapsed] = useState(0);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const voiceRecorderRef = useRef<VoiceRecorderResources | null>(null);
+  const voiceSamplesRef = useRef<Float32Array[]>([]);
 
   const thread = useMemo(
     () => persisted.threads.find((candidate) => candidate.id === threadId) ?? null,
@@ -267,6 +398,140 @@ export function ChatDetailPage(): JSX.Element {
     markThreadRead(thread.id);
     endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [markThreadRead, thread?.id, thread?.messages.length]);
+
+  useEffect(() => {
+    if (voiceRecorderState !== 'recording') {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      const startedAt = voiceRecorderRef.current?.startedAt;
+      setVoiceRecorderElapsed(startedAt ? Math.max(0, (Date.now() - startedAt) / 1000) : 0);
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, [voiceRecorderState]);
+
+  useEffect(
+    () => () => {
+      cleanupVoiceRecorder();
+    },
+    []
+  );
+
+  function cleanupVoiceRecorder(): void {
+    const resources = voiceRecorderRef.current;
+    if (!resources) {
+      return;
+    }
+
+    resources.processor.disconnect();
+    resources.source.disconnect();
+    resources.gain.disconnect();
+    resources.stream.getTracks().forEach((track) => track.stop());
+    void resources.audioContext.close().catch(() => undefined);
+    voiceRecorderRef.current = null;
+  }
+
+  async function startVoiceRecording(): Promise<void> {
+    if (voiceRecorderState !== 'idle') {
+      return;
+    }
+
+    const AudioContextConstructor = getAudioContextConstructor();
+    if (!navigator.mediaDevices?.getUserMedia || !AudioContextConstructor) {
+      setUploadError('Registrazione vocale non supportata da questo browser.');
+      return;
+    }
+
+    try {
+      setUploadError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioContext = new AudioContextConstructor();
+      await audioContext.resume();
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const gain = audioContext.createGain();
+
+      gain.gain.value = 0;
+      voiceSamplesRef.current = [];
+      processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        voiceSamplesRef.current.push(new Float32Array(input));
+      };
+
+      source.connect(processor);
+      processor.connect(gain);
+      gain.connect(audioContext.destination);
+
+      voiceRecorderRef.current = {
+        stream,
+        audioContext,
+        source,
+        processor,
+        gain,
+        startedAt: Date.now(),
+        sampleRate: audioContext.sampleRate
+      };
+      setVoiceRecorderElapsed(0);
+      setVoiceRecorderState('recording');
+    } catch {
+      cleanupVoiceRecorder();
+      setVoiceRecorderState('idle');
+      setUploadError('Impossibile accedere al microfono.');
+    }
+  }
+
+  async function stopVoiceRecording(): Promise<void> {
+    const resources = voiceRecorderRef.current;
+    if (!resources || voiceRecorderState !== 'recording') {
+      return;
+    }
+
+    setVoiceRecorderState('processing');
+    const duration = Math.max(1, Math.round((Date.now() - resources.startedAt) / 1000));
+    const samples = [...voiceSamplesRef.current];
+    const sampleRate = resources.sampleRate;
+    cleanupVoiceRecorder();
+
+    if (samples.length === 0) {
+      setVoiceRecorderState('idle');
+      setUploadError('Registrazione vuota.');
+      return;
+    }
+
+    try {
+      const blob = encodeWav(samples, sampleRate);
+      const dataUrl = await blobToDataUrl(blob);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      setAttachments((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          type: 'audio',
+          name: `messaggio-vocale-${timestamp}.wav`,
+          mimeType: 'audio/wav',
+          sizeBytes: blob.size,
+          dataUrl,
+          duration
+        }
+      ]);
+      setUploadError(null);
+    } catch {
+      setUploadError('Impossibile preparare il messaggio vocale.');
+    } finally {
+      voiceSamplesRef.current = [];
+      setVoiceRecorderElapsed(0);
+      setVoiceRecorderState('idle');
+    }
+  }
+
+  function cancelVoiceRecording(): void {
+    cleanupVoiceRecorder();
+    voiceSamplesRef.current = [];
+    setVoiceRecorderElapsed(0);
+    setVoiceRecorderState('idle');
+  }
 
   async function onAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
@@ -304,6 +569,10 @@ export function ChatDetailPage(): JSX.Element {
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!thread) {
+      return;
+    }
+
+    if (voiceRecorderState !== 'idle') {
       return;
     }
 
@@ -466,20 +735,64 @@ export function ChatDetailPage(): JSX.Element {
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Messaggio"
           />
-          <label className="chat-attach-button">
-            <input type="file" multiple accept={CHAT_ATTACHMENT_ACCEPT} onChange={onAttachmentChange} />
-            Allega
-          </label>
+          <div className="chat-composer__tools">
+            <label className="chat-attach-button">
+              <input type="file" multiple accept={CHAT_ATTACHMENT_ACCEPT} onChange={onAttachmentChange} />
+              Allega
+            </label>
+            <button
+              className={voiceRecorderState === 'recording' ? 'chat-voice-button is-recording' : 'chat-voice-button'}
+              type="button"
+              disabled={voiceRecorderState === 'processing'}
+              onClick={() => {
+                if (voiceRecorderState === 'recording') {
+                  void stopVoiceRecording();
+                  return;
+                }
+                void startVoiceRecording();
+              }}
+            >
+              {voiceRecorderState === 'recording' ? 'Ferma vocale' : 'Vocale'}
+            </button>
+          </div>
         </div>
 
-        <Button disabled={!draft.trim() && attachments.length === 0}>Invia</Button>
+        <Button type="submit" disabled={voiceRecorderState !== 'idle' || (!draft.trim() && attachments.length === 0)}>
+          Invia
+        </Button>
       </form>
+
+      {voiceRecorderState !== 'idle' && (
+        <div className="chat-voice-recorder" role="status">
+          <span className="chat-voice-recorder__dot" aria-hidden="true" />
+          <div>
+            <strong>
+              {voiceRecorderState === 'recording' ? 'Registrazione vocale' : 'Preparazione vocale'}
+            </strong>
+            <span>{formatAttachmentDuration(voiceRecorderElapsed) || '0:00'}</span>
+          </div>
+          {voiceRecorderState === 'recording' && (
+            <div className="chat-voice-recorder__actions">
+              <button type="button" onClick={() => void stopVoiceRecording()}>
+                Usa
+              </button>
+              <button type="button" onClick={cancelVoiceRecording}>
+                Annulla
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {attachments.length > 0 && (
         <ul className="chat-attachment-preview-list">
           {attachments.map((attachment) => (
             <li key={attachment.id}>
-              <span>{attachment.name}</span>
+              {attachment.type === 'audio' ? (
+                <ChatAttachmentItem attachment={attachment} />
+              ) : (
+                <span>{attachment.name}</span>
+              )}
               <button type="button" onClick={() => removeAttachment(attachment.id)}>
                 Rimuovi
               </button>
