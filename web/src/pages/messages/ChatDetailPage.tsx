@@ -6,6 +6,24 @@ import { useAppStore } from '../../hooks/useAppStore';
 import { formatLastSeen } from '../../context/AppContext';
 import { ChatAttachment } from '../../types/models';
 
+const CHAT_ATTACHMENT_EXTENSIONS = [
+  'heif',
+  'jpg',
+  'pdf',
+  'gif',
+  'mp4',
+  'jpeg',
+  'hevc',
+  'png',
+  'mp3',
+  'm4a',
+  'aac',
+  'wav',
+  'zip'
+] as const;
+const CHAT_ATTACHMENT_ACCEPT = CHAT_ATTACHMENT_EXTENSIONS.map((extension) => `.${extension}`).join(',');
+const CHAT_ATTACHMENT_EXTENSION_SET = new Set<string>(CHAT_ATTACHMENT_EXTENSIONS);
+
 function inferAttachmentType(mimeType: string): ChatAttachment['type'] {
   if (mimeType.startsWith('image/')) {
     return 'image';
@@ -77,6 +95,11 @@ function attachmentMetadata(file: File, type: ChatAttachment['type']): Promise<P
   }
 
   return Promise.resolve({});
+}
+
+function fileExtension(fileName: string): string {
+  const extension = fileName.split('.').pop()?.trim().toLowerCase() ?? '';
+  return extension;
 }
 
 function fileToAttachment(file: File): Promise<ChatAttachment> {
@@ -253,8 +276,19 @@ export function ChatDetailPage(): JSX.Element {
 
     setUploadError(null);
 
+    const selectedFiles = Array.from(files);
+    const unsupportedFile = selectedFiles.find(
+      (file) => !CHAT_ATTACHMENT_EXTENSION_SET.has(fileExtension(file.name))
+    );
+
+    if (unsupportedFile) {
+      setUploadError(`Formato non supportato: ${unsupportedFile.name}.`);
+      event.target.value = '';
+      return;
+    }
+
     try {
-      const loaded = await Promise.all(Array.from(files).map((file) => fileToAttachment(file)));
+      const loaded = await Promise.all(selectedFiles.map((file) => fileToAttachment(file)));
       setAttachments((prev) => [...prev, ...loaded]);
     } catch {
       setUploadError('Impossibile allegare uno o più file.');
@@ -433,7 +467,7 @@ export function ChatDetailPage(): JSX.Element {
             placeholder="Messaggio"
           />
           <label className="chat-attach-button">
-            <input type="file" multiple onChange={onAttachmentChange} />
+            <input type="file" multiple accept={CHAT_ATTACHMENT_ACCEPT} onChange={onAttachmentChange} />
             Allega
           </label>
         </div>
