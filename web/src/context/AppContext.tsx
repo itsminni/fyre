@@ -12,6 +12,7 @@ import {
   AppNotification,
   AppSettings,
   ChatAttachment,
+  ChatDeliveryState,
   ChatMessage,
   ChatThread,
   DiscoverProfile,
@@ -112,6 +113,7 @@ interface AppContextValue {
   seedDemoUsers(): number;
   resetLocalData(): void;
   updateProfileImage(imageData: string): Promise<string | null>;
+  updateProfileImages(imageDataItems: string[]): Promise<string | null>;
   updateProfile(input: ProfileUpdateInput): Promise<string | null>;
   updateAccountPreferences(input: {
     orientation: UserOrientation;
@@ -119,10 +121,12 @@ interface AppContextValue {
     preferredGenders: UserGender[];
     smokes: boolean;
     drinks: boolean;
+    excludeSmokers: boolean;
+    excludeDrinkers: boolean;
     bio: string;
     ageRangeMin: number;
     ageRangeMax: number;
-    maxDistanceKm: number;
+    maxDistanceKm?: number;
     intent: MatchIntent;
     hobbies: string;
     passions: string;
@@ -161,25 +165,9 @@ interface AppContextValue {
   requestBrowserNotificationsPermission(): Promise<NotificationPermission | 'unsupported'>;
   updateSettings(patch: Partial<AppSettings>): void;
   setThreads(threads: ChatThread[]): void;
-  hydrateMockDiscoverProfiles(): Promise<void>;
-  hydrateMockThreadsIfMissing(): Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
-
-const INCOMING_MESSAGE_LIBRARY = [
-  'Ti va un aperitivo questa settimana?',
-  'Ho visto il tuo profilo, ottima energia.',
-  'Ci sentiamo dopo cena?',
-  'Quando sei libera/o per un caffe?',
-  'Hai idee per il weekend?'
-];
-
-const POLL_NOTIFICATION_LIBRARY = [
-  'Ricorda di confermare la tua disponibilita per il Main Event.',
-  'Nuovi profili compatibili disponibili nella Home.',
-  'Hai una chat con messaggi non letti.'
-];
 
 const EVENT_ADMIN_MESSAGE_BY_KEY: Record<string, string> = {
   'events.admin.error.forbidden': 'Non hai i permessi admin per questo evento.',
@@ -196,8 +184,8 @@ const EVENT_MESSAGE_BY_KEY: Record<string, string> = {
   'events.error.notRegistered': 'Nessuna iscrizione evento trovata.',
   'events.error.registrationClosed': 'Le iscrizioni per questo evento sono chiuse.',
   'events.error.cancellationClosed': 'La finestra per la disdetta e terminata.',
-  'events.error.alreadyRegistered': 'Sei gia registrato a questo evento.',
-  'events.error.alreadyWaitlisted': 'Sei gia in waiting list.',
+  'events.error.alreadyRegistered': 'Sei già registrato a questo evento.',
+  'events.error.alreadyWaitlisted': 'Sei già in waiting list.',
   'events.error.capacityFull': 'L evento e al completo.',
   'events.error.requestFailed': 'Operazione evento non riuscita. Riprova.'
 };
@@ -316,29 +304,53 @@ function upsertUser(users: User[], user: User): User[] {
   return nextUsers;
 }
 
-function stableHash(input: string): number {
-  let hash = 0;
-
-  for (let index = 0; index < input.length; index += 1) {
-    hash = (hash * 31 + input.charCodeAt(index)) >>> 0;
-  }
-
-  return hash;
-}
-
-function shouldCreateMockMatch(currentUser: User | null, profileId: string): boolean {
-  return stableHash(`${currentUser?.email ?? 'guest'}:${profileId}`) % 100 >= 38;
-}
-
 function mapAppwriteError(error: unknown, fallbackMessage: string): string {
   if (error instanceof AppwriteServiceError) {
-    if (error.statusCode === 401) {
+    const normalizedType = error.type?.toLowerCase() ?? '';
+    const normalizedMessage = error.message.toLowerCase();
+    const statusCode = error.statusCode;
+
+    if (statusCode === 401) {
       return 'Credenziali non valide o sessione scaduta.';
     }
 
-    if (error.statusCode === 409) {
-      return 'Esiste gia un account con questa email.';
+    if (
+      statusCode === 409 ||
+      normalizedType.includes('already') ||
+      normalizedMessage.includes('already exists')
+    ) {
+      return 'Esiste già un account con questa email.';
     }
+
+    if (
+      normalizedType.includes('password') ||
+      normalizedMessage.includes('password')
+    ) {
+      return 'La password deve contenere almeno 8 caratteri.';
+    }
+
+    if (
+      normalizedType.includes('email') ||
+      normalizedMessage.includes('email')
+    ) {
+      return 'Inserisci un indirizzo email valido.';
+    }
+
+    if (statusCode === 429) {
+      return 'Troppe richieste in poco tempo. Riprova tra qualche minuto.';
+    }
+
+    if (statusCode === 400) {
+      return 'Controlla i dati inseriti e riprova.';
+    }
+
+    if (statusCode !== null && statusCode >= 500) {
+      return 'Il server non è disponibile adesso. Riprova tra poco.';
+    }
+  }
+
+  if (error instanceof TypeError) {
+    return 'Impossibile raggiungere il server. Controlla la connessione e riprova.';
   }
 
   return fallbackMessage;
@@ -470,7 +482,6 @@ function shouldPreferCachedThread(cachedThread: ChatThread, fetchedThread: ChatT
 
 function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThread[]): ChatThread[] {
   const merged = [...fetchedThreads];
-  const fetchedThreadIds = new Set(fetchedThreads.map((thread) => thread.id));
 
   for (const cachedThread of cachedThreads) {
     const existingIndex = merged.findIndex((thread) => thread.id === cachedThread.id);
@@ -478,8 +489,6 @@ function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThrea
       if (shouldPreferCachedThread(cachedThread, merged[existingIndex])) {
         merged[existingIndex] = cachedThread;
       }
-    } else if (!fetchedThreadIds.has(cachedThread.id)) {
-      merged.unshift(cachedThread);
     }
   }
 
@@ -509,7 +518,18 @@ function createHistoryEntry(
 }
 
 export function AppProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [persisted, setPersisted] = useState<PersistedAppState>(() => loadPersistedState());
+  const [persisted, setPersisted] = useState<PersistedAppState>(() => {
+    const initialState = loadPersistedState();
+    if (!IS_BACKEND_MODE) {
+      return initialState;
+    }
+
+    return {
+      ...initialState,
+      threads: [],
+      notifications: []
+    };
+  });
   const [discoverProfiles, setDiscoverProfiles] = useState<DiscoverProfile[]>([]);
   const [remoteMainEventState, setRemoteMainEventState] = useState<EventRemoteState | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<
@@ -523,8 +543,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
   const pendingTimeoutsRef = useRef<number[]>([]);
   const lastBrowserNotificationRef = useRef<string | null>(null);
-  const mockRealtimeCursorRef = useRef(0);
-  const mockNotificationCursorRef = useRef(0);
 
   useEffect(() => {
     persistState(persisted);
@@ -680,7 +698,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     void refreshRemoteMainEventState(currentUser);
   }, [currentUser, refreshRemoteMainEventState]);
 
-  const hydrateMockDiscoverProfiles = useCallback(async (): Promise<void> => {
+  const hydrateDiscoverProfiles = useCallback(async (): Promise<void> => {
     if (IS_BACKEND_MODE && appwriteService) {
       try {
         const profiles = await appwriteService.fetchDiscoverProfiles();
@@ -696,27 +714,22 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     setDiscoverProfiles(profiles);
   }, []);
 
-  const hydrateMockThreadsIfMissing = useCallback(async (): Promise<void> => {
+  const hydrateThreads = useCallback(async (): Promise<void> => {
     if (IS_BACKEND_MODE && appwriteService) {
       await refreshThreads();
       return;
     }
 
-    if (persisted.threads.length > 0) {
-      return;
-    }
-
-    const threads = await mockBackendApi.fetchThreads();
     setPersisted((prev) => ({
       ...prev,
-      threads
+      threads: []
     }));
-  }, [persisted.threads.length, refreshThreads]);
+  }, [refreshThreads]);
 
   useEffect(() => {
-    void hydrateMockDiscoverProfiles();
-    void hydrateMockThreadsIfMissing();
-  }, [persisted.currentUserEmail, hydrateMockDiscoverProfiles, hydrateMockThreadsIfMissing]);
+    void hydrateDiscoverProfiles();
+    void hydrateThreads();
+  }, [persisted.currentUserEmail, hydrateDiscoverProfiles, hydrateThreads]);
 
   useEffect(() => {
     if (!IS_BACKEND_MODE || !appwriteService || !currentUser?.appwriteUserId) {
@@ -917,8 +930,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Inserisci un indirizzo email valido.';
       }
 
-      if (password.length < 6) {
-        return 'La password deve contenere almeno 6 caratteri.';
+      if (password.length < 8) {
+        return 'La password deve contenere almeno 8 caratteri.';
       }
 
       const normalized = normalizeEmail(email);
@@ -935,7 +948,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const alreadyExists = persisted.users.some((candidate) => candidate.email === normalized);
       if (alreadyExists) {
-        return 'Esiste gia un account con questa email.';
+        return 'Esiste già un account con questa email.';
       }
 
       const nextUser = createEmptyUser(normalized, password);
@@ -957,14 +970,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Inserisci un indirizzo email valido.';
       }
 
-      if (password.length < 6) {
-        return 'La password deve contenere almeno 6 caratteri.';
+      if (password.length < 8) {
+        return 'La password deve contenere almeno 8 caratteri.';
       }
 
       const normalized = normalizeEmail(email);
       const alreadyExists = persisted.users.some((candidate) => candidate.email === normalized);
       if (alreadyExists) {
-        return 'Esiste gia un account con questa email.';
+        return 'Esiste già un account con questa email.';
       }
 
       const nextUser = createEmptyUser(normalized, password);
@@ -1109,7 +1122,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   const updateProfileImage = useCallback(
     async (imageData: string): Promise<string | null> => {
       if (!currentUser) {
-        return 'Effettua di nuovo l accesso.';
+        return 'Effettua di nuovo l\'accesso.';
       }
 
       if (IS_BACKEND_MODE && appwriteService) {
@@ -1117,19 +1130,45 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           const updatedUser = await appwriteService.updateProfileImage(currentUser, imageData);
           commitCurrentUser(updatedUser);
           return null;
-        } catch {
-          return 'Impossibile aggiornare la foto profilo.';
+        } catch (error) {
+          return mapAppwriteError(error, 'Impossibile aggiornare la foto profilo.');
         }
       }
 
       withCurrentUser((existing) => ({
         ...normalizeUser(existing),
-        profileImageData: imageData
+        profileImageData: imageData.trim().length > 0 ? imageData : undefined,
+        avatarFileId: imageData.trim().length > 0 ? existing.avatarFileId : undefined
       }));
 
       return null;
     },
     [commitCurrentUser, currentUser, withCurrentUser]
+  );
+
+  const updateProfileImages = useCallback(
+    async (imageDataItems: string[]): Promise<string | null> => {
+      if (!currentUser) {
+        return 'Effettua di nuovo l\'accesso.';
+      }
+
+      const sanitizedImages = imageDataItems
+        .filter((value) => typeof value === 'string' && value.trim().length > 0)
+        .slice(0, 6);
+
+      withCurrentUser((existing) => ({
+        ...normalizeUser(existing),
+        profilePhotoDataItems: sanitizedImages,
+        photoFileIds: sanitizedImages.length === 0
+          ? []
+          : (existing.photoFileIds ?? []).filter((fileId) =>
+              sanitizedImages.some((image) => image.includes(fileId))
+            )
+      }));
+
+      return null;
+    },
+    [currentUser, withCurrentUser]
   );
 
   const willUserLoseEventRegistrations = useCallback(
@@ -1169,7 +1208,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const nextState = await refreshRemoteMainEventState(user);
       if (shouldRemoveRegistration && nextState?.currentStatus) {
-        return 'Profilo aggiornato, ma la posizione evento non e stata rimossa dal backend.';
+        return 'Profilo aggiornato, ma la posizione evento non è stata rimossa dal server.';
       }
 
       return null;
@@ -1180,19 +1219,13 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   const updateProfile = useCallback(
     async (input: ProfileUpdateInput): Promise<string | null> => {
       if (!currentUser) {
-        return 'Effettua di nuovo l accesso.';
+        return 'Effettua di nuovo l\'accesso.';
       }
 
       const requiredFields = [
         input.firstName,
-        input.lastName,
         input.city,
-        input.bio,
-        input.hobbies,
-        input.passions,
-        input.lookingFor,
-        input.favoriteSong,
-        input.favoriteMovie
+        input.bio
       ];
 
       if (!requiredFields.every((field) => field.trim().length > 0)) {
@@ -1204,12 +1237,12 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Devi avere almeno 18 anni.';
       }
 
-      if (input.ageRangeMin < 18 || input.ageRangeMax < input.ageRangeMin) {
-        return 'Il range di eta non e valido.';
+      if (input.ageRangeMin < 18 || input.ageRangeMax <= input.ageRangeMin) {
+        return 'La fascia d\'età non è valida.';
       }
 
-      if (input.maxDistanceKm < 1 || input.maxDistanceKm > 300) {
-        return 'La distanza massima deve essere tra 1 e 300 km.';
+      if (input.maxDistanceKm != null && (input.maxDistanceKm < 5 || input.maxDistanceKm > 300)) {
+        return 'La distanza massima deve essere tra 5 e 300 km.';
       }
 
       const preferredGenders = normalizePreferredGenders(input.preferredGenders);
@@ -1238,21 +1271,23 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         preferredGenders,
         smokes: input.smokes,
         drinks: input.drinks,
+        excludeSmokers: input.excludeSmokers,
+        excludeDrinkers: input.excludeDrinkers,
         bio: input.bio.trim(),
         ageRangeMin: input.ageRangeMin,
         ageRangeMax: input.ageRangeMax,
         maxDistanceKm: input.maxDistanceKm,
         intent: input.intent,
         hobbies: input.hobbies.trim(),
-        passions: input.passions.trim(),
-        lookingFor: input.lookingFor.trim(),
+        passions: '',
+        lookingFor: '',
         instagram: input.instagram.trim(),
         instagramTag: normalizeSocialHandle(input.instagramTag),
         telegram: input.telegram.trim(),
         spotifyTag: normalizeSocialHandle(input.spotifyTag),
         website: input.website.trim(),
-        favoriteSong: input.favoriteSong.trim(),
-        favoriteMovie: input.favoriteMovie.trim()
+        favoriteSong: '',
+        favoriteMovie: ''
       });
 
       if (IS_BACKEND_MODE && appwriteService) {
@@ -1267,8 +1302,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
             return eventError;
           }
           return null;
-        } catch {
-          return 'Salvataggio profilo non riuscito. Riprova.';
+        } catch (error) {
+          return mapAppwriteError(error, 'Impossibile salvare il profilo adesso. Riprova.');
         }
       }
 
@@ -1306,10 +1341,12 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       preferredGenders: UserGender[];
       smokes: boolean;
       drinks: boolean;
+      excludeSmokers: boolean;
+      excludeDrinkers: boolean;
       bio: string;
       ageRangeMin: number;
       ageRangeMax: number;
-      maxDistanceKm: number;
+      maxDistanceKm?: number;
       intent: MatchIntent;
       hobbies: string;
       passions: string;
@@ -1323,14 +1360,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       favoriteMovie: string;
     }): Promise<string | null> => {
       if (!currentUser) {
-        return 'Effettua di nuovo l accesso.';
+        return 'Effettua di nuovo l\'accesso.';
       }
 
-      if (input.ageRangeMin < 18 || input.ageRangeMax < input.ageRangeMin) {
-        return 'Range eta non valido.';
+      if (input.ageRangeMin < 18 || input.ageRangeMax <= input.ageRangeMin) {
+        return 'Fascia d\'età non valida.';
       }
 
-      if (input.maxDistanceKm < 1 || input.maxDistanceKm > 300) {
+      if (input.maxDistanceKm != null && (input.maxDistanceKm < 5 || input.maxDistanceKm > 300)) {
         return 'Distanza non valida.';
       }
 
@@ -1353,21 +1390,23 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         preferredGenders,
         smokes: input.smokes,
         drinks: input.drinks,
+        excludeSmokers: input.excludeSmokers,
+        excludeDrinkers: input.excludeDrinkers,
         bio: input.bio.trim(),
         ageRangeMin: input.ageRangeMin,
         ageRangeMax: input.ageRangeMax,
         maxDistanceKm: input.maxDistanceKm,
         intent: input.intent,
         hobbies: input.hobbies.trim(),
-        passions: input.passions.trim(),
-        lookingFor: input.lookingFor.trim(),
+        passions: '',
+        lookingFor: '',
         instagram: input.instagram.trim(),
         instagramTag: normalizeSocialHandle(input.instagramTag),
         telegram: input.telegram.trim(),
         spotifyTag: normalizeSocialHandle(input.spotifyTag),
         website: input.website.trim(),
-        favoriteSong: input.favoriteSong.trim(),
-        favoriteMovie: input.favoriteMovie.trim()
+        favoriteSong: '',
+        favoriteMovie: ''
       });
 
       if (IS_BACKEND_MODE && appwriteService) {
@@ -1382,8 +1421,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
             return eventError;
           }
           return null;
-        } catch {
-          return 'Aggiornamento preferenze non riuscito. Riprova.';
+        } catch (error) {
+          return mapAppwriteError(error, 'Aggiornamento preferenze non riuscito. Riprova.');
         }
       }
 
@@ -1606,7 +1645,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         persisted.mainEventState.waitingList.some((item) => item.email === normalized);
 
       if (alreadyPresent) {
-        return 'Questo utente e gia presente in evento o waiting list.';
+        return 'Questo utente è già presente in evento o waiting list.';
       }
 
       setPersisted((prev) => ({
@@ -1848,36 +1887,63 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       void appwriteService.markThreadRead(threadId).catch(() => undefined);
     }
 
-    setPersisted((prev) => ({
-      ...prev,
-      threads: prev.threads.map((thread) => {
+    setPersisted((prev) => {
+      let didChangeThread = false;
+      let didChangeNotifications = false;
+
+      const threads = prev.threads.map((thread) => {
         if (thread.id !== threadId) {
           return thread;
         }
 
-        return {
-          ...thread,
-          unreadCount: 0,
-          messages: thread.messages.map((message) =>
-            !message.isMe && !message.readAt
-              ? {
-                  ...message,
-                  readAt,
-                  deliveryState: 'read'
-                }
-              : message
-          )
-        };
-      }),
-      notifications: prev.notifications.map((notification) =>
-        notification.threadId === threadId && !notification.readAt
+        const messages = thread.messages.map((message) => {
+          if (message.isMe || message.readAt) {
+            return message;
+          }
+
+          didChangeThread = true;
+          return {
+            ...message,
+            readAt,
+            deliveryState: 'read' as ChatDeliveryState
+          };
+        });
+
+        if (thread.unreadCount > 0) {
+          didChangeThread = true;
+        }
+
+        return didChangeThread
           ? {
-              ...notification,
-              readAt
+              ...thread,
+              unreadCount: 0,
+              messages
             }
-          : notification
-      )
-    }));
+          : thread;
+      });
+
+      const notifications = prev.notifications.map((notification) => {
+        if (notification.threadId !== threadId || notification.readAt) {
+          return notification;
+        }
+
+        didChangeNotifications = true;
+        return {
+          ...notification,
+          readAt
+        };
+      });
+
+      if (!didChangeThread && !didChangeNotifications) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        threads,
+        notifications
+      };
+    });
   }, []);
 
   const setThreadNotifications = useCallback(
@@ -1978,7 +2044,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
               matched: false,
               message: decision === 'left'
                 ? `Hai saltato ${profile.name}.`
-                : `Like inviato a ${profile.name}. In attesa di risposta.`
+                : `Like inviato a ${profile.name}.`
             };
           }
 
@@ -1987,7 +2053,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
             id: crypto.randomUUID(),
             type: 'match',
             title: `Nuovo match con ${profile.name}`,
-            body: 'La chat e stata creata automaticamente.',
+            body: 'La chat è stata creata automaticamente.',
             createdAt,
             threadId: thread.id
           };
@@ -2006,7 +2072,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           return {
             matched: true,
             threadId: thread.id,
-            message: `It s a match con ${profile.name}!`
+            message: `È un match con ${profile.name}!`
           };
         } catch {
           return {
@@ -2016,84 +2082,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         }
       }
 
-      if (decision === 'left') {
-        return {
-          matched: false,
-          message: `Hai saltato ${profile.name}.`
-        };
-      }
-
-      const existingThread = persisted.threads.find(
-        (thread) => thread.name.toLowerCase() === profile.name.toLowerCase()
-      );
-
-      if (existingThread) {
-        return {
-          matched: true,
-          threadId: existingThread.id,
-          message: `Hai gia una chat con ${profile.name}.`
-        };
-      }
-
-      const matched = shouldCreateMockMatch(currentUser, profile.id);
-      if (!matched) {
-        return {
-          matched: false,
-          message: `Like inviato a ${profile.name}. In attesa di risposta.`
-        };
-      }
-
-      const createdAt = nowIso();
-      const threadId = crypto.randomUUID();
-      const openerMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        text: `Ehi! Match fatto. Ti va di sentirci qui?`,
-        isMe: false,
-        time: formatTime(new Date()),
-        createdAt,
-        senderName: profile.name,
-        deliveryState: 'delivered'
-      };
-
-      const newThread: ChatThread = {
-        id: threadId,
-        name: profile.name,
-        avatar: profile.name.slice(0, 1).toUpperCase(),
-        isOnline: true,
-        isTyping: false,
-        unreadCount: 1,
-        createdAt,
-        matchedAt: createdAt,
-        lastSeenAt: createdAt,
-        notificationsEnabled: true,
-        relationshipState: 'matched',
-        messages: [openerMessage]
-      };
-
-      const matchNotification: AppNotification = {
-        id: crypto.randomUUID(),
-        type: 'match',
-        title: `Nuovo match con ${profile.name}`,
-        body: 'La chat e stata creata automaticamente.',
-        createdAt,
-        threadId
-      };
-
-      setPersisted((prev) => ({
-        ...prev,
-        threads: [newThread, ...prev.threads],
-        notifications: isNotificationEnabledForType(prev.settings, 'match')
-          ? [matchNotification, ...prev.notifications].slice(0, 180)
-          : prev.notifications
-      }));
-
       return {
-        matched: true,
-        threadId,
-        message: `It s a match con ${profile.name}!`
+        matched: false,
+        message: IS_BACKEND_MODE
+          ? 'Swipe non disponibile. Riprova.'
+          : 'Backend non configurato: impossibile creare chat o match.'
       };
     },
-    [discoverProfiles, persisted.threads]
+    [discoverProfiles]
   );
 
   const fetchMainEventAdminState = useCallback(async (eventId?: string): Promise<EventAdminActionResult> => {
@@ -2290,123 +2286,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   }, []);
 
   useEffect(() => {
-    if (IS_BACKEND_MODE) {
-      return;
-    }
-
-    setPersisted((prev) => ({
-      ...prev,
-      realtimeState: 'connecting'
-    }));
-
-    const connectTimer = window.setTimeout(() => {
-      setPersisted((prev) => ({
-        ...prev,
-        realtimeState: 'connected'
-      }));
-    }, 900);
-
-    const realtimeTimer = window.setInterval(() => {
-      setPersisted((prev) => {
-        if (prev.threads.length === 0) {
-          return {
-            ...prev,
-            realtimeState: 'connected'
-          };
-        }
-
-        const cursor = mockRealtimeCursorRef.current;
-        const targetIndex = cursor % prev.threads.length;
-        const target = prev.threads[targetIndex];
-        const messageText =
-          INCOMING_MESSAGE_LIBRARY[cursor % INCOMING_MESSAGE_LIBRARY.length];
-        const createdAt = nowIso();
-
-        mockRealtimeCursorRef.current += 1;
-
-        const incomingMessage: ChatMessage = {
-          id: crypto.randomUUID(),
-          text: messageText,
-          isMe: false,
-          time: formatTime(new Date()),
-          createdAt,
-          senderName: target.name,
-          deliveryState: 'delivered'
-        };
-
-        const nextThreads: ChatThread[] = prev.threads.map((thread, index): ChatThread => {
-          if (index !== targetIndex) {
-            return thread;
-          }
-
-          return {
-            ...thread,
-            isOnline: cursor % 4 !== 0,
-            lastSeenAt: createdAt,
-            unreadCount: thread.unreadCount + 1,
-            messages: [...thread.messages, incomingMessage]
-          };
-        });
-
-        const incomingNotification: AppNotification = {
-          id: crypto.randomUUID(),
-          type: 'chat',
-          title: `Nuovo messaggio da ${target.name}`,
-          body: messageText,
-          createdAt,
-          threadId: target.id
-        };
-
-        const nextNotifications: AppNotification[] = isNotificationEnabledForType(prev.settings, 'chat')
-          ? [incomingNotification, ...prev.notifications].slice(0, 180)
-          : prev.notifications;
-
-        return {
-          ...prev,
-          realtimeState: 'connected',
-          threads: nextThreads,
-          notifications: nextNotifications
-        };
-      });
-    }, 14000);
-
-    return () => {
-      window.clearTimeout(connectTimer);
-      window.clearInterval(realtimeTimer);
-      setPersisted((prev) => ({
-        ...prev,
-        realtimeState: 'disconnected'
-      }));
-    };
-  }, []);
-
-  useEffect(() => {
-    if (IS_BACKEND_MODE || !persisted.settings.notificationsPollingEnabled) {
-      return;
-    }
-
-    const pollTimer = window.setInterval(() => {
-      const cursor = mockNotificationCursorRef.current;
-      mockNotificationCursorRef.current += 1;
-
-      if (cursor % 2 === 0) {
-        return;
-      }
-
-      const content = POLL_NOTIFICATION_LIBRARY[cursor % POLL_NOTIFICATION_LIBRARY.length];
-      pushNotification({
-        type: 'system',
-        title: 'Aggiornamento inbox',
-        body: content
-      });
-    }, 30000);
-
-    return () => {
-      window.clearInterval(pollTimer);
-    };
-  }, [persisted.settings.notificationsPollingEnabled, pushNotification]);
-
-  useEffect(() => {
     if (
       notificationPermission !== 'granted' ||
       !persisted.settings.browserPushEnabled ||
@@ -2459,6 +2338,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       seedDemoUsers,
       resetLocalData,
       updateProfileImage,
+      updateProfileImages,
       updateProfile,
       updateAccountPreferences,
       willUserLoseEventRegistrations,
@@ -2482,9 +2362,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       markAllNotificationsRead,
       requestBrowserNotificationsPermission,
       updateSettings,
-      setThreads,
-      hydrateMockDiscoverProfiles,
-      hydrateMockThreadsIfMissing
+      setThreads
     }),
     [
       persisted,
@@ -2509,6 +2387,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       seedDemoUsers,
       resetLocalData,
       updateProfileImage,
+      updateProfileImages,
       updateProfile,
       updateAccountPreferences,
       willUserLoseEventRegistrations,
@@ -2532,9 +2411,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       markAllNotificationsRead,
       requestBrowserNotificationsPermission,
       updateSettings,
-      setThreads,
-      hydrateMockDiscoverProfiles,
-      hydrateMockThreadsIfMissing
+      setThreads
     ]
   );
 

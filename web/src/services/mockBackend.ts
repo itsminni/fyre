@@ -1,5 +1,5 @@
-import { baseDiscoverProfiles, createMockThreads } from '../data/mockData';
-import { ChatThread, DiscoverProfile } from '../types/models';
+import { baseDiscoverProfiles } from '../data/mockData';
+import { DiscoverProfile } from '../types/models';
 
 const MOCK_NETWORK_DELAY = 280;
 
@@ -11,7 +11,6 @@ function wait(ms: number): Promise<void> {
 
 export interface BackendAPI {
   fetchDiscoverProfiles(): Promise<DiscoverProfile[]>;
-  fetchThreads(): Promise<ChatThread[]>;
 }
 
 class MockBackendAPI implements BackendAPI {
@@ -20,11 +19,6 @@ class MockBackendAPI implements BackendAPI {
     return structuredClone(baseDiscoverProfiles);
   }
 
-  async fetchThreads(): Promise<ChatThread[]> {
-    await wait(MOCK_NETWORK_DELAY);
-    return createMockThreads();
-  }
 }
 
-// TODO(backend): replace this with a real API client once backend endpoints are available.
 export const backendApi: BackendAPI = new MockBackendAPI();

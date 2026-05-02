@@ -1,12 +1,9 @@
 import {
-  ChatThread,
   DiscoverProfile,
   MainEventConfig,
   MainEventInfo,
   MainEventState
 } from '../types/models';
-
-const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
 export const MAX_PARTICIPANTS = 48;
 export const MAX_PER_GENDER = 24;
@@ -125,7 +122,7 @@ export const baseDiscoverProfiles: DiscoverProfile[] = [
     city: 'Modena',
     distanceKm: 27,
     intent: 'casual',
-    bio: 'Cinema d autore, podcast e passeggiate serali.',
+    bio: 'Cinema d\'autore, podcast e passeggiate serali.',
     imageUrl: makeProfileArtwork('Elena', 'Cinema night', 'Podcast and moonwalks', '#9c89ff', '#312244'),
     photos: [
       makeProfileArtwork('Elena', 'Cinema night', 'Podcast and moonwalks', '#9c89ff', '#312244'),
@@ -142,7 +139,7 @@ export const baseDiscoverProfiles: DiscoverProfile[] = [
     gender: 'male',
     city: 'Bologna',
     distanceKm: 53,
-    intent: 'networking',
+    intent: 'notSure',
     bio: 'Vinili, aperitivi e road trip last minute.',
     imageUrl: makeProfileArtwork('Luca', 'Vinyl session', 'Road trip planner', '#ffb703', '#9b2226'),
     photos: [
@@ -172,98 +169,6 @@ export const baseDiscoverProfiles: DiscoverProfile[] = [
     relationshipState: 'none'
   }
 ];
-
-export function createMockThreads(): ChatThread[] {
-  const now = new Date();
-  return [
-    {
-      id: crypto.randomUUID(),
-      name: 'Giulia',
-      avatar: 'G',
-      isOnline: true,
-      isTyping: false,
-      unreadCount: 1,
-      createdAt: new Date(now.getTime() - 50 * FIFTEEN_MINUTES).toISOString(),
-      matchedAt: new Date(now.getTime() - 60 * FIFTEEN_MINUTES).toISOString(),
-      lastSeenAt: new Date(now.getTime() - 5 * 60 * 1000).toISOString(),
-      notificationsEnabled: true,
-      relationshipState: 'matched',
-      messages: [
-        {
-          id: crypto.randomUUID(),
-          text: 'Ci vediamo dopo cena?',
-          isMe: false,
-          time: formatTime(new Date(now.getTime() - 40 * FIFTEEN_MINUTES)),
-          createdAt: new Date(now.getTime() - 40 * FIFTEEN_MINUTES).toISOString(),
-          deliveryState: 'delivered'
-        },
-        {
-          id: crypto.randomUUID(),
-          text: 'Perfetto, ci sono.',
-          isMe: true,
-          time: formatTime(new Date(now.getTime() - 35 * FIFTEEN_MINUTES)),
-          createdAt: new Date(now.getTime() - 35 * FIFTEEN_MINUTES).toISOString(),
-          readAt: new Date(now.getTime() - 34 * FIFTEEN_MINUTES).toISOString(),
-          deliveryState: 'read'
-        }
-      ]
-    },
-    {
-      id: crypto.randomUUID(),
-      name: 'Marco',
-      avatar: 'M',
-      isOnline: false,
-      isTyping: false,
-      unreadCount: 0,
-      createdAt: new Date(now.getTime() - 122 * FIFTEEN_MINUTES).toISOString(),
-      matchedAt: new Date(now.getTime() - 126 * FIFTEEN_MINUTES).toISOString(),
-      lastSeenAt: new Date(now.getTime() - 45 * 60 * 1000).toISOString(),
-      notificationsEnabled: true,
-      relationshipState: 'matched',
-      messages: [
-        {
-          id: crypto.randomUUID(),
-          text: 'Allenamento domani mattina?',
-          isMe: false,
-          time: formatTime(new Date(now.getTime() - 120 * FIFTEEN_MINUTES)),
-          createdAt: new Date(now.getTime() - 120 * FIFTEEN_MINUTES).toISOString(),
-          deliveryState: 'delivered'
-        }
-      ]
-    },
-    {
-      id: crypto.randomUUID(),
-      name: 'Elena',
-      avatar: 'E',
-      isOnline: true,
-      isTyping: false,
-      unreadCount: 0,
-      createdAt: new Date(now.getTime() - 22 * FIFTEEN_MINUTES).toISOString(),
-      matchedAt: new Date(now.getTime() - 28 * FIFTEEN_MINUTES).toISOString(),
-      lastSeenAt: new Date(now.getTime() - 2 * 60 * 1000).toISOString(),
-      notificationsEnabled: true,
-      relationshipState: 'matched',
-      messages: [
-        {
-          id: crypto.randomUUID(),
-          text: 'Hai visto il nuovo film in sala?',
-          isMe: false,
-          time: formatTime(new Date(now.getTime() - 16 * FIFTEEN_MINUTES)),
-          createdAt: new Date(now.getTime() - 16 * FIFTEEN_MINUTES).toISOString(),
-          deliveryState: 'delivered'
-        },
-        {
-          id: crypto.randomUUID(),
-          text: 'Sabato potremmo andare insieme.',
-          isMe: true,
-          time: formatTime(new Date(now.getTime() - 15 * FIFTEEN_MINUTES)),
-          createdAt: new Date(now.getTime() - 15 * FIFTEEN_MINUTES).toISOString(),
-          deliveryState: 'sent'
-        }
-      ]
-    }
-  ];
-}
 
 export function createInitialMainEventState(): MainEventState {
   return {

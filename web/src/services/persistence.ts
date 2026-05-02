@@ -19,8 +19,7 @@ import { normalizeUser } from '../types/models';
 import {
   createDefaultMainEventConfig,
   createDefaultMainEventInfo,
-  createInitialMainEventState,
-  createMockThreads
+  createInitialMainEventState
 } from '../data/mockData';
 
 const STORAGE_KEY = 'fyre_web_state';
@@ -33,6 +32,7 @@ interface PersistedStateEnvelope {
 }
 
 const defaultSettings: AppSettings = {
+  language: 'it',
   themeMode: 'system',
   notificationsEnabled: true,
   matchNotificationsEnabled: true,
@@ -67,7 +67,7 @@ export function createDefaultPersistedState(): PersistedAppState {
     mainEventConfig: createDefaultMainEventConfig(),
     mainEventInfo: createDefaultMainEventInfo(),
     mainEventState: createInitialMainEventState(),
-    threads: createMockThreads(),
+    threads: [],
     settings: defaultSettings
   };
 }
@@ -103,7 +103,7 @@ export function loadPersistedState(): PersistedAppState {
       mainEventConfig: sanitizeMainEventConfig(candidateState.mainEventConfig, fallbackState.mainEventConfig),
       mainEventInfo: sanitizeMainEventInfo(candidateState.mainEventInfo, fallbackState.mainEventInfo),
       mainEventState: sanitizeMainEventState(candidateState.mainEventState, fallbackState.mainEventState),
-      threads: sanitizeThreads(candidateState.threads, fallbackState.threads),
+      threads: sanitizeThreads(candidateState.threads),
       settings: {
         ...defaultSettings,
         ...(isRecord(candidateState.settings) ? candidateState.settings : {})
@@ -235,10 +235,12 @@ function sanitizeMatchIntent(value: unknown): User['intent'] | undefined {
     value === 'relationship' ||
     value === 'friendship' ||
     value === 'casual' ||
-    value === 'networking' ||
     value === 'notSure'
   ) {
     return value;
+  }
+  if (value === 'networking') {
+    return 'notSure';
   }
   return undefined;
 }
@@ -369,16 +371,14 @@ function sanitizeMainEventInfo(value: unknown, fallback: MainEventInfo): MainEve
   };
 }
 
-function sanitizeThreads(value: unknown, fallback: ChatThread[]): ChatThread[] {
+function sanitizeThreads(value: unknown): ChatThread[] {
   if (!Array.isArray(value)) {
-    return fallback;
+    return [];
   }
 
-  const sanitized = value
+  return value
     .map((thread) => sanitizeThread(thread))
     .filter((thread): thread is ChatThread => Boolean(thread));
-
-  return sanitized.length > 0 ? sanitized : fallback;
 }
 
 function sanitizeThread(value: unknown): ChatThread | null {

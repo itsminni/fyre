@@ -80,6 +80,7 @@ export class AppwriteService {
   private readonly projectId: string;
   private readonly configuration: AppwriteConfiguration;
   private realtimeClient: Client | null = null;
+  private cachedFunctionJwt: { value: string; expiresAt: number } | null = null;
 
   constructor(configuration: AppwriteConfiguration) {
     this.configuration = configuration;
@@ -139,10 +140,36 @@ export class AppwriteService {
       await this.uploadAvatarDataUrl(user.profileImageData, nextAvatarFileId, accountId);
     }
 
+    let nextPhotoFileIds = user.photoFileIds ?? [];
+    if (Array.isArray(user.profilePhotoDataItems)) {
+      const preservedFileIds = user.photoFileIds ?? [];
+      const usedPreservedFileIds = new Set<string>();
+      nextPhotoFileIds = [];
+
+      for (const photoItem of user.profilePhotoDataItems.slice(0, 6)) {
+        if (photoItem.startsWith('data:')) {
+          const [uploadedFileId] = await this.uploadProfilePhotoDataUrls([photoItem], accountId);
+          if (uploadedFileId) {
+            nextPhotoFileIds.push(uploadedFileId);
+          }
+          continue;
+        }
+
+        const preservedFileId = preservedFileIds.find(
+          (fileId) => !usedPreservedFileIds.has(fileId) && photoItem.includes(fileId)
+        );
+        if (preservedFileId) {
+          usedPreservedFileIds.add(preservedFileId);
+          nextPhotoFileIds.push(preservedFileId);
+        }
+      }
+    }
+
     const payload = this.makeProfilePayload({
       ...user,
       appwriteUserId: accountId,
-      avatarFileId: nextAvatarFileId ?? undefined
+      avatarFileId: nextAvatarFileId ?? undefined,
+      photoFileIds: nextPhotoFileIds
     });
 
     if (!existingProfileRow) {
@@ -176,16 +203,33 @@ export class AppwriteService {
   async updateProfileImage(user: User, profileImageData: string): Promise<User> {
     const accountId = await this.resolveRequiredAccountId(user);
     const previousAvatarFileId = user.avatarFileId ?? null;
+    const trimmedImageData = profileImageData.trim();
+
+    if (trimmedImageData.length === 0) {
+      const updated = await this.updateProfile({
+        ...user,
+        appwriteUserId: accountId,
+        avatarFileId: undefined,
+        profileImageData: undefined
+      });
+
+      if (previousAvatarFileId) {
+        await this.deleteAvatarFile(previousAvatarFileId).catch(() => undefined);
+      }
+
+      return updated;
+    }
+
     const nextAvatarFileId = this.makeRandomIdentifier();
 
-    await this.uploadAvatarDataUrl(profileImageData, nextAvatarFileId, accountId);
+    await this.uploadAvatarDataUrl(trimmedImageData, nextAvatarFileId, accountId);
 
     try {
       const updated = await this.updateProfile({
         ...user,
         appwriteUserId: accountId,
         avatarFileId: nextAvatarFileId,
-        profileImageData
+        profileImageData: trimmedImageData
       });
 
       if (previousAvatarFileId && previousAvatarFileId !== nextAvatarFileId) {
@@ -494,18 +538,14 @@ export class AppwriteService {
       decision
     });
 
-    const matched = this.booleanValue(response.matched) ?? false;
-    if (!matched) {
-      if (decision === 'liked') {
-        return this.fetchMatchedThreadAfterSwipe(otherUserId, otherUserName);
-      }
-
-      return null;
-    }
-
     const threadId = this.stringValue(response.threadId);
     if (threadId) {
       return this.fetchThreadAfterWrite(threadId, otherUserId, otherUserName, 'matched');
+    }
+
+    const matched = this.booleanValue(response.matched) ?? false;
+    if (!matched) {
+      return null;
     }
 
     // Ensure the dedicated create/get-thread function is used in the web swipe flow too.
@@ -842,41 +882,6 @@ export class AppwriteService {
     return rows.length > 0;
   }
 
-  private async hasMatchedRelationshipWithCurrentUser(otherUserId: string): Promise<boolean> {
-    const currentAccountId = await this.fetchCurrentAccountId(false);
-    if (!currentAccountId) {
-      return false;
-    }
-
-    const relationshipState = await this.fetchRelationshipState(currentAccountId, otherUserId);
-    if (relationshipState === 'matched') {
-      return true;
-    }
-
-    return this.hasLegacyMatch(currentAccountId, otherUserId);
-  }
-
-  private async fetchMatchedThreadAfterSwipe(
-    otherUserId: string,
-    otherUserName: string | null
-  ): Promise<ChatThread | null> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      try {
-        if (await this.hasMatchedRelationshipWithCurrentUser(otherUserId)) {
-          return this.createOrGetThread(otherUserId, otherUserName);
-        }
-      } catch {
-        // Keep parity with iOS: a transient relationship read failure should not fail the swipe flow.
-      }
-
-      if (attempt < 4) {
-        await wait(250);
-      }
-    }
-
-    return null;
-  }
-
   private isRelationshipVisibleInInbox(state: RelationshipState): boolean {
     return state === 'liked' || state === 'matched';
   }
@@ -1014,7 +1019,7 @@ export class AppwriteService {
   private async createAccount(email: string, password: string): Promise<void> {
     await this.sendJsonRequest('POST', '/account', {
       body: {
-        userId: 'unique()',
+        userId: this.makeRandomIdentifier(),
         email,
         password
       },
@@ -1049,6 +1054,10 @@ export class AppwriteService {
     const profileRow = await this.fetchProfileRow(accountId);
     const avatarFileId = this.stringValue(profileRow?.avatarFileId);
     const avatarDataUrl = await this.fetchAvatarDataUrl(avatarFileId);
+    const photoFileIds = this.stringArrayValue(profileRow?.photoFileIds);
+    const profilePhotoDataItems = photoFileIds
+      .map((fileId) => this.storageFileUrl(this.configuration.avatarsBucketId, fileId))
+      .filter((value): value is string => Boolean(value));
 
     const gender = this.userGenderValue(this.stringValue(profileRow?.gender));
     const preferredGenders = this.genderListValue(profileRow?.preferredGenders);
@@ -1065,13 +1074,17 @@ export class AppwriteService {
       showMe: 'everyone',
       smokes: this.booleanValue(profileRow?.smokes) ?? undefined,
       drinks: this.booleanValue(profileRow?.drinks) ?? undefined,
+      excludeSmokers: this.booleanValue(profileRow?.excludeSmokers) ?? undefined,
+      excludeDrinkers: this.booleanValue(profileRow?.excludeDrinkers) ?? undefined,
       hobbies: this.stringValue(profileRow?.interests) ?? '',
       passions: this.stringValue(profileRow?.bio) ?? '',
       lookingFor: this.intentToText(this.stringValue(profileRow?.intent)),
       favoriteSong: this.stringValue(profileRow?.spotifyTag) ?? '',
       favoriteMovie: this.stringValue(profileRow?.instagramTag) ?? '',
       profileImageData: avatarDataUrl ?? undefined,
+      profilePhotoDataItems,
       avatarFileId: avatarFileId ?? undefined,
+      photoFileIds,
       city: this.stringValue(profileRow?.city) ?? undefined,
       latitude: this.numberValue(profileRow?.latitude) ?? undefined,
       longitude: this.numberValue(profileRow?.longitude) ?? undefined,
@@ -1117,6 +1130,8 @@ export class AppwriteService {
       longitude,
       smokes: typeof normalizedUser.smokes === 'boolean' ? normalizedUser.smokes : null,
       drinks: typeof normalizedUser.drinks === 'boolean' ? normalizedUser.drinks : null,
+      excludeSmokers: typeof normalizedUser.excludeSmokers === 'boolean' ? normalizedUser.excludeSmokers : null,
+      excludeDrinkers: typeof normalizedUser.excludeDrinkers === 'boolean' ? normalizedUser.excludeDrinkers : null,
       bio: this.nullOrString(this.userBio(normalizedUser)),
       intent: this.nullOrString(
         normalizedUser.intent ?? this.intentFromText(normalizedUser.lookingFor, normalizedUser.intent)
@@ -1124,6 +1139,7 @@ export class AppwriteService {
       interests: this.nullOrString(normalizedUser.hobbies),
       instagramTag: this.nullOrString(normalizedUser.instagramTag),
       spotifyTag: this.nullOrString(normalizedUser.spotifyTag),
+      photoFileIds: normalizedUser.photoFileIds ?? [],
       profileReady: isProfileComplete(normalizedUser),
       avatarFileId: this.nullOrString(normalizedUser.avatarFileId)
     };
@@ -1355,7 +1371,149 @@ export class AppwriteService {
       payload.currentUserId = currentUserId;
     }
 
+    if (this.shouldBypassDirectFunctionInvoke(functionId)) {
+      return this.executeFunction(functionId, payload);
+    }
+
+    try {
+      const directResponse = await this.executeFunctionDirectly(functionId, payload);
+      if (directResponse && Object.keys(directResponse).length > 0) {
+        return directResponse;
+      }
+    } catch (error) {
+      if (!this.shouldFallbackToExecutionApi(error)) {
+        throw error;
+      }
+    }
+
     return this.executeFunction(functionId, payload);
+  }
+
+  private shouldBypassDirectFunctionInvoke(functionId: string): boolean {
+    return (
+      this.configuration.discoverProfilesFunctionId === functionId ||
+      this.configuration.sendMessageFunctionId === functionId ||
+      this.configuration.eventAdminFunctionId === functionId ||
+      this.configuration.manageRelationshipFunctionId === functionId
+    );
+  }
+
+  private shouldFallbackToExecutionApi(error: unknown): boolean {
+    if (error instanceof AppwriteServiceError) {
+      return (
+        error.statusCode === 401 ||
+        error.statusCode === 403 ||
+        error.type === 'router_unauthorized_execution'
+      );
+    }
+
+    // Browsers may reject direct function domains through CORS/network policy; the execution API remains supported.
+    return error instanceof TypeError;
+  }
+
+  private async executeFunctionDirectly(
+    functionId: string,
+    body: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null> {
+    const directUrl = this.generatedFunctionUrl(functionId);
+    if (!directUrl) {
+      return null;
+    }
+
+    const jwt = await this.fetchFunctionJwt();
+    const headers = new Headers();
+    headers.set('Content-Type', 'application/json');
+    headers.set('Accept', 'application/json');
+    headers.set('x-appwrite-user-jwt', jwt);
+
+    const currentUserId = this.stringValue(body.currentUserId);
+    if (currentUserId) {
+      headers.set('x-appwrite-user-id', currentUserId);
+    }
+
+    const response = await fetch(directUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+
+    const payload = await this.parseResponsePayload(response);
+    if (!this.expectedStatus(response.status)) {
+      throw this.makeServiceError(response.status, payload);
+    }
+
+    return payload;
+  }
+
+  private async fetchFunctionJwt(): Promise<string> {
+    const now = Date.now();
+    if (this.cachedFunctionJwt && this.cachedFunctionJwt.expiresAt > now) {
+      return this.cachedFunctionJwt.value;
+    }
+
+    const response = await this.sendJsonRequest('POST', '/account/jwts', {
+      body: {
+        duration: 900
+      },
+      expectedStatusCodes: [201]
+    });
+    const jwt = this.stringValue(response.jwt);
+    if (!jwt) {
+      throw new AppwriteServiceError('Missing function JWT', 500);
+    }
+
+    this.cachedFunctionJwt = {
+      value: jwt,
+      expiresAt: now + 14 * 60 * 1000
+    };
+    return jwt;
+  }
+
+  private generatedFunctionUrl(functionId: string): string | null {
+    const configuredUrl = this.configuredFunctionUrl(functionId);
+    if (configuredUrl) {
+      return configuredUrl;
+    }
+
+    const endpointUrl = new URL(this.endpoint);
+    const segments = endpointUrl.hostname.split('.');
+    if (
+      segments.length < 4 ||
+      segments[1] !== 'cloud' ||
+      segments[2] !== 'appwrite' ||
+      segments[3] !== 'io'
+    ) {
+      return null;
+    }
+
+    const url = new URL(`https://${functionId}.${segments[0]}.appwrite.run`);
+    url.searchParams.set('type', 'json');
+    return url.toString();
+  }
+
+  private configuredFunctionUrl(functionId: string): string | null {
+    let value: string | null = null;
+    if (this.configuration.discoverProfilesFunctionId === functionId) {
+      value = this.configuration.discoverProfilesFunctionDomain;
+    } else if (this.configuration.recordSwipeFunctionId === functionId) {
+      value = this.configuration.recordSwipeFunctionDomain;
+    } else if (this.configuration.createOrGetThreadFunctionId === functionId) {
+      value = this.configuration.createOrGetThreadFunctionDomain;
+    } else if (this.configuration.sendMessageFunctionId === functionId) {
+      value = this.configuration.sendMessageFunctionDomain;
+    } else if (this.configuration.eventAdminFunctionId === functionId) {
+      value = this.configuration.eventAdminFunctionDomain;
+    }
+
+    if (!value) {
+      return null;
+    }
+
+    const url = new URL(value);
+    if (!url.searchParams.has('type')) {
+      url.searchParams.set('type', 'json');
+    }
+    return url.toString();
   }
 
   private async executeFunction(functionId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1630,7 +1788,7 @@ export class AppwriteService {
       city: profile.city,
       distanceKm: profile.distanceKm,
       compatibilityScore: profile.compatibilityScore,
-      intent: profile.intent,
+      intent: profile.intent === 'networking' ? 'notSure' : profile.intent,
       bio: profile.bio,
       imageUrl,
       photos: photos.length > 0 ? photos : imageUrl ? [imageUrl] : undefined,
@@ -1810,6 +1968,23 @@ export class AppwriteService {
     });
   }
 
+  private async uploadProfilePhotoDataUrls(dataUrls: string[], ownerUserId: string): Promise<string[]> {
+    const uploadedFileIds: string[] = [];
+
+    try {
+      for (const dataUrl of dataUrls) {
+        const fileId = this.makeRandomIdentifier();
+        await this.uploadAvatarDataUrl(dataUrl, fileId, ownerUserId);
+        uploadedFileIds.push(fileId);
+      }
+
+      return uploadedFileIds;
+    } catch (error) {
+      await Promise.all(uploadedFileIds.map((fileId) => this.deleteAvatarFile(fileId).catch(() => undefined)));
+      throw error;
+    }
+  }
+
   private async deleteAvatarFile(fileId: string): Promise<void> {
     await this.sendJsonRequest('DELETE', `/storage/buckets/${this.configuration.avatarsBucketId}/files/${fileId}`, {
       expectedStatusCodes: [204]
@@ -1939,10 +2114,6 @@ export class AppwriteService {
   private genderToBackendValue(gender: UserGender | undefined): string | null {
     if (!gender) {
       return null;
-    }
-
-    if (gender === 'nonBinary') {
-      return 'nonbinary';
     }
 
     return gender;

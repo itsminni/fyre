@@ -182,14 +182,14 @@ export function registerForMainEvent(
   if (flags.isRegistered) {
     return {
       nextState: state,
-      message: 'Sei gia iscritto a questo evento.',
+      message: 'Sei già iscritto a questo evento.',
       isError: true
     };
   }
   if (flags.isWaiting) {
     return {
       nextState: state,
-      message: 'Sei gia in waiting list.',
+      message: 'Sei già in waiting list.',
       isError: true
     };
   }
@@ -287,7 +287,7 @@ export function cancelMainEventRegistration(
   if (now >= cancellationLockDate) {
     return {
       nextState: state,
-      message: 'Disdetta non piu disponibile (mancano meno di 48h).',
+      message: 'Disdetta non più disponibile (mancano meno di 48h).',
       isError: true
     };
   }

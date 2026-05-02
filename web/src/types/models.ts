@@ -1,9 +1,10 @@
 export type ThemeMode = 'system' | 'light' | 'dark';
+export type AppLanguage = 'it' | 'en';
 export type RealtimeConnectionState = 'connecting' | 'connected' | 'disconnected';
 export type ChatAttachmentType = 'image' | 'video' | 'audio' | 'file';
 export type ChatDeliveryState = 'sending' | 'sent' | 'delivered' | 'read';
 export type NotificationType = 'chat' | 'match' | 'event' | 'system';
-export type MatchIntent = 'relationship' | 'friendship' | 'casual' | 'networking' | 'notSure';
+export type MatchIntent = 'relationship' | 'friendship' | 'casual' | 'notSure';
 export type RelationshipState = 'none' | 'liked' | 'matched' | 'archived' | 'blocked';
 export type ChatBackgroundStyle = 'sunset' | 'midnight' | 'aurora' | 'custom';
 export type ChatBubblePalette = 'default' | 'sunset' | 'ocean' | 'graphite';
@@ -36,6 +37,8 @@ export interface User {
   preferredGenders?: UserGender[];
   smokes?: boolean;
   drinks?: boolean;
+  excludeSmokers?: boolean;
+  excludeDrinkers?: boolean;
   bio?: string;
   minPreferredAge?: number;
   maxPreferredAge?: number;
@@ -54,7 +57,9 @@ export interface User {
   favoriteSong?: string;
   favoriteMovie?: string;
   avatarFileId?: string;
+  photoFileIds?: string[];
   profileImageData?: string;
+  profilePhotoDataItems?: string[];
 }
 
 export interface DiscoverProfile {
@@ -218,6 +223,7 @@ export interface EventAdminDraftInput {
 }
 
 export interface AppSettings {
+  language: AppLanguage;
   themeMode: ThemeMode;
   notificationsEnabled: boolean;
   matchNotificationsEnabled: boolean;
@@ -275,10 +281,12 @@ export interface ProfileUpdateInput {
   preferredGenders: UserGender[];
   smokes: boolean;
   drinks: boolean;
+  excludeSmokers: boolean;
+  excludeDrinkers: boolean;
   bio: string;
   ageRangeMin: number;
   ageRangeMax: number;
-  maxDistanceKm: number;
+  maxDistanceKm?: number;
   intent: MatchIntent;
   hobbies: string;
   passions: string;
@@ -369,10 +377,8 @@ export function normalizeUser(user: Pick<User, 'email' | 'password'> & Partial<U
     user.preferredGenders
   );
   const showMe = showMeFromPreferredGenders(preferredGenders);
-  const instagramTag = trimOptionalString(user.instagramTag ?? user.favoriteMovie);
-  const spotifyTag = trimOptionalString(user.spotifyTag ?? user.favoriteSong);
-  const favoriteMovie = trimOptionalString(user.favoriteMovie ?? instagramTag);
-  const favoriteSong = trimOptionalString(user.favoriteSong ?? spotifyTag);
+  const instagramTag = trimOptionalString(user.instagramTag);
+  const spotifyTag = trimOptionalString(user.spotifyTag);
   const cityLat = pickNumber(user.cityLat, user.latitude);
   const cityLng = pickNumber(user.cityLng, user.longitude);
   const ageRangeMin = pickInteger(user.ageRangeMin, user.minPreferredAge);
@@ -395,8 +401,16 @@ export function normalizeUser(user: Pick<User, 'email' | 'password'> & Partial<U
     telegram: trimOptionalString(user.telegram),
     spotifyTag,
     website: trimOptionalString(user.website),
-    favoriteSong,
-    favoriteMovie,
+    favoriteSong: trimOptionalString(user.favoriteSong),
+    favoriteMovie: trimOptionalString(user.favoriteMovie),
+    excludeSmokers: typeof user.excludeSmokers === 'boolean' ? user.excludeSmokers : undefined,
+    excludeDrinkers: typeof user.excludeDrinkers === 'boolean' ? user.excludeDrinkers : undefined,
+    photoFileIds: Array.isArray(user.photoFileIds)
+      ? user.photoFileIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : undefined,
+    profilePhotoDataItems: Array.isArray(user.profilePhotoDataItems)
+      ? user.profilePhotoDataItems.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : undefined,
     showMe,
     preferredGenders,
     cityLat,
@@ -440,12 +454,8 @@ export function getDisplayName(user: User): string {
 export function isProfileComplete(user: User): boolean {
   const requiredTextFields = [
     user.firstName,
-    user.lastName,
-    user.hobbies,
-    user.passions,
-    user.lookingFor,
-    user.favoriteSong,
-    user.favoriteMovie
+    user.city,
+    user.bio
   ];
 
   return (
@@ -453,8 +463,9 @@ export function isProfileComplete(user: User): boolean {
     calculateAge(user.birthDate ?? '') >= 18 &&
     Boolean(user.gender) &&
     Boolean(user.orientation) &&
-    typeof user.smokes === 'boolean' &&
-    typeof user.drinks === 'boolean'
+    typeof user.latitude === 'number' &&
+    typeof user.longitude === 'number' &&
+    preferredGendersFromShowMe(user.showMe, user.preferredGenders).length > 0
   );
 }
 
