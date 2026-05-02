@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { SwipeCard } from '../../components/home/SwipeCard';
 import { useAppStore } from '../../hooks/useAppStore';
+import { useI18n } from '../../i18n';
 import { preferredGenderMatches } from '../../types/models';
 
 type Decision = 'left' | 'right';
@@ -15,6 +16,7 @@ export function HomePage(): JSX.Element {
     submitSwipeDecision,
     persisted: { settings }
   } = useAppStore();
+  const { t } = useI18n();
 
   const filteredProfiles = useMemo(() => {
     const showMe = currentUser?.showMe ?? 'everyone';
@@ -98,13 +100,7 @@ export function HomePage(): JSX.Element {
   return (
     <section className="home-page fade-in-up">
       <header className="section-header">
-        <p className="section-header__eyebrow">Scopri</p>
-        <h2>Swipe Home</h2>
-        <p className="text-muted">
-          {activeProfile
-            ? `${index + 1} di ${filteredProfiles.length} profili compatibili`
-            : 'Hai finito i profili disponibili per adesso.'}
-        </p>
+        <h2>{t('home.title')}</h2>
       </header>
 
       {activeProfile ? (
@@ -142,7 +138,8 @@ export function HomePage(): JSX.Element {
                         ? 'none'
                         : 'transform 180ms ease-out, opacity 180ms ease-out',
                       zIndex: String(queuedProfiles.length - deckIndex),
-                      opacity: 1 - deckIndex * 0.08,
+                      opacity: isTopCard ? 1 : 0,
+                      pointerEvents: isTopCard ? 'auto' : 'none',
                       position: 'absolute',
                       inset: 0
                     }}
@@ -153,10 +150,10 @@ export function HomePage(): JSX.Element {
 
           <div className="swipe-actions">
             <Button variant="secondary" onClick={() => onDecision('left')} disabled={isSubmitting}>
-              Salta
+              {t('home.skip')}
             </Button>
             <Button onClick={() => onDecision('right')} disabled={isSubmitting}>
-              {isSubmitting ? 'Attendi...' : 'Fyre'}
+              {isSubmitting ? t('home.wait') : t('home.like')}
             </Button>
           </div>
 
@@ -164,14 +161,14 @@ export function HomePage(): JSX.Element {
 
           {lastMatch && (
             <article className="match-panel">
-              <h3>It s a match con {lastMatch.name}</h3>
-              <p>La chat e stata creata. Puoi iniziare a scrivere subito.</p>
+              <h3>{t('home.match.title', { name: lastMatch.name })}</h3>
+              <p>{t('home.match.body')}</p>
               <div className="match-panel__actions">
                 <Button onClick={() => navigate(`/app/messages/${lastMatch.threadId}`)}>
-                  Apri chat
+                  {t('home.match.openChat')}
                 </Button>
                 <Button variant="secondary" onClick={() => setLastMatch(null)}>
-                  Continua swipe
+                  {t('home.match.continue')}
                 </Button>
               </div>
             </article>
@@ -179,11 +176,7 @@ export function HomePage(): JSX.Element {
         </div>
       ) : (
         <div className="empty-panel">
-          <h3>Fine profili</h3>
-          <p>Hai visto tutti i profili demo.</p>
-          <Button variant="ghost" onClick={() => setIndex(0)}>
-            Ricomincia
-          </Button>
+          <h3>{t('home.empty.title')}</h3>
         </div>
       )}
     </section>

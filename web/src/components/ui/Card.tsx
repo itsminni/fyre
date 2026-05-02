@@ -5,15 +5,19 @@ interface CardProps {
   subtitle?: string;
   children: ReactNode;
   className?: string;
+  headerAction?: ReactNode;
 }
 
-export function Card({ title, subtitle, children, className = '' }: CardProps): JSX.Element {
+export function Card({ title, subtitle, children, className = '', headerAction }: CardProps): JSX.Element {
   return (
     <section className={['ui-card', className].filter(Boolean).join(' ')}>
-      {(title || subtitle) && (
+      {(title || subtitle || headerAction) && (
         <header className="ui-card__header">
-          {title && <h3>{title}</h3>}
-          {subtitle && <p>{subtitle}</p>}
+          <div className="ui-card__header-main">
+            {title && <h3>{title}</h3>}
+            {subtitle && <p>{subtitle}</p>}
+          </div>
+          {headerAction ? <div className="ui-card__header-action">{headerAction}</div> : null}
         </header>
       )}
       <div className="ui-card__body">{children}</div>

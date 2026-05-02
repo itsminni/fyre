@@ -1,5 +1,6 @@
 import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { DiscoverProfile } from '../../types/models';
+import { TranslationKey, useI18n } from '../../i18n';
 
 interface SwipeCardProps {
   profile: DiscoverProfile;
@@ -10,12 +11,11 @@ interface SwipeCardProps {
   showInterests?: boolean;
 }
 
-const INTENT_LABELS: Record<NonNullable<DiscoverProfile['intent']>, string> = {
-  relationship: 'Relazione',
-  friendship: 'Amicizia',
-  casual: 'Casual',
-  networking: 'Networking',
-  notSure: 'Esplorazione'
+const intentLabelKeys: Record<NonNullable<DiscoverProfile['intent']>, TranslationKey> = {
+  relationship: 'intent.relationship',
+  friendship: 'intent.friendship',
+  casual: 'intent.casual',
+  notSure: 'intent.notSure'
 };
 
 export function SwipeCard({
@@ -26,6 +26,7 @@ export function SwipeCard({
   showIntent = true,
   showInterests = true
 }: SwipeCardProps): JSX.Element {
+  const { t } = useI18n();
   const photos = useMemo(() => {
     if (Array.isArray(profile.photos) && profile.photos.length > 0) {
       return profile.photos;
@@ -71,8 +72,6 @@ export function SwipeCard({
             : undefined
         }
       >
-        {!activePhoto && <span className="swipe-card__fallback">{profile.name[0]}</span>}
-
         {photos.length > 1 && (
           <>
             <div className="swipe-card__photo-indicators" aria-hidden>
@@ -89,33 +88,29 @@ export function SwipeCard({
             <div className="swipe-card__photo-nav">
               <button
                 type="button"
+                className="swipe-card__photo-arrow swipe-card__photo-arrow--previous"
                 onClick={() => movePhoto(-1)}
+                onMouseDown={(event) => event.stopPropagation()}
+                onTouchStart={(event) => event.stopPropagation()}
                 disabled={photoIndex === 0}
                 aria-label="Foto precedente"
-              />
+              >
+                ‹
+              </button>
               <button
                 type="button"
+                className="swipe-card__photo-arrow swipe-card__photo-arrow--next"
                 onClick={() => movePhoto(1)}
+                onMouseDown={(event) => event.stopPropagation()}
+                onTouchStart={(event) => event.stopPropagation()}
                 disabled={photoIndex === photos.length - 1}
                 aria-label="Foto successiva"
-              />
+              >
+                ›
+              </button>
             </div>
           </>
         )}
-
-        <div className="swipe-card__hero-meta">
-          {profile.compatibilityScore ? (
-            <span className="swipe-card__tag swipe-card__tag--accent">
-              {profile.compatibilityScore}% compatibilita
-            </span>
-          ) : null}
-          {showDistance && profile.distanceKm ? (
-            <span className="swipe-card__tag">{profile.distanceKm} km</span>
-          ) : null}
-          {showIntent && profile.intent ? (
-            <span className="swipe-card__tag">{INTENT_LABELS[profile.intent]}</span>
-          ) : null}
-        </div>
       </div>
 
       <div className="swipe-card__body">
@@ -125,6 +120,20 @@ export function SwipeCard({
         </h3>
         {profile.city ? <p className="swipe-card__location">{profile.city}</p> : null}
         <p>{profile.bio}</p>
+
+        <div className="swipe-card__hero-meta">
+          {profile.compatibilityScore ? (
+            <span className="swipe-card__tag swipe-card__tag--accent">
+              {profile.compatibilityScore}% {t('profile.compatibility')}
+            </span>
+          ) : null}
+          {showDistance && profile.distanceKm ? (
+            <span className="swipe-card__tag">{profile.distanceKm} km</span>
+          ) : null}
+          {showIntent && profile.intent ? (
+            <span className="swipe-card__tag">{t(intentLabelKeys[profile.intent])}</span>
+          ) : null}
+        </div>
 
         {showInterests && profile.commonInterests && profile.commonInterests.length > 0 ? (
           <div className="swipe-card__interest-list">
