@@ -1,5 +1,6 @@
 interface ChatAvatarProps {
   name: string;
+  avatar?: string;
   size?: number;
   isOnline?: boolean;
 }
@@ -18,7 +19,20 @@ function gradientForName(name: string): string {
   return `linear-gradient(135deg, ${start}, ${end})`;
 }
 
-export function ChatAvatar({ name, size = 52, isOnline = false }: ChatAvatarProps): JSX.Element {
+function isRemoteImage(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export function ChatAvatar({ name, avatar, size = 52, isOnline = false }: ChatAvatarProps): JSX.Element {
   const initials = name
     .split(/\s+/)
     .filter(Boolean)
@@ -28,7 +42,11 @@ export function ChatAvatar({ name, size = 52, isOnline = false }: ChatAvatarProp
 
   return (
     <span className="chat-avatar" style={{ width: size, height: size, background: gradientForName(name) }}>
-      <span>{initials || 'FY'}</span>
+      {isRemoteImage(avatar) ? (
+        <img src={avatar} alt="" />
+      ) : (
+        <span>{initials || avatar || 'FY'}</span>
+      )}
       {isOnline && <span className="chat-avatar__presence" aria-label="online" />}
     </span>
   );

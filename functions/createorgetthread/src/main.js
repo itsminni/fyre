@@ -12,7 +12,7 @@ export default async ({ req, res, error }) => {
     const otherUserName = asString(body.otherUserName);
 
     if (!otherUserId || otherUserId === currentUserId) {
-      return res.json({ message: "Invalid participant" }, 400);
+      return json(res, { message: "Invalid participant" }, 400);
     }
 
     let knownThreadId = null;
@@ -21,11 +21,11 @@ export default async ({ req, res, error }) => {
       if (!relationship) {
         const hasLegacyMatch = await findLegacyMatch(config, currentUserId, otherUserId);
         if (!hasLegacyMatch) {
-          return res.json({ message: "Relationship unavailable" }, 403);
+          return json(res, { message: "Relationship unavailable" }, 403);
         }
         knownThreadId = asString(hasLegacyMatch.threadId);
       } else if (!relationshipAllowsThread(relationship, currentUserId, otherUserId)) {
-        return res.json({ message: "Relationship unavailable" }, 403);
+        return json(res, { message: "Relationship unavailable" }, 403);
       } else {
         knownThreadId = asString(relationship.threadId);
       }
@@ -35,12 +35,17 @@ export default async ({ req, res, error }) => {
     const threadId = knownThreadId ?? stableThreadRowId(participantIds);
     await ensureThreadAccess(config, threadId, currentUserId, otherUserId, otherUserName);
 
-    return res.json({ threadId }, 200);
+    return json(res, { threadId }, 200);
   } catch (err) {
     error(String(err?.stack ?? err));
-    return res.json({ message: "Unable to create thread" }, 500);
+    return json(res, { message: "Unable to create thread" }, 500);
   }
 };
+
+function json(res, payload, status) {
+  console.log(`RESULT_JSON:${JSON.stringify(payload)}`);
+  return res.json(payload, status);
+}
 
 function getConfig(req) {
   return {

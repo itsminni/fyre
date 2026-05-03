@@ -364,12 +364,20 @@ function chatSurfaceStyle(settings: ReturnType<typeof useAppStore>['persisted'][
 export function ChatDetailPage(): JSX.Element {
   const navigate = useNavigate();
   const { threadId } = useParams();
-  const { persisted, sendMessage, markThreadRead, setThreadNotifications, applyRelationshipAction } = useAppStore();
+  const {
+    persisted,
+    isBackendMode,
+    sendMessage,
+    markThreadRead,
+    setThreadNotifications,
+    applyRelationshipAction
+  } = useAppStore();
   const [draft, setDraft] = useState('');
   const [replyToId, setReplyToId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [relationshipFeedback, setRelationshipFeedback] = useState<string | null>(null);
+  const [isAvatarPreviewOpen, setIsAvatarPreviewOpen] = useState(false);
   const [voiceRecorderState, setVoiceRecorderState] = useState<VoiceRecorderState>('idle');
   const [voiceRecorderElapsed, setVoiceRecorderElapsed] = useState(0);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -623,6 +631,20 @@ export function ChatDetailPage(): JSX.Element {
     }
   }
 
+  if (!thread && isBackendMode && persisted.realtimeState !== 'connected') {
+    return (
+      <section className="chat-detail-page fade-in-up">
+        <Link className="chat-back-link" to="/app/messages">
+          Torna ai messaggi
+        </Link>
+        <div className="empty-panel">
+          <h3>Caricamento chat</h3>
+          <p>Recupero la conversazione.</p>
+        </div>
+      </section>
+    );
+  }
+
   if (!thread) {
     return (
       <section className="chat-detail-page fade-in-up">
@@ -644,7 +666,14 @@ export function ChatDetailPage(): JSX.Element {
       </Link>
 
       <header className="chat-detail-page__header">
-        <ChatAvatar name={thread.name} size={40} isOnline={thread.isOnline} />
+        <button
+          className="chat-detail-page__avatar-button"
+          type="button"
+          onClick={() => setIsAvatarPreviewOpen(true)}
+          aria-label={`Apri avatar di ${thread.name}`}
+        >
+          <ChatAvatar name={thread.name} avatar={thread.avatar} size={40} isOnline={thread.isOnline} />
+        </button>
         <div>
           <h2>{thread.name}</h2>
           <p>{thread.isOnline ? 'Online ora' : formatLastSeen(thread.lastSeenAt)}</p>
@@ -668,48 +697,50 @@ export function ChatDetailPage(): JSX.Element {
           return (
             <article
               key={message.id}
-              className={message.isMe ? 'chat-bubble chat-bubble--me' : 'chat-bubble'}
+              className={message.isMe ? 'chat-message-row chat-message-row--me' : 'chat-message-row'}
             >
-              {replied && (
-                <div className="chat-reply-preview">
-                  <small>{replied.isMe ? 'Tu' : thread.name}</small>
-                  <p>
-                    {replied.text
-                      || (replied.attachments?.[0]
-                        ? attachmentLabel(replied.attachments[0])
-                        : 'Allegato')}
-                  </p>
-                </div>
-              )}
+              <div className={message.isMe ? 'chat-bubble chat-bubble--me' : 'chat-bubble'}>
+                {replied && (
+                  <div className="chat-reply-preview">
+                    <small>{replied.isMe ? 'Tu' : thread.name}</small>
+                    <p>
+                      {replied.text
+                        || (replied.attachments?.[0]
+                          ? attachmentLabel(replied.attachments[0])
+                          : 'Allegato')}
+                    </p>
+                  </div>
+                )}
 
-              {message.text ? <p>{message.text}</p> : null}
+                {message.text ? <p>{message.text}</p> : null}
 
-              {message.attachments && message.attachments.length > 0 ? (
-                <ul className="chat-attachments-list">
-                  {message.attachments.map((attachment) => (
-                    <li key={attachment.id}>
-                      <ChatAttachmentItem attachment={attachment} />
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+                {message.attachments && message.attachments.length > 0 ? (
+                  <ul className="chat-attachments-list">
+                    {message.attachments.map((attachment) => (
+                      <li key={attachment.id}>
+                        <ChatAttachmentItem attachment={attachment} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
 
-              <div className="chat-bubble__meta">
+              <div className="chat-message-row__meta">
                 <span>{message.time}</span>
                 {message.isMe && (
                   <span className="chat-bubble__delivery">
                     {formatDeliveryLabel(message.deliveryState, message.readAt)}
                   </span>
                 )}
-              </div>
 
-              <button
-                className="chat-bubble__reply-action"
-                type="button"
-                onClick={() => setReplyToId(message.id)}
-              >
-                Rispondi
-              </button>
+                <button
+                  className="chat-bubble__reply-action"
+                  type="button"
+                  onClick={() => setReplyToId(message.id)}
+                >
+                  Rispondi
+                </button>
+              </div>
             </article>
           );
         })}
@@ -804,6 +835,28 @@ export function ChatDetailPage(): JSX.Element {
       {uploadError && <p className="form-feedback form-feedback--error">{uploadError}</p>}
       {relationshipFeedback && (
         <p className="form-feedback form-feedback--error">{relationshipFeedback}</p>
+      )}
+
+      {isAvatarPreviewOpen && (
+        <div
+          className="chat-avatar-preview"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Avatar di ${thread.name}`}
+          onClick={() => setIsAvatarPreviewOpen(false)}
+        >
+          <button
+            className="chat-avatar-preview__close"
+            type="button"
+            onClick={() => setIsAvatarPreviewOpen(false)}
+            aria-label="Chiudi avatar"
+          >
+            Chiudi
+          </button>
+          <div className="chat-avatar-preview__image" onClick={(event) => event.stopPropagation()}>
+            <ChatAvatar name={thread.name} avatar={thread.avatar} size={220} isOnline={false} />
+          </div>
+        </div>
       )}
     </section>
   );

@@ -67,7 +67,9 @@ export function HomePage(): JSX.Element {
 
     pointerStart.current = null;
     setDragOffset(0);
-    setIndex((prev) => prev + 1);
+    if (result.recorded) {
+      setIndex((prev) => prev + 1);
+    }
   }
 
   function onDecision(decision: Decision): void {

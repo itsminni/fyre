@@ -78,6 +78,7 @@ interface SwipeDecisionResult {
   matched: boolean;
   message: string;
   threadId?: string;
+  recorded: boolean;
 }
 
 interface EventAdminActionResult {
@@ -746,6 +747,34 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     void hydrateThreads();
   }, [persisted.currentUserEmail, hydrateDiscoverProfiles, hydrateThreads]);
 
+  const discoveryProfileRefreshKey = useMemo(() => {
+    if (!currentUser || !isProfileComplete(currentUser)) {
+      return '';
+    }
+
+    return [
+      currentUser.appwriteUserId ?? currentUser.email,
+      currentUser.gender,
+      currentUser.orientation,
+      currentUser.showMe,
+      (currentUser.preferredGenders ?? []).join(','),
+      currentUser.ageRangeMin,
+      currentUser.ageRangeMax,
+      currentUser.maxDistanceKm ?? 'none',
+      currentUser.excludeSmokers,
+      currentUser.excludeDrinkers,
+      currentUser.city
+    ].join('|');
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!discoveryProfileRefreshKey) {
+      return;
+    }
+
+    void hydrateDiscoverProfiles();
+  }, [discoveryProfileRefreshKey, hydrateDiscoverProfiles]);
+
   useEffect(() => {
     if (!IS_BACKEND_MODE || !appwriteService || !currentUser?.appwriteUserId) {
       return;
@@ -754,6 +783,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     let isStopped = false;
     let pendingRefresh: number | null = null;
     let refreshInFlight = false;
+    let fallbackRefresh: number | null = null;
 
     const scheduleRefresh = () => {
       if (isStopped || pendingRefresh !== null) {
@@ -781,17 +811,23 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     try {
       unsubscribe = appwriteService.subscribeToChatRealtime(scheduleRefresh);
       scheduleRefresh();
+      fallbackRefresh = window.setInterval(scheduleRefresh, 8_000);
     } catch {
       setPersisted((prev) => ({
         ...prev,
         realtimeState: 'disconnected'
       }));
+      fallbackRefresh = window.setInterval(scheduleRefresh, 8_000);
+      scheduleRefresh();
     }
 
     return () => {
       isStopped = true;
       if (pendingRefresh !== null) {
         window.clearTimeout(pendingRefresh);
+      }
+      if (fallbackRefresh !== null) {
+        window.clearInterval(fallbackRefresh);
       }
       unsubscribe();
     };
@@ -2040,7 +2076,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       if (!profile) {
         return {
           matched: false,
-          message: 'Profilo non disponibile.'
+          message: 'Profilo non disponibile.',
+          recorded: false
         };
       }
 
@@ -2055,7 +2092,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
               matched: false,
               message: decision === 'left'
                 ? `Hai saltato ${profile.name}.`
-                : `Like inviato a ${profile.name}.`
+                : `Like inviato a ${profile.name}.`,
+              recorded: true
             };
           }
 
@@ -2083,12 +2121,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           return {
             matched: true,
             threadId: thread.id,
-            message: `È un match con ${profile.name}!`
+            message: `È un match con ${profile.name}!`,
+            recorded: true
           };
         } catch {
           return {
             matched: false,
-            message: 'Swipe non registrato. Riprova.'
+            message: 'Swipe non registrato. Riprova.',
+            recorded: false
           };
         }
       }
@@ -2097,7 +2137,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         matched: false,
         message: IS_BACKEND_MODE
           ? 'Swipe non disponibile. Riprova.'
-          : 'Backend non configurato: impossibile creare chat o match.'
+          : 'Backend non configurato: impossibile creare chat o match.',
+        recorded: false
       };
     },
     [discoverProfiles]

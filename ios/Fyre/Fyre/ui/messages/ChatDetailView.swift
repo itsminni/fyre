@@ -192,6 +192,12 @@ struct ChatDetailView: View {
         let action: RelationshipActionDTO
     }
 
+    private struct AvatarPreview: Identifiable {
+        let id = UUID()
+        let name: String
+        let avatarKey: String
+    }
+
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -226,6 +232,7 @@ struct ChatDetailView: View {
     @State private var isSending = false
     @State private var realtimeSubscription: AppwriteRealtimeSubscription?
     @State private var realtimeReloadTask: Task<Void, Never>?
+    @State private var fallbackReloadTask: Task<Void, Never>?
     @State private var animatingMessageIDs: Set<UUID> = []
     @State private var activeReplySwipeMessageID: UUID?
     @State private var activeReplySwipeOffset: CGFloat = 0
@@ -236,6 +243,7 @@ struct ChatDetailView: View {
     @State private var initialScrollTicket = UUID()
     @State private var pendingRelationshipAction: PendingRelationshipAction?
     @State private var messageReadInfoMessage: ChatMessage?
+    @State private var avatarPreview: AvatarPreview?
     @State private var keyboardOverlap: CGFloat = 0
     @State private var localAudioDataByFileId: [String: Data] = [:]
     @State private var localAttachmentDataByFileId: [String: Data] = [:]
@@ -356,6 +364,7 @@ struct ChatDetailView: View {
         .task {
             await reloadThread()
             startRealtime()
+            startFallbackReloadLoop()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             updateKeyboardOverlap(from: notification)
@@ -382,6 +391,7 @@ struct ChatDetailView: View {
         }
         .onDisappear {
             stopRealtime()
+            stopFallbackReloadLoop()
             audioPlayback.stop()
             voiceRecorder.cancel()
         }
@@ -399,6 +409,9 @@ struct ChatDetailView: View {
                 message: message,
                 readAt: readTimestamp(for: message)
             )
+        }
+        .sheet(item: $avatarPreview) { preview in
+            ChatAvatarPreviewSheet(name: preview.name, avatarKey: preview.avatarKey)
         }
         .alert(item: $pendingRelationshipAction) { pending in
             Alert(
@@ -487,13 +500,19 @@ struct ChatDetailView: View {
 
     private var chatHeaderPrincipal: some View {
         HStack(spacing: 8) {
-            ChatAvatarView(
-                name: threadName,
-                avatarKey: threadAvatar,
-                size: 30,
-                isOnline: threadIsOnline,
-                showsPresence: false
-            )
+            Button {
+                avatarPreview = AvatarPreview(name: threadName, avatarKey: threadAvatar)
+            } label: {
+                ChatAvatarView(
+                    name: threadName,
+                    avatarKey: threadAvatar,
+                    size: 30,
+                    isOnline: threadIsOnline,
+                    showsPresence: false
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open avatar")
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(threadName)
@@ -2715,6 +2734,23 @@ struct ChatDetailView: View {
         realtimeSubscription = nil
     }
 
+    private func startFallbackReloadLoop() {
+        guard fallbackReloadTask == nil else { return }
+
+        fallbackReloadTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard !Task.isCancelled else { return }
+                await reloadThread()
+            }
+        }
+    }
+
+    private func stopFallbackReloadLoop() {
+        fallbackReloadTask?.cancel()
+        fallbackReloadTask = nil
+    }
+
     private func scheduleRealtimeReload() {
         realtimeReloadTask?.cancel()
         realtimeReloadTask = Task {
@@ -3994,6 +4030,41 @@ private struct MessageReadInfoSheet: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+private struct ChatAvatarPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let name: String
+    let avatarKey: String
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color(uiColor: .systemBackground)
+                    .ignoresSafeArea()
+
+                ChatAvatarView(
+                    name: name,
+                    avatarKey: avatarKey,
+                    size: 240,
+                    isOnline: false,
+                    showsPresence: false
+                )
+                .padding(28)
+            }
+            .navigationTitle(name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Chiudi") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
 }
 
 private struct QuickLookPreview: UIViewControllerRepresentable {

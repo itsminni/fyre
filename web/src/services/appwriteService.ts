@@ -291,14 +291,23 @@ export class AppwriteService {
       }
 
       const threadRow = await this.fetchRowIfAccessible(this.configuration.threadsTableId, threadId);
-      const thread = await this.fetchThread(threadId, currentAccountId);
+      let thread = await this.fetchThread(threadId, currentAccountId);
+      if (!thread) {
+        thread = await this.recoverThreadFromReference(currentAccountId, threadId);
+      }
       if (!thread) {
         continue;
       }
 
+      const lastMessage = thread.messages[thread.messages.length - 1];
+      const lastMessageAt = lastMessage ? Date.parse(lastMessage.createdAt) : Number.NaN;
       const lastActivity =
+        (Number.isNaN(lastMessageAt) ? null : lastMessageAt) ??
         this.dateValue(threadRow?.lastMessageAt)?.getTime() ??
         this.dateValue(threadRow?.$updatedAt)?.getTime() ??
+        this.dateValue(participantRow.lastReadAt)?.getTime() ??
+        this.dateValue(participantRow.$updatedAt)?.getTime() ??
+        this.dateValue(participantRow.$createdAt)?.getTime() ??
         0;
       threads.push({ thread, lastActivity });
     }
@@ -734,9 +743,6 @@ export class AppwriteService {
     }
 
     const threadRow = await this.fetchRowIfAccessible(this.configuration.threadsTableId, threadId);
-    if (!threadRow) {
-      return null;
-    }
 
     const participantRows = await this.listRows(this.configuration.threadParticipantsTableId, [
       appwriteQueryEqual('threadId', [threadId])
@@ -787,14 +793,14 @@ export class AppwriteService {
       this.stringValue(profileRow?.firstName),
       this.stringValue(profileRow?.lastName),
       this.stringValue(profileRow?.email),
-      this.stringValue(threadRow.subject) ?? 'Match'
+      this.stringValue(threadRow?.subject) ?? 'Match'
     );
 
     const presenceUpdatedAt = this.dateValue(profileRow?.presenceUpdatedAt);
     const isOnline = presenceUpdatedAt ? Date.now() - presenceUpdatedAt.getTime() <= 70_000 : false;
     const lastSeenAt = this.dateValue(profileRow?.lastSeenAt);
     const threadCreatedAt =
-      this.dateValue(threadRow.createdAt) ?? this.dateValue(threadRow.$createdAt) ?? new Date();
+      this.dateValue(threadRow?.createdAt) ?? this.dateValue(threadRow?.$createdAt) ?? new Date();
 
     return {
       id: threadId,
@@ -888,6 +894,88 @@ export class AppwriteService {
     ]);
 
     return rows.length > 0;
+  }
+
+  private async recoverThreadFromReference(
+    currentAccountId: string,
+    threadId: string
+  ): Promise<ChatThread | null> {
+    const otherUserId = await this.resolveOtherUserIdForThread(currentAccountId, threadId);
+    if (!otherUserId) {
+      return null;
+    }
+
+    try {
+      return await this.createOrGetThread(otherUserId, null);
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveOtherUserIdForThread(
+    currentAccountId: string,
+    threadId: string
+  ): Promise<string | null> {
+    try {
+      const participantRows = await this.listRows(this.configuration.threadParticipantsTableId, [
+        appwriteQueryEqual('threadId', [threadId])
+      ]);
+      const otherParticipant = participantRows
+        .map((row) => this.stringValue(row.userId))
+        .find((userId): userId is string => Boolean(userId && userId !== currentAccountId));
+      if (otherParticipant) {
+        return otherParticipant;
+      }
+    } catch {
+      // Fall back to relationship/match rows below.
+    }
+
+    const fromRelationship = await this.resolveOtherUserIdFromPairTable(
+      this.configuration.relationshipsTableId,
+      currentAccountId,
+      threadId
+    );
+    if (fromRelationship) {
+      return fromRelationship;
+    }
+
+    return this.resolveOtherUserIdFromPairTable(
+      this.configuration.matchesTableId,
+      currentAccountId,
+      threadId
+    );
+  }
+
+  private async resolveOtherUserIdFromPairTable(
+    tableId: string | null,
+    currentAccountId: string,
+    threadId: string
+  ): Promise<string | null> {
+    if (!tableId) {
+      return null;
+    }
+
+    try {
+      const rows = await this.listRows(tableId, [
+        appwriteQueryEqual('threadId', [threadId]),
+        appwriteQueryLimit(10)
+      ]);
+
+      for (const row of rows) {
+        const userAId = this.stringValue(row.userAId);
+        const userBId = this.stringValue(row.userBId);
+        if (userAId === currentAccountId && userBId) {
+          return userBId;
+        }
+        if (userBId === currentAccountId && userAId) {
+          return userAId;
+        }
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
   }
 
   private async hasMatchedRelationshipWithCurrentUser(otherUserId: string): Promise<boolean> {

@@ -94,7 +94,7 @@ export function MessagesPage(): JSX.Element {
             return (
               <li key={thread.id} className="thread-row">
                 <Link to={`/app/messages/${thread.id}`} className="thread-row__content">
-                  <ChatAvatar name={thread.name} isOnline={thread.isOnline} />
+                  <ChatAvatar name={thread.name} avatar={thread.avatar} isOnline={thread.isOnline} />
 
                   <div className="thread-row__meta">
                     <p className="thread-row__name">{thread.name}</p>

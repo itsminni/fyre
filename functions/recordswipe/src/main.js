@@ -13,7 +13,7 @@ export default async ({ req, res, error }) => {
     const decision = asDecision(body.decision);
 
     if (!otherUserId || otherUserId === currentUserId || !decision) {
-      return res.json({ message: "Invalid swipe payload" }, 400);
+      return json(res, { message: "Invalid swipe payload" }, 400);
     }
 
     const now = new Date().toISOString();
@@ -22,7 +22,7 @@ export default async ({ req, res, error }) => {
       : null;
 
     if (relationshipBlocksInteraction(existingRelationship, currentUserId, otherUserId)) {
-      return res.json({ message: "Interaction unavailable" }, 403);
+      return json(res, { message: "Interaction unavailable" }, 403);
     }
 
     const swipeKey = `${currentUserId}:${otherUserId}`;
@@ -60,14 +60,14 @@ export default async ({ req, res, error }) => {
     }
 
     if (decision !== "liked") {
-      return res.json({ matched: false, relationshipState: "none" }, 200);
+      return json(res, { matched: false, relationshipState: "none" }, 200);
     }
 
     // A match exists only when the opposite swipe was already a like.
     const reverseSwipe = await findSwipeRow(config, otherUserId, currentUserId, "liked");
 
     if (!reverseSwipe?.$id) {
-      return res.json({ matched: false, relationshipState: "liked" }, 200);
+      return json(res, { matched: false, relationshipState: "liked" }, 200);
     }
 
     const userIds = [currentUserId, otherUserId].sort();
@@ -95,7 +95,7 @@ export default async ({ req, res, error }) => {
         createdAt: existingMatch.createdAt ?? now,
         matchedAt: now
       }, permissions);
-      return res.json({
+      return json(res, {
         matched: true,
         matchId: existingMatch.$id,
         threadId: existingMatch.threadId,
@@ -117,7 +117,7 @@ export default async ({ req, res, error }) => {
         createdAt: existingMatch.createdAt ?? now,
         matchedAt: now
       }, permissions);
-      return res.json({ matched: true, matchId: existingMatch.$id, threadId, relationshipState: "matched" }, 200);
+      return json(res, { matched: true, matchId: existingMatch.$id, threadId, relationshipState: "matched" }, 200);
     }
 
     const matchId = stableMatchRowId(userIds);
@@ -130,12 +130,17 @@ export default async ({ req, res, error }) => {
       matchedAt: now
     }, permissions);
 
-    return res.json({ matched: true, matchId, threadId, relationshipState: "matched" }, 200);
+    return json(res, { matched: true, matchId, threadId, relationshipState: "matched" }, 200);
   } catch (err) {
     error(String(err?.stack ?? err));
-    return res.json({ message: "Unable to record swipe" }, 500);
+    return json(res, { message: "Unable to record swipe" }, 500);
   }
 };
+
+function json(res, payload, status) {
+  console.log(`RESULT_JSON:${JSON.stringify(payload)}`);
+  return res.json(payload, status);
+}
 
 function getConfig(req) {
   return {
