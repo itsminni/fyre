@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.fyre.account.model.AccountSection
 import com.example.fyre.account.model.AccountUiState
+import com.example.fyre.account.model.AppLanguage
+import com.example.fyre.account.model.AppIconVariant
 import com.example.fyre.account.model.AppearanceSettings
 import com.example.fyre.account.model.ChatCustomizationSettings
 import com.example.fyre.account.model.DiscoveryPreferences
@@ -12,7 +14,6 @@ import com.example.fyre.account.model.EventHistoryItem
 import com.example.fyre.account.model.EventHistoryStatus
 import com.example.fyre.account.model.NotificationSettings
 import com.example.fyre.account.model.ProfileDraft
-import com.example.fyre.account.model.SecuritySettings
 import com.example.fyre.account.model.ThemeMode
 import com.example.fyre.data.local.UserSettingsDataStore
 import com.example.fyre.data.model.ProfileFieldValues
@@ -24,6 +25,8 @@ import com.example.fyre.events.model.EventUserState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class AccountViewModel(
@@ -34,6 +37,7 @@ class AccountViewModel(
     private val onUserUpdated: (User) -> Unit = {}
 ) : ViewModel() {
     private var currentUser: User? = initialUser
+    private var profileAutoSaveJob: Job? = null
 
     private val _uiState = MutableStateFlow(
         AccountUiState(
@@ -53,11 +57,10 @@ class AccountViewModel(
                         discoveryPreferences = persisted.discoveryPreferences,
                         chatCustomizationSettings = persisted.chatCustomizationSettings,
                         notificationSettings = persisted.notificationSettings,
-                        securitySettings = persisted.securitySettings,
                         appearanceSettings = current.appearanceSettings.copy(
                             themeMode = persisted.themeMode,
-                            dynamicColor = persisted.dynamicColor,
-                            compactMode = persisted.compactMode
+                            appLanguage = persisted.appLanguage,
+                            appIconVariant = persisted.appIconVariant
                         )
                     )
                 }
@@ -79,9 +82,15 @@ class AccountViewModel(
             profileDraft = update,
             statusMessage = null
         )
+        scheduleProfileAutoSave()
     }
 
     fun saveProfile() {
+        profileAutoSaveJob?.cancel()
+        saveProfileNow(isAutomatic = false)
+    }
+
+    private fun saveProfileNow(isAutomatic: Boolean) {
         val repository = authRepository ?: run {
             _uiState.value = _uiState.value.copy(statusMessage = "Repository profilo Appwrite non configurato")
             return
@@ -90,6 +99,11 @@ class AccountViewModel(
             _uiState.value = _uiState.value.copy(statusMessage = "Sessione utente non disponibile")
             return
         }
+        if (_uiState.value.isSavingProfile) {
+            if (isAutomatic) scheduleProfileAutoSave()
+            return
+        }
+
         val draft = _uiState.value.profileDraft
         val minPreferredAge = draft.minPreferredAge.coerceIn(18, 98)
         val maxPreferredAge = draft.maxPreferredAge.coerceIn(
@@ -114,6 +128,8 @@ class AccountViewModel(
             maxDistanceKm = draft.maxDistanceKm?.coerceAtLeast(5),
             smokes = draft.smokes,
             drinks = draft.drinks,
+            excludeSmokers = draft.excludeSmokers,
+            excludeDrinkers = draft.excludeDrinkers,
             avatarUri = draft.avatarUri,
             profilePhotoUris = draft.profilePhotoUris.take(MaxProfilePhotoCount)
         )
@@ -125,13 +141,20 @@ class AccountViewModel(
                 onSuccess = { updatedUser ->
                     currentUser = updatedUser
                     onUserUpdated(updatedUser)
+                    val latestDraft = _uiState.value.profileDraft
+                    val hasNewerDraft = latestDraft != draft
                     _uiState.value = _uiState.value.copy(
                         email = updatedUser.email,
                         displayName = updatedUser.displayName,
-                        profileDraft = profileDraftFromUser(updatedUser),
+                        profileDraft = if (hasNewerDraft) latestDraft else profileDraftFromUser(updatedUser),
                         isSavingProfile = false,
-                        statusMessage = "Profilo aggiornato su database"
+                        statusMessage = if (isAutomatic) {
+                            "Modifiche salvate automaticamente"
+                        } else {
+                            "Profilo aggiornato su database"
+                        }
                     )
+                    if (hasNewerDraft) scheduleProfileAutoSave()
                     loadEventHistoryFromDatabase()
                 },
                 onFailure = { throwable ->
@@ -145,14 +168,13 @@ class AccountViewModel(
     }
 
     fun updateDiscoveryPreferences(update: DiscoveryPreferences) {
-        val normalized = normalizedDiscoveryPreferences(update)
         _uiState.value = _uiState.value.copy(
-            discoveryPreferences = normalized,
-            statusMessage = "Preferenze discovery salvate sul dispositivo"
+            discoveryPreferences = update,
+            statusMessage = "Preferenze salvate sul dispositivo"
         )
         userSettingsDataStore?.let { dataStore ->
             viewModelScope.launch {
-                dataStore.updateDiscoveryPreferences(normalized)
+                dataStore.updateDiscoveryPreferences(update)
             }
         }
     }
@@ -181,18 +203,6 @@ class AccountViewModel(
         }
     }
 
-    fun updateSecuritySettings(update: SecuritySettings) {
-        _uiState.value = _uiState.value.copy(
-            securitySettings = update,
-            statusMessage = "Impostazioni sicurezza aggiornate sul dispositivo"
-        )
-        userSettingsDataStore?.let { dataStore ->
-            viewModelScope.launch {
-                dataStore.updateSecuritySettings(update)
-            }
-        }
-    }
-
     fun updateAppearanceSettings(update: AppearanceSettings) {
         _uiState.value = _uiState.value.copy(
             appearanceSettings = update,
@@ -200,10 +210,10 @@ class AccountViewModel(
         )
         userSettingsDataStore?.let { dataStore ->
             viewModelScope.launch {
-                dataStore.updateTheme(
-                    mode = update.themeMode,
-                    dynamicColor = update.dynamicColor,
-                    compactMode = update.compactMode
+                dataStore.updateAppearance(
+                    themeMode = update.themeMode,
+                    appLanguage = update.appLanguage,
+                    appIconVariant = update.appIconVariant
                 )
             }
         }
@@ -212,6 +222,26 @@ class AccountViewModel(
     fun setThemeMode(mode: ThemeMode) {
         val current = _uiState.value.appearanceSettings
         updateAppearanceSettings(current.copy(themeMode = mode))
+    }
+
+    fun setAppLanguage(language: AppLanguage) {
+        val current = _uiState.value.appearanceSettings
+        updateAppearanceSettings(current.copy(appLanguage = language))
+    }
+
+    fun setAppIconVariant(variant: AppIconVariant) {
+        val current = _uiState.value.appearanceSettings
+        updateAppearanceSettings(current.copy(appIconVariant = variant))
+    }
+
+    private fun scheduleProfileAutoSave() {
+        if (authRepository == null || currentUser == null) return
+
+        profileAutoSaveJob?.cancel()
+        profileAutoSaveJob = viewModelScope.launch {
+            delay(ProfileAutoSaveDelayMs)
+            saveProfileNow(isAutomatic = true)
+        }
     }
 
     private fun profileDraftFromUser(user: User?): ProfileDraft {
@@ -235,6 +265,8 @@ class AccountViewModel(
                 maxDistanceKm = profile.maxDistanceKm,
                 smokes = profile.smokes,
                 drinks = profile.drinks,
+                excludeSmokers = profile.excludeSmokers,
+                excludeDrinkers = profile.excludeDrinkers,
                 avatarUri = profile.avatarUri,
                 profilePhotoUris = profile.profilePhotoUris.take(MaxProfilePhotoCount)
             )
@@ -265,16 +297,6 @@ class AccountViewModel(
         }
     }
 
-    private fun normalizedDiscoveryPreferences(preferences: DiscoveryPreferences): DiscoveryPreferences {
-        val minAge = preferences.minAge.coerceIn(18, 98)
-        val maxAge = preferences.maxAge.coerceIn(maxOf(minAge + 1, 19), 99)
-        return preferences.copy(
-            minAge = minAge,
-            maxAge = maxAge,
-            maxDistanceKm = preferences.maxDistanceKm.coerceIn(1, 999)
-        )
-    }
-
     private fun loadEventHistoryFromDatabase() {
         val repository = eventsRepository ?: return
         val user = currentUser ?: return
@@ -289,6 +311,7 @@ class AccountViewModel(
                 val history = loadedEvents.mapNotNull { event ->
                     val status = when (event.userState) {
                         EventUserState.Registered -> EventHistoryStatus.Registered
+                        EventUserState.Promoted -> EventHistoryStatus.Promoted
                         EventUserState.Waitlist -> EventHistoryStatus.Waitlisted
                         EventUserState.NotRegistered,
                         EventUserState.Closed -> return@mapNotNull null
@@ -313,6 +336,7 @@ class AccountViewModel(
 
     private companion object {
         private const val MaxProfilePhotoCount = 6
+        private const val ProfileAutoSaveDelayMs = 900L
     }
 }
 

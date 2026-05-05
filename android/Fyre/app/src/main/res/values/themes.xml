@@ -2,4 +2,8 @@
 <resources>
 
     <style name="Theme.Fyre" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.Fyre.Launcher" parent="Theme.Fyre">
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
+    </style>
 </resources>

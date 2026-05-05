@@ -36,5 +36,9 @@ interface MessagesRepository {
 
     suspend fun markAsRead(threadId: String): Result<Unit>
 
+    suspend fun setThreadNotifications(threadId: String, enabled: Boolean): Result<MessageThread>
+
+    suspend fun markCurrentUserPresence(isOnline: Boolean): Result<Unit>
+
     suspend fun updateRelationship(threadId: String, action: RelationshipAction): Result<Unit>
 }

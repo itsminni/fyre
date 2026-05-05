@@ -140,6 +140,8 @@ class AppwriteAuthRepository(
                 addProperty("longitude", profile.longitude)
                 addProperty("smokes", profile.smokes)
                 addProperty("drinks", profile.drinks)
+                addProperty("excludeSmokers", profile.excludeSmokers)
+                addProperty("excludeDrinkers", profile.excludeDrinkers)
                 addProperty("intent", profile.intent.ifBlank { "relationship" })
                 addProperty("interests", profile.interests.trim())
                 addProperty("instagramTag", normalizedSocialTag(profile.instagramTag))
@@ -244,6 +246,8 @@ class AppwriteAuthRepository(
                 longitude = it["longitude"]?.asDoubleOrNull() ?: 10.6313,
                 smokes = it.booleanOrNull("smokes") ?: false,
                 drinks = it.booleanOrNull("drinks") ?: false,
+                excludeSmokers = it.booleanOrNull("excludeSmokers") ?: false,
+                excludeDrinkers = it.booleanOrNull("excludeDrinkers") ?: false,
                 intent = it.stringOrNull("intent") ?: "relationship",
                 interests = it.stringOrNull("interests").orEmpty(),
                 instagramTag = it.stringOrNull("instagramTag"),

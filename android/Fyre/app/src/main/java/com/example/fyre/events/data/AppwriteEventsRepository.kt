@@ -63,7 +63,7 @@ class AppwriteEventsRepository(
     }
 
     override suspend fun waitlistEvent(eventId: String, userId: String, displayName: String): Result<Unit> {
-        // La function decide lato server se l'utente finisce in waiting list.
+        
         return joinEvent(eventId, userId, displayName)
     }
 
@@ -84,7 +84,11 @@ class AppwriteEventsRepository(
         description: String,
         deadlineText: String,
         capacity: Int,
-        rules: List<String>
+        rules: List<String>,
+        maleLimit: Int,
+        femaleLimit: Int,
+        cancellationDeadlineText: String,
+        adminEmails: String
     ): Result<Unit> {
         return runCatching {
             val functionId = configuration.eventAdminFunctionId
@@ -92,6 +96,7 @@ class AppwriteEventsRepository(
 
             val startsAt = normalizeDateTime(dateText)
             val deadline = normalizeDateTime(deadlineText)
+            val cancellationDeadline = normalizeDateTime(cancellationDeadlineText)
 
             gateway.executeFunction(
                 functionId = functionId,
@@ -101,12 +106,12 @@ class AppwriteEventsRepository(
                     "title" to title,
                     "startsAt" to startsAt,
                     "maxParticipants" to capacity.coerceAtLeast(2),
-                    "maleLimit" to (capacity / 2).coerceAtLeast(1),
-                    "femaleLimit" to (capacity / 2).coerceAtLeast(1),
+                    "maleLimit" to maleLimit.coerceAtLeast(0),
+                    "femaleLimit" to femaleLimit.coerceAtLeast(0),
                     "registrationClosesAt" to deadline,
-                    "cancellationClosesAt" to deadline,
+                    "cancellationClosesAt" to cancellationDeadline,
                     "adminUserIds" to "",
-                    "adminEmails" to ""
+                    "adminEmails" to adminEmails.trim()
                 )
             )
 
@@ -155,9 +160,11 @@ class AppwriteEventsRepository(
                 }
 
                 RegistrationStatus.Registered,
+                RegistrationStatus.Promoted,
                 RegistrationStatus.Waitlist -> {
                     val mappedStatus = when (status) {
                         RegistrationStatus.Registered -> "confirmed"
+                        RegistrationStatus.Promoted -> "promoted"
                         RegistrationStatus.Waitlist -> "waitlisted"
                         else -> "confirmed"
                     }
@@ -225,6 +232,7 @@ class AppwriteEventsRepository(
         val registrationStatus = mapRegistrationStatus(userRegistration?.stringOrNull("status"))
         val userState = when {
             registrationStatus == RegistrationStatus.Registered -> EventUserState.Registered
+            registrationStatus == RegistrationStatus.Promoted -> EventUserState.Promoted
             registrationStatus == RegistrationStatus.Waitlist -> EventUserState.Waitlist
             registeredCount >= capacity -> EventUserState.Closed
             else -> EventUserState.NotRegistered
@@ -249,9 +257,7 @@ class AppwriteEventsRepository(
             id = eventId,
             title = eventRow.stringOrNull("title") ?: "Evento Fyre",
             dateText = formatDate(eventRow.stringOrNull("startsAt")),
-            place = eventRow.stringOrNull("place")
-                ?: eventRow.stringOrNull("location")
-                ?: "Location da definire",
+            place = resolveEventPlace(eventRow),
             description = eventRow.stringOrNull("description") ?: "Dettagli in aggiornamento",
             rules = parseRules(eventRow["rules"]),
             registrationStatus = registrationStatus,
@@ -266,6 +272,8 @@ class AppwriteEventsRepository(
             waitingListCount = waitingListCount,
             participants = participants,
             deadlineText = formatDate(eventRow.stringOrNull("registrationClosesAt")),
+            cancellationDeadlineText = formatDate(eventRow.stringOrNull("cancellationClosesAt")),
+            adminEmails = eventRow.stringOrNull("adminEmails").orEmpty(),
             liveMetrics = LiveMetrics(
                 viewersOnline = eventRow.intOrNull("viewersOnline") ?: (registeredCount * 2),
                 checkIns = eventRow.intOrNull("checkIns") ?: registeredCount,
@@ -274,6 +282,21 @@ class AppwriteEventsRepository(
             backendEventId = eventId,
             syncStatus = EventSyncStatus.Synced
         )
+    }
+
+    private fun resolveEventPlace(eventRow: JsonObject): String {
+        val backendPlace = listOf(
+            "place",
+            "location",
+            "venue",
+            "venueName",
+            "club",
+            "clubName"
+        ).firstNotNullOfOrNull { key ->
+            eventRow.stringOrNull(key)?.takeUnless { it.isPlaceholderPlace() }
+        }
+
+        return backendPlace ?: DefaultMainEventVenue
     }
 
     private suspend fun resolveParticipantDisplayName(userId: String, fallback: String): String {
@@ -342,7 +365,8 @@ class AppwriteEventsRepository(
 
     private fun mapRegistrationStatus(raw: String?): RegistrationStatus {
         return when (normalizeStatus(raw)) {
-            "confirmed", "promoted" -> RegistrationStatus.Registered
+            "confirmed" -> RegistrationStatus.Registered
+            "promoted" -> RegistrationStatus.Promoted
             "waitlisted" -> RegistrationStatus.Waitlist
             "closed" -> RegistrationStatus.Closed
             else -> RegistrationStatus.NotRegistered
@@ -381,5 +405,17 @@ class AppwriteEventsRepository(
             ?: return raw
 
         return SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(Date(timestamp))
+    }
+
+    private fun String.isPlaceholderPlace(): Boolean {
+        val normalized = trim().lowercase(Locale.ROOT)
+        return normalized == "location da definire" ||
+            normalized == "luogo da definire" ||
+            normalized == "da definire" ||
+            normalized == "tbd"
+    }
+
+    private companion object {
+        private const val DefaultMainEventVenue = "EVENT_VENUE_REDACTED"
     }
 }

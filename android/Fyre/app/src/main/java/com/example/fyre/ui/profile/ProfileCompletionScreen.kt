@@ -3,6 +3,7 @@ package com.example.fyre.ui.profile
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -43,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -56,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +79,9 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
 private const val MaxProfilePhotoCount = 6
+private val RegistrationFieldText = Color(0xFF6F6877)
+private val RegistrationFieldLabel = Color(0xFFA8A1B0)
+private val RegistrationFieldBorder = Color(0xFF8D8797)
 
 private data class ProfileOption(
     val value: String,
@@ -482,7 +489,8 @@ private fun BirthDateField(
         },
         singleLine = true,
         shape = RoundedCornerShape(16.dp),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        colors = profileTextFieldColors()
     )
 
     if (showPicker) {
@@ -652,7 +660,12 @@ private fun ProfileOptionSelector(
     Box(modifier = Modifier.fillMaxWidth()) {
         OutlinedButton(
             onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            border = BorderStroke(1.dp, RegistrationFieldBorder),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = Color.White,
+                contentColor = RegistrationFieldText
+            )
         ) {
             Column(
                 modifier = Modifier.weight(1f),
@@ -661,17 +674,18 @@ private fun ProfileOptionSelector(
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = RegistrationFieldLabel
                 )
                 Text(
                     text = stringResource(selectedOption.labelRes),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = RegistrationFieldText
                 )
             }
             Icon(
                 imageVector = Icons.Filled.ArrowDropDown,
-                contentDescription = null
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
             )
         }
 
@@ -759,9 +773,27 @@ private fun NumericProfileField(
         },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(16.dp),
+        colors = profileTextFieldColors()
     )
 }
+
+@Composable
+private fun profileTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = RegistrationFieldText,
+    unfocusedTextColor = RegistrationFieldText,
+    focusedContainerColor = Color.White,
+    unfocusedContainerColor = Color.White,
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = RegistrationFieldBorder,
+    focusedLabelColor = MaterialTheme.colorScheme.primary,
+    unfocusedLabelColor = RegistrationFieldLabel,
+    focusedPlaceholderColor = RegistrationFieldLabel,
+    unfocusedPlaceholderColor = RegistrationFieldLabel,
+    focusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+    unfocusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+    cursorColor = MaterialTheme.colorScheme.primary
+)
 
 @Composable
 private fun ProfileSwitchRow(

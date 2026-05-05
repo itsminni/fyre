@@ -1,13 +1,15 @@
 package com.example.fyre.ui.navigation
 
-/** Route del root graph: una sola fonte di verita per i flussi principali. */
+import android.net.Uri
+
+
 object RootRoute {
     const val Auth = "root_auth"
     const val ProfileCompletion = "root_profile_completion"
     const val AuthenticatedShell = "root_authenticated_shell"
 }
 
-/** Route interne al flusso di autenticazione. */
+
 object AuthRoute {
     const val Welcome = "auth_welcome"
     const val Login = "auth_login"
@@ -15,7 +17,7 @@ object AuthRoute {
     const val TermsPrivacy = "auth_terms_privacy"
 }
 
-/** Route interne alla shell autenticata con bottom navigation. */
+
 object MainRoute {
     const val Home = "main_home"
     const val Discover = "main_discover"
@@ -25,6 +27,6 @@ object MainRoute {
     const val Events = "main_events"
     const val Account = "main_account"
 
-    fun messagesThread(threadId: String): String = "main_messages/$threadId"
+    fun messagesThread(threadId: String): String = "main_messages/${Uri.encode(threadId)}"
 }
 

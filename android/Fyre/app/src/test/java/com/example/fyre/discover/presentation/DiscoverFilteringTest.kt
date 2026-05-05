@@ -8,52 +8,30 @@ import org.junit.Test
 class DiscoverFilteringTest {
 
     @Test
-    fun filters_matching_profiles_when_filter_has_results() {
+    fun keeps_backend_profiles_without_applying_local_preference_filters() {
         val matching = profile(id = "match", age = 28, intent = "relationship", verified = true, distanceKm = 12)
         val hidden = profile(id = "hidden", age = 44, intent = "casual", verified = false, distanceKm = 80)
 
         val result = discoverProfilesForDisplay(
             profiles = listOf(matching, hidden),
-            discoveryPreferences = DiscoveryPreferences(
-                minAge = 25,
-                maxAge = 35,
-                maxDistanceKm = 30,
-                showOnlyVerified = true,
-                intent = "relationship"
-            )
+            discoveryPreferences = DiscoveryPreferences()
         )
 
-        assertEquals(listOf(matching), result)
+        assertEquals(listOf(matching, hidden), result)
     }
 
     @Test
-    fun falls_back_to_backend_profiles_when_local_filters_hide_everything() {
-        val backendProfile = profile(id = "backend", age = 44, intent = "casual", verified = false, distanceKm = 80)
+    fun hides_only_current_optimistic_dismissals() {
+        val visible = profile(id = "visible")
+        val dismissed = profile(id = "dismissed")
 
         val result = discoverProfilesForDisplay(
-            profiles = listOf(backendProfile),
-            discoveryPreferences = DiscoveryPreferences(
-                minAge = 25,
-                maxAge = 35,
-                maxDistanceKm = 30,
-                showOnlyVerified = true,
-                intent = "relationship"
-            )
+            profiles = listOf(visible, dismissed),
+            discoveryPreferences = DiscoveryPreferences(),
+            dismissedProfileIds = setOf("dismissed")
         )
 
-        assertEquals(listOf(backendProfile), result)
-    }
-
-    @Test
-    fun unknown_distance_does_not_exclude_profile() {
-        val unknownDistance = profile(id = "near-enough", distanceKm = 0)
-
-        val result = discoverProfilesForDisplay(
-            profiles = listOf(unknownDistance),
-            discoveryPreferences = DiscoveryPreferences(maxDistanceKm = 1)
-        )
-
-        assertEquals(listOf(unknownDistance), result)
+        assertEquals(listOf(visible), result)
     }
 
     private fun profile(

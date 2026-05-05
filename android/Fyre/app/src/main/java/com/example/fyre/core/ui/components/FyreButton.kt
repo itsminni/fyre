@@ -12,17 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/**
- * Bottone personalizzato con lo stile Fyre.
- *
- * Bottone Material 3 con angoli arrotondati, altezza fissa e colore primary.
- * Usato in tutta l'app per mantenere consistenza visiva.
- *
- * @param text Testo da mostrare nel bottone
- * @param onClick Callback eseguita al click
- * @param modifier Modifier opzionale per personalizzazione esterna
- * @param enabled Se il bottone è abilitato o disabilitato
- */
 @Composable
 fun FyreButton(
     text: String,
@@ -36,7 +25,7 @@ fun FyreButton(
             .fillMaxWidth()
             .height(56.dp),
         enabled = enabled,
-        shape = RoundedCornerShape(16.dp), // Angoli arrotondati
+        shape = RoundedCornerShape(16.dp), 
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,

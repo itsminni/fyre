@@ -1,13 +1,13 @@
 package com.example.fyre.messages.presentation
 
+import android.content.Context
 import android.media.MediaPlayer
 import android.media.MediaRecorder
+import android.net.Uri
 
-/**
- * Gestione di registrazione e playback vocale per la chat.
- * Il file audio viene caricato dal repository messaggi dopo la registrazione.
- */
-class LocalVoiceNoteController {
+class LocalVoiceNoteController(
+    private val context: Context
+) {
     private var recorder: MediaRecorder? = null
     private var player: MediaPlayer? = null
 
@@ -38,19 +38,36 @@ class LocalVoiceNoteController {
         recorder = null
     }
 
-    fun play(localPath: String, onCompleted: () -> Unit) {
+    fun play(
+        source: String,
+        requestHeaders: Map<String, String> = emptyMap(),
+        onCompleted: () -> Unit
+    ): Boolean {
         stopPlayback()
-        runCatching {
+        return runCatching {
             val localPlayer = MediaPlayer().apply {
-                setDataSource(localPath)
+                if (source.isUriSource()) {
+                    setDataSource(context, Uri.parse(source), requestHeaders)
+                } else {
+                    setDataSource(source)
+                }
                 setOnCompletionListener {
                     onCompleted()
                     stopPlayback()
                 }
-                prepare()
-                start()
+                setOnErrorListener { _, _, _ ->
+                    stopPlayback()
+                    onCompleted()
+                    true
+                }
+                setOnPreparedListener { preparedPlayer -> preparedPlayer.start() }
+                prepareAsync()
             }
             player = localPlayer
+            true
+        }.getOrElse {
+            stopPlayback()
+            false
         }
     }
 
@@ -65,6 +82,13 @@ class LocalVoiceNoteController {
     fun release() {
         stopRecording()
         stopPlayback()
+    }
+
+    private fun String.isUriSource(): Boolean {
+        return startsWith("http://", ignoreCase = true) ||
+            startsWith("https://", ignoreCase = true) ||
+            startsWith("content://", ignoreCase = true) ||
+            startsWith("file://", ignoreCase = true)
     }
 }
 

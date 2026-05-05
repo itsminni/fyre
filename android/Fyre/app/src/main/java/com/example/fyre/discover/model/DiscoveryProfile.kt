@@ -1,8 +1,5 @@
 package com.example.fyre.discover.model
 
-/**
- * Modello UI per una card di discovery proveniente da Appwrite.
- */
 data class DiscoveryProfile(
     val id: String,
     val name: String,

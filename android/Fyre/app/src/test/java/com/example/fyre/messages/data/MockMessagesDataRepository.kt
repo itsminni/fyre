@@ -74,6 +74,14 @@ class MockMessagesDataRepository : MessagesRepository {
         return Result.success(Unit)
     }
 
+    override suspend fun setThreadNotifications(threadId: String, enabled: Boolean): Result<MessageThread> {
+        return Result.success(MockMessagesRepository.setThreadNotifications(threadId, enabled))
+    }
+
+    override suspend fun markCurrentUserPresence(isOnline: Boolean): Result<Unit> {
+        return Result.success(Unit)
+    }
+
     override suspend fun updateRelationship(threadId: String, action: RelationshipAction): Result<Unit> {
         MockMessagesRepository.updateRelationship(threadId, action)
         return Result.success(Unit)

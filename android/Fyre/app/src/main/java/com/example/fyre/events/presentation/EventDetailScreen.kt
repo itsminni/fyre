@@ -81,7 +81,11 @@ fun EventDetailScreen(
         description: String,
         deadlineText: String,
         capacity: Int,
-        rules: List<String>
+        rules: List<String>,
+        maleLimit: Int,
+        femaleLimit: Int,
+        cancellationDeadlineText: String,
+        adminEmails: String
     ) -> Boolean,
     onAdminSetParticipantStatus: (participantId: String, status: RegistrationStatus) -> Boolean
 ) {
@@ -90,7 +94,11 @@ fun EventDetailScreen(
     var editPlace by remember(event.id) { mutableStateOf(event.place) }
     var editDescription by remember(event.id) { mutableStateOf(event.description) }
     var editDeadline by remember(event.id) { mutableStateOf(event.deadlineText) }
+    var editCancellationDeadline by remember(event.id) { mutableStateOf(event.cancellationDeadlineText) }
     var editCapacity by remember(event.id) { mutableStateOf(event.capacity.toString()) }
+    var editMaleLimit by remember(event.id) { mutableStateOf(event.maleLimit.toString()) }
+    var editFemaleLimit by remember(event.id) { mutableStateOf(event.femaleLimit.toString()) }
+    var editAdminEmails by remember(event.id) { mutableStateOf(event.adminEmails) }
     var editRulesText by remember(event.id) { mutableStateOf(event.rules.joinToString("\n")) }
 
     val actionTitle = when {
@@ -249,11 +257,40 @@ fun EventDetailScreen(
                             label = { Text(stringResource(R.string.events_detail_input_deadline)) }
                         )
                         OutlinedTextField(
+                            value = editCancellationDeadline,
+                            onValueChange = { editCancellationDeadline = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(stringResource(R.string.events_detail_input_cancellation_deadline)) }
+                        )
+                        OutlinedTextField(
                             value = editCapacity,
                             onValueChange = { editCapacity = it.filter { ch -> ch.isDigit() } },
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text(stringResource(R.string.events_detail_input_capacity)) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = editMaleLimit,
+                                onValueChange = { editMaleLimit = it.filter { ch -> ch.isDigit() } },
+                                modifier = Modifier.weight(1f),
+                                label = { Text(stringResource(R.string.events_detail_input_male_limit)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                            OutlinedTextField(
+                                value = editFemaleLimit,
+                                onValueChange = { editFemaleLimit = it.filter { ch -> ch.isDigit() } },
+                                modifier = Modifier.weight(1f),
+                                label = { Text(stringResource(R.string.events_detail_input_female_limit)) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+                        }
+                        OutlinedTextField(
+                            value = editAdminEmails,
+                            onValueChange = { editAdminEmails = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(stringResource(R.string.events_detail_input_admin_emails)) },
+                            minLines = 2
                         )
                         OutlinedTextField(
                             value = editRulesText,
@@ -272,7 +309,11 @@ fun EventDetailScreen(
                                     editDescription,
                                     editDeadline,
                                     editCapacity.toIntOrNull() ?: event.capacity,
-                                    editRulesText.lines().map { it.trim() }.filter { it.isNotBlank() }
+                                    editRulesText.lines().map { it.trim() }.filter { it.isNotBlank() },
+                                    editMaleLimit.toIntOrNull() ?: event.maleLimit,
+                                    editFemaleLimit.toIntOrNull() ?: event.femaleLimit,
+                                    editCancellationDeadline,
+                                    editAdminEmails
                                 )
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -633,6 +674,10 @@ private fun AdminParticipantRow(
                     Icon(Icons.Filled.Star, contentDescription = null, modifier = Modifier.size(16.dp))
                     Text(stringResource(R.string.events_detail_status_waitlist_short))
                 }
+                TextButton(onClick = { onStatus(RegistrationStatus.Promoted) }) {
+                    Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Text(stringResource(R.string.events_detail_status_promoted_short))
+                }
                 TextButton(onClick = { onStatus(RegistrationStatus.NotRegistered) }) {
                     Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                     Text(stringResource(R.string.events_detail_status_none_short))
@@ -698,6 +743,7 @@ private fun EventStatusBadge(text: String) {
 private fun registrationBadge(event: EventItem): String? {
     return when (event.userState) {
         EventUserState.Registered -> stringResource(R.string.events_badge_confirmed)
+        EventUserState.Promoted -> stringResource(R.string.events_badge_promoted)
         EventUserState.Waitlist -> stringResource(R.string.events_badge_waitlisted)
         EventUserState.NotRegistered,
         EventUserState.Closed -> null

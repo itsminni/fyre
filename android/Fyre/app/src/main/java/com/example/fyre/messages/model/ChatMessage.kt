@@ -19,6 +19,7 @@ data class ChatMessage(
     val timestamp: Long,
     val isRead: Boolean,
     val replyToMessageId: String? = null,
+    val replyPreviewText: String? = null,
     val attachments: List<MessageAttachment> = emptyList(),
     val voiceNote: VoiceNote? = null,
     val backendMessageId: String? = null,

@@ -4,9 +4,6 @@ import com.example.fyre.data.model.PasswordUtils
 import com.example.fyre.data.model.User
 import com.example.fyre.data.model.UserProfile
 
-/**
- * Implementazione fake in-memory utile per preview, test rapidi o prototipi UI.
- */
 class FakeAuthRepository : AuthRepository {
     private val users = mutableListOf<User>()
 

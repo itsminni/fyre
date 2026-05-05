@@ -2,7 +2,7 @@ package com.example.fyre.core.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Palette colori "Fyre" — toni caldi arancione/ambra
+
 val FyreOrange80 = Color(0xFFFFB74D)
 val FyreAmber80 = Color(0xFFFFD54F)
 val FyreCoral80 = Color(0xFFFF8A65)

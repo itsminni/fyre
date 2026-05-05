@@ -229,30 +229,30 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    // Navigazione tra schermate
+    
     implementation(libs.androidx.navigation.compose)
-    // ViewModel integration con Compose
+    
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    // Lifecycle-aware state per Compose
+    
     implementation(libs.androidx.lifecycle.runtime.compose)
-    // Icone Material estese (visibilità password, ecc.)
+    
     implementation(libs.androidx.compose.material.icons.extended)
-    // Loading immagini (avatar, cover, preview)
+    
     implementation(libs.coil.compose)
-    // Gson per serializzazione/deserializzazione JSON degli utenti
+    
     implementation(libs.google.gson)
-    // DataStore Preferences per la sessione locale
+    
     implementation(libs.androidx.datastore.preferences)
-    // API utili per URI da picker documenti/immagini
+    
     implementation(libs.androidx.documentfile)
-    // Gestione permessi runtime in schermate Compose
+    
     implementation(libs.accompanist.permissions)
-    // Audio playback per anteprime vocali
+    
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
-    // Scheduling per notifiche locali future
+    
     implementation(libs.androidx.work.runtime.ktx)
-    // HTTP client per integrazione Appwrite REST
+    
     implementation(libs.squareup.okhttp)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

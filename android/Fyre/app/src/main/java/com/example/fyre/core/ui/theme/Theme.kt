@@ -16,9 +16,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ============================================================
-// Schema colori SCURO — usato quando il dispositivo è in dark mode
-// ============================================================
 private val DarkColorScheme = darkColorScheme(
     primary = FyreOrange80,
     secondary = FyreAmber80,
@@ -32,9 +29,6 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = Color.White
 )
 
-// ============================================================
-// Schema colori CHIARO — usato quando il dispositivo è in light mode
-// ============================================================
 private val LightColorScheme = lightColorScheme(
     primary = FyreOrange40,
     secondary = FyreAmber40,
@@ -48,14 +42,10 @@ private val LightColorScheme = lightColorScheme(
     onSurface = Color(0xFF1C1B1F)
 )
 
-/**
- * Tema principale dell'app Fyre.
- * dynamicColor è disabilitato di default per mostrare sempre i colori Fyre.
- */
 @Composable
 fun FyreTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Disabilitato per usare la palette Fyre
+    dynamicColor: Boolean = false, 
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -67,7 +57,7 @@ fun FyreTheme(
         else -> LightColorScheme
     }
 
-    // Colora la status bar in base al tema
+    
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {

@@ -65,6 +65,7 @@ class EventsViewModel(
     fun updateRegistrationForSelected(status: RegistrationStatus) {
         when (status) {
             RegistrationStatus.Registered -> joinSelected()
+            RegistrationStatus.Promoted -> joinSelected()
             RegistrationStatus.NotRegistered, RegistrationStatus.Closed -> cancelSelected()
             RegistrationStatus.Waitlist -> waitlistSelected()
         }
@@ -130,7 +131,11 @@ class EventsViewModel(
         description: String,
         deadlineText: String,
         capacity: Int,
-        rules: List<String>
+        rules: List<String>,
+        maleLimit: Int = (capacity / 2).coerceAtLeast(1),
+        femaleLimit: Int = (capacity / 2).coerceAtLeast(1),
+        cancellationDeadlineText: String = deadlineText,
+        adminEmails: String = ""
     ): Boolean {
         val eventId = _selectedEventId.value ?: return false
         if (!_isAdmin.value) return false
@@ -146,7 +151,11 @@ class EventsViewModel(
                 description = description,
                 deadlineText = deadlineText,
                 capacity = capacity,
-                rules = rules
+                rules = rules,
+                maleLimit = maleLimit,
+                femaleLimit = femaleLimit,
+                cancellationDeadlineText = cancellationDeadlineText,
+                adminEmails = adminEmails
             )
             result.onFailure { throwable ->
                 _errorMessage.value = throwable.message ?: "Aggiornamento evento non riuscito"
@@ -185,6 +194,7 @@ class EventsViewModel(
             EventUserState.NotRegistered,
             EventUserState.Waitlist -> true
             EventUserState.Registered,
+            EventUserState.Promoted,
             EventUserState.Closed,
             null -> false
         }
@@ -193,6 +203,7 @@ class EventsViewModel(
     fun canCancelSelected(): Boolean {
         return when (selectedEvent()?.userState) {
             EventUserState.Registered,
+            EventUserState.Promoted,
             EventUserState.Waitlist -> true
             EventUserState.NotRegistered,
             EventUserState.Closed,

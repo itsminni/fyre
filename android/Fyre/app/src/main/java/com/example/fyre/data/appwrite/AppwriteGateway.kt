@@ -204,14 +204,11 @@ class AppwriteGateway(
         val currentUserId = fetchCurrentAccountId(required = true)
             ?: throw AppwriteConfigurationException("Sessione backend non valida")
 
-        val participantIds = listRows(
-            tableId = configuration.threadParticipantsTableId,
-            queries = listOf(queryEqual("threadId", listOf(threadId)))
-        ).mapNotNull { it.stringOrNull("userId") }
-
-        val permissions = participantIds.map { "read(\"user:$it\")" }.toMutableList()
-        permissions += "update(\"user:$currentUserId\")"
-        permissions += "delete(\"user:$currentUserId\")"
+        val permissions = listOf(
+            "read(\"user:$currentUserId\")",
+            "update(\"user:$currentUserId\")",
+            "delete(\"user:$currentUserId\")"
+        )
 
         val bytes = readBinaryPayload(localUri)
         val fileId = randomIdentifier()

@@ -4,6 +4,7 @@ enum class RegistrationStatus {
     NotRegistered,
     Registered,
     Waitlist,
+    Promoted,
     Closed
 }
 
@@ -16,6 +17,7 @@ enum class EventUserState {
     NotRegistered,
     Registered,
     Waitlist,
+    Promoted,
     Closed
 }
 
@@ -57,6 +59,8 @@ data class EventItem(
     val waitingListCount: Int = 0,
     val participants: List<EventParticipant>,
     val deadlineText: String,
+    val cancellationDeadlineText: String = deadlineText,
+    val adminEmails: String = "",
     val liveMetrics: LiveMetrics,
     val backendEventId: String? = null,
     val syncStatus: EventSyncStatus = EventSyncStatus.LocalOnly

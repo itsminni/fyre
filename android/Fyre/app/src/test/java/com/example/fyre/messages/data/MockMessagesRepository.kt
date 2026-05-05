@@ -8,10 +8,6 @@ import com.example.fyre.messages.model.MessageThread
 import com.example.fyre.messages.model.RelationshipAction
 import com.example.fyre.messages.model.VoiceNote
 
-/**
- * Repository locale in-memory per inbox/chat.
- * Nessun backend: i dati restano mock durante la vita del processo.
- */
 object MockMessagesRepository {
     private val threads = mutableListOf<MessageThread>()
     private val messagesByThread = mutableMapOf<String, MutableList<ChatMessage>>()
@@ -20,7 +16,7 @@ object MockMessagesRepository {
         resetLocalState()
     }
 
-    /** Ripristina il seed mock locale (utile anche nei test). */
+    
     fun resetLocalState() {
         val baseNow = System.currentTimeMillis()
         threads.clear()
@@ -197,6 +193,16 @@ object MockMessagesRepository {
         }
     }
 
+    fun setThreadNotifications(threadId: String, enabled: Boolean): MessageThread {
+        val resolved = ensureThread(threadId)
+        val updated = resolved.copy(notificationsEnabled = enabled)
+        val index = threads.indexOfFirst { it.id == threadId }
+        if (index >= 0) {
+            threads[index] = updated
+        }
+        return updated
+    }
+
     fun updateRelationship(threadId: String, action: RelationshipAction) {
         threads.removeAll { it.id == threadId }
         if (action == RelationshipAction.Unmatch || action == RelationshipAction.Block) {
@@ -222,6 +228,4 @@ object MockMessagesRepository {
         }
     }
 }
-
-
 

@@ -7,7 +7,7 @@ import com.example.fyre.events.model.EventUserState
 import com.example.fyre.events.model.LiveMetrics
 import com.example.fyre.events.model.RegistrationStatus
 
-/** Repository locale mock per la feature Eventi. */
+
 object MockEventsRepository {
     private const val DEFAULT_USER_ID = "user_default"
     private const val DEFAULT_USER_NAME = "Utente"
@@ -23,6 +23,8 @@ object MockEventsRepository {
         var maleLimit: Int,
         var femaleLimit: Int,
         var deadlineText: String,
+        var cancellationDeadlineText: String,
+        var adminEmails: String,
         var liveMetrics: LiveMetrics,
         val participants: MutableList<EventParticipant>
     )
@@ -51,9 +53,9 @@ object MockEventsRepository {
     fun joinEvent(eventId: String, userId: String, displayName: String) {
         val record = records.firstOrNull { it.id == eventId } ?: return
         val current = record.participants.firstOrNull { it.id == userId }
-        if (current?.status == RegistrationStatus.Registered) return
+        if (current?.status == RegistrationStatus.Registered || current?.status == RegistrationStatus.Promoted) return
 
-        val hasFreeSeats = record.participants.count { it.status == RegistrationStatus.Registered } < record.capacity
+        val hasFreeSeats = record.participants.count { it.isConfirmedStatus() } < record.capacity
         val nextStatus = if (hasFreeSeats) RegistrationStatus.Registered else RegistrationStatus.Waitlist
         upsertParticipant(record, userId, displayName, nextStatus)
     }
@@ -71,11 +73,11 @@ object MockEventsRepository {
             record.participants[index] = record.participants[index].copy(status = RegistrationStatus.NotRegistered)
         }
 
-        // Se un partecipante registrato annulla, promuoviamo il primo utente in waitlist.
-        if (previousStatus == RegistrationStatus.Registered) {
+        
+        if (previousStatus == RegistrationStatus.Registered || previousStatus == RegistrationStatus.Promoted) {
             val waitlistIndex = record.participants.indexOfFirst { it.status == RegistrationStatus.Waitlist }
             if (waitlistIndex >= 0) {
-                record.participants[waitlistIndex] = record.participants[waitlistIndex].copy(status = RegistrationStatus.Registered)
+                record.participants[waitlistIndex] = record.participants[waitlistIndex].copy(status = RegistrationStatus.Promoted)
             }
         }
     }
@@ -89,7 +91,11 @@ object MockEventsRepository {
         description: String,
         deadlineText: String,
         capacity: Int,
-        rules: List<String>
+        rules: List<String>,
+        maleLimit: Int = (capacity / 2).coerceAtLeast(1),
+        femaleLimit: Int = (capacity / 2).coerceAtLeast(1),
+        cancellationDeadlineText: String = deadlineText,
+        adminEmails: String = ""
     ): Boolean {
         if (!isAdminMock) return false
         val record = records.firstOrNull { it.id == eventId } ?: return false
@@ -98,9 +104,11 @@ object MockEventsRepository {
         record.place = place
         record.description = description
         record.deadlineText = deadlineText
+        record.cancellationDeadlineText = cancellationDeadlineText
+        record.adminEmails = adminEmails
         record.capacity = capacity.coerceAtLeast(1)
-        record.maleLimit = (record.capacity / 2).coerceAtLeast(1)
-        record.femaleLimit = (record.capacity / 2).coerceAtLeast(1)
+        record.maleLimit = maleLimit.coerceAtLeast(0)
+        record.femaleLimit = femaleLimit.coerceAtLeast(0)
         record.rules = rules.map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
         rebalanceParticipantsAfterCapacityChange(record)
         return true
@@ -136,7 +144,7 @@ object MockEventsRepository {
         }
     }
 
-    // Compatibility API used by existing tests/callers.
+    
     fun getEvents(): List<EventItem> = getEventsForUser(DEFAULT_USER_ID, DEFAULT_USER_NAME, null)
 
     fun getEventById(eventId: String): EventItem? =
@@ -145,6 +153,7 @@ object MockEventsRepository {
     fun updateRegistrationStatus(eventId: String, status: RegistrationStatus) {
         when (status) {
             RegistrationStatus.Registered -> joinEvent(eventId, DEFAULT_USER_ID, DEFAULT_USER_NAME)
+            RegistrationStatus.Promoted -> joinEvent(eventId, DEFAULT_USER_ID, DEFAULT_USER_NAME)
             RegistrationStatus.Waitlist -> waitlistEvent(eventId, DEFAULT_USER_ID, DEFAULT_USER_NAME)
             RegistrationStatus.NotRegistered -> cancelEvent(eventId, DEFAULT_USER_ID)
             RegistrationStatus.Closed -> cancelEvent(eventId, DEFAULT_USER_ID)
@@ -160,16 +169,17 @@ object MockEventsRepository {
         ensureParticipantExists(record, userId, displayName)
         val userStatus = record.participants.firstOrNull { it.id == userId }?.status
             ?: RegistrationStatus.NotRegistered
-        val registeredCount = record.participants.count { it.status == RegistrationStatus.Registered }
+        val registeredCount = record.participants.count { it.isConfirmedStatus() }
         val maleCount = record.participants.count {
-            it.status == RegistrationStatus.Registered && it.gender == "male"
+            it.isConfirmedStatus() && it.gender == "male"
         }
         val femaleCount = record.participants.count {
-            it.status == RegistrationStatus.Registered && it.gender == "female"
+            it.isConfirmedStatus() && it.gender == "female"
         }
         val waitingListCount = record.participants.count { it.status == RegistrationStatus.Waitlist }
         val userState = when {
             userStatus == RegistrationStatus.Registered -> EventUserState.Registered
+            userStatus == RegistrationStatus.Promoted -> EventUserState.Promoted
             userStatus == RegistrationStatus.Waitlist -> EventUserState.Waitlist
             userStatus == RegistrationStatus.Closed -> EventUserState.Closed
             registeredCount >= record.capacity -> EventUserState.Closed
@@ -200,13 +210,15 @@ object MockEventsRepository {
             waitingListCount = waitingListCount,
             participants = record.participants.toList(),
             deadlineText = record.deadlineText,
+            cancellationDeadlineText = record.cancellationDeadlineText,
+            adminEmails = record.adminEmails,
             liveMetrics = record.liveMetrics
         )
     }
 
     private fun rebalanceParticipantsAfterCapacityChange(record: EventRecord) {
         val registeredIndexes = record.participants
-            .mapIndexedNotNull { index, participant -> if (participant.status == RegistrationStatus.Registered) index else null }
+            .mapIndexedNotNull { index, participant -> if (participant.isConfirmedStatus()) index else null }
 
         if (registeredIndexes.size > record.capacity) {
             val overflow = registeredIndexes.drop(record.capacity)
@@ -215,7 +227,7 @@ object MockEventsRepository {
             }
         }
 
-        val currentRegistered = record.participants.count { it.status == RegistrationStatus.Registered }
+        val currentRegistered = record.participants.count { it.isConfirmedStatus() }
         val seatsLeft = (record.capacity - currentRegistered).coerceAtLeast(0)
         if (seatsLeft == 0) return
 
@@ -223,10 +235,14 @@ object MockEventsRepository {
         for (index in record.participants.indices) {
             if (promoted >= seatsLeft) break
             if (record.participants[index].status == RegistrationStatus.Waitlist) {
-                record.participants[index] = record.participants[index].copy(status = RegistrationStatus.Registered)
+                record.participants[index] = record.participants[index].copy(status = RegistrationStatus.Promoted)
                 promoted += 1
             }
         }
+    }
+
+    private fun EventParticipant.isConfirmedStatus(): Boolean {
+        return status == RegistrationStatus.Registered || status == RegistrationStatus.Promoted
     }
 
     private fun upsertParticipant(
@@ -276,6 +292,8 @@ object MockEventsRepository {
                 maleLimit = 60,
                 femaleLimit = 60,
                 deadlineText = "23/04/2026 23:59",
+                cancellationDeadlineText = "22/04/2026 23:59",
+                adminEmails = "admin@example.com",
                 liveMetrics = LiveMetrics(viewersOnline = 41, checkIns = 12, chatPerMinute = 8),
                 participants = mutableListOf(
                     EventParticipant("u_alice", "Alice", RegistrationStatus.Registered, "female"),
@@ -294,6 +312,8 @@ object MockEventsRepository {
                 maleLimit = 100,
                 femaleLimit = 100,
                 deadlineText = "27/04/2026 12:00",
+                cancellationDeadlineText = "26/04/2026 18:00",
+                adminEmails = "admin@example.com",
                 liveMetrics = LiveMetrics(viewersOnline = 63, checkIns = 29, chatPerMinute = 15),
                 participants = mutableListOf(
                     EventParticipant("u_diego", "Diego", RegistrationStatus.Registered, "male"),
@@ -311,6 +331,8 @@ object MockEventsRepository {
                 maleLimit = 20,
                 femaleLimit = 20,
                 deadlineText = "29/04/2026 20:00",
+                cancellationDeadlineText = "28/04/2026 20:00",
+                adminEmails = "admin@example.com",
                 liveMetrics = LiveMetrics(viewersOnline = 19, checkIns = 4, chatPerMinute = 3),
                 participants = mutableListOf(
                     EventParticipant("u_federico", "Federico", RegistrationStatus.Registered, "male"),

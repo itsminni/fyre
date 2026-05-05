@@ -16,9 +16,6 @@ private val Context.sessionDataStore: DataStore<Preferences> by preferencesDataS
     name = "session_preferences"
 )
 
-/**
- * Storage locale per dati di sessione basato su DataStore.
- */
 class SessionDataStore(private val context: Context) {
 
     private companion object {

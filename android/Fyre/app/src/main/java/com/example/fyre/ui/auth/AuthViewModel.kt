@@ -19,37 +19,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-// ============================================================
-// Stato dell'autenticazione — sealed class per gestire i vari stati
-// ============================================================
-
-/**
- * Rappresenta lo stato corrente del processo di autenticazione.
- * Usato dalla UI per mostrare feedback appropriato all'utente.
- */
 sealed class AuthState {
-    /** Stato iniziale, nessuna operazione in corso */
+    
     data object Idle : AuthState()
 
-    /** Autenticazione riuscita, contiene l'utente loggato */
+    
     data class Success(val user: User) : AuthState()
 
-    /** Errore durante l'autenticazione, contiene il messaggio di errore */
+    
     data class Error(val message: String) : AuthState()
 }
 
-// ============================================================
-// ViewModel per la gestione dell'autenticazione
-// ============================================================
-
-/**
- * ViewModel che gestisce la logica di login e registrazione.
- *
- * Contiene lo stato dei campi di input e la logica di validazione.
- * Comunica con il [AuthRepository] per le operazioni di autenticazione.
- *
- * @property repository Repository backend per auth
- */
 class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
 
     private object ValidationMessages {
@@ -79,7 +59,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         const val ProfileSaveError = "Errore salvataggio profilo"
     }
 
-    // --- Stato dell'autenticazione ---
+    
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
@@ -89,14 +69,14 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     private val _globalError = MutableStateFlow<String?>(null)
     val globalError: StateFlow<String?> = _globalError.asStateFlow()
 
-    // --- Campi di input condivisi ---
+    
     private val _email = MutableStateFlow("")
     val email: StateFlow<String> = _email.asStateFlow()
 
     private val _password = MutableStateFlow("")
     val password: StateFlow<String> = _password.asStateFlow()
 
-    // --- Campi di input solo per la registrazione ---
+    
     private val _displayName = MutableStateFlow("")
     val displayName: StateFlow<String> = _displayName.asStateFlow()
 
@@ -184,22 +164,17 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     private val _profileSaveCompleted = MutableStateFlow(false)
     val profileSaveCompleted: StateFlow<Boolean> = _profileSaveCompleted.asStateFlow()
 
-    // --- Utente attualmente loggato ---
+    
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
-    // ============================================================
-    // Aggiornamento campi di input
-    // ============================================================
-
-    /** Aggiorna il valore dell'email */
-    fun updateEmail(value: String) {
+fun updateEmail(value: String) {
         _email.value = value
         _emailError.value = null
         _globalError.value = null
     }
 
-    /** Aggiorna il valore della password */
+    
     fun updatePassword(value: String) {
         _password.value = value
         _passwordError.value = null
@@ -207,14 +182,14 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _globalError.value = null
     }
 
-    /** Aggiorna il valore del nome visualizzato */
+    
     fun updateDisplayName(value: String) {
         _displayName.value = value
         _displayNameError.value = null
         _globalError.value = null
     }
 
-    /** Aggiorna il valore della conferma password */
+    
     fun updateConfirmPassword(value: String) {
         _confirmPassword.value = value
         _confirmPasswordError.value = null
@@ -376,20 +351,12 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _profileDrinks.value = profile.drinks
     }
 
-    // ============================================================
-    // Logica di autenticazione
-    // ============================================================
-
-    /**
-     * Effettua il login con le credenziali inserite.
-     * Valida i campi prima di procedere.
-     */
-    fun login() {
+fun login() {
         if (_isLoading.value) return
         clearValidationErrors()
         _globalError.value = null
 
-        // Validazione campi
+        
         val emailError = validateEmail(_email.value)
         if (emailError != null) {
             _emailError.value = emailError
@@ -420,16 +387,12 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         }
     }
 
-    /**
-     * Effettua la registrazione di un nuovo utente.
-     * Valida tutti i campi prima di procedere.
-     */
-    fun register() {
+fun register() {
         if (_isLoading.value) return
         clearValidationErrors()
         _globalError.value = null
 
-        // Validazione nome
+        
         if (_displayName.value.isBlank()) {
             _displayNameError.value = ValidationMessages.DisplayNameRequired
             return
@@ -440,21 +403,21 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
             return
         }
 
-        // Validazione email
+        
         val emailError = validateEmail(_email.value)
         if (emailError != null) {
             _emailError.value = emailError
             return
         }
 
-        // Validazione password
+        
         val passwordError = validatePassword(_password.value)
         if (passwordError != null) {
             _passwordError.value = passwordError
             return
         }
 
-        // Controllo corrispondenza password
+        
         if (_password.value != _confirmPassword.value) {
             _confirmPasswordError.value = ValidationMessages.PasswordMismatch
             return
@@ -491,11 +454,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         }
     }
 
-    /**
-     * Effettua il logout dell'utente.
-     * Resetta tutti i campi e lo stato.
-     */
-    fun logout() {
+fun logout() {
         viewModelScope.launch {
             repository.logout()
         }
@@ -513,19 +472,13 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _isLoading.value = false
     }
 
-    /**
-     * Resetta lo stato di errore (chiamato quando l'utente cambia schermata).
-     */
-    fun resetState() {
+fun resetState() {
         _authState.value = AuthState.Idle
         _globalError.value = null
         _profileSaveCompleted.value = false
     }
 
-    /**
-     * Pulisce i campi di input (utile quando si cambia tra login e registrazione).
-     */
-    fun clearFields() {
+fun clearFields() {
         _email.value = ""
         _password.value = ""
         _displayName.value = ""
@@ -547,11 +500,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _globalError.value = null
     }
 
-    /**
-     * Ripristina la sessione backend usando l'email salvata solo come controllo di coerenza.
-     * @return true se il profilo viene trovato e caricato, false altrimenti.
-     */
-    suspend fun restoreSession(email: String?): Boolean {
+suspend fun restoreSession(email: String?): Boolean {
         val result = repository.restoreSession(email)
         val user = result.getOrElse { throwable ->
             _globalError.value = throwable.message ?: ValidationMessages.UnknownError
@@ -623,17 +572,9 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         _profileSaveCompleted.value = false
     }
 
-    // ============================================================
-    // Validazione
-    // ============================================================
-
-    /**
-     * Valida il formato dell'email.
-     * @return Messaggio di errore se non valida, null se corretta
-     */
-    private fun validateEmail(email: String): String? {
+private fun validateEmail(email: String): String? {
         if (email.isBlank()) return ValidationMessages.EmailRequired
-        // Pattern semplice per validazione email
+        
         val emailPattern = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
         if (!emailPattern.matches(email.trim())) return ValidationMessages.EmailInvalid
         return null
@@ -644,13 +585,7 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
         return null
     }
 
-    /**
-     * Valida la robustezza della password.
-     * Requisiti: minimo 8 caratteri, almeno 1 maiuscola, almeno 1 numero.
-     *
-     * @return Messaggio di errore se non valida, null se corretta
-     */
-    fun validatePassword(password: String): String? {
+fun validatePassword(password: String): String? {
         if (password.length < 8) return ValidationMessages.RegisterPasswordMinLength
         if (!password.any { it.isUpperCase() }) return ValidationMessages.RegisterPasswordUppercase
         if (!password.any { it.isDigit() }) return ValidationMessages.RegisterPasswordDigit
@@ -766,14 +701,6 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     }
 }
 
-// ============================================================
-// Factory per creare l'AuthViewModel con il repository
-// ============================================================
-
-/**
- * Factory necessaria perché il ViewModel ha un parametro nel costruttore (repository).
- * Senza librerie di Dependency Injection (Hilt/Koin), usiamo questa factory manuale.
- */
 class AuthViewModelFactory(
     private val repository: AuthRepository
 ) : ViewModelProvider.Factory {

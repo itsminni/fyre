@@ -10,22 +10,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/**
- * Campo di testo personalizzato con lo stile Fyre.
- *
- * OutlinedTextField Material 3 con angoli arrotondati e colori del tema.
- * Supporta etichetta, placeholder, icona iniziale e messaggio di errore.
- *
- * @param value Valore corrente del campo
- * @param onValueChange Callback eseguita quando il valore cambia
- * @param label Etichetta del campo
- * @param modifier Modifier opzionale
- * @param placeholder Testo placeholder opzionale
- * @param leadingIcon Icona a sinistra opzionale (composable)
- * @param singleLine Se il campo accetta solo una riga
- * @param isError Se il campo è in stato di errore
- * @param supportingText Testo di supporto/errore sotto il campo
- */
 @Composable
 fun FyreTextField(
 	value: String,

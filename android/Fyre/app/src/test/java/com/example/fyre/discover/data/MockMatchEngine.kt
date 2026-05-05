@@ -3,10 +3,6 @@ package com.example.fyre.discover.data
 import com.example.fyre.discover.model.DiscoveryProfile
 import kotlin.math.absoluteValue
 
-/**
- * Simula il match reciproco completamente in locale.
- * Regola deterministica: alcuni profili generano match per garantire UX ripetibile nei test.
- */
 object MockMatchEngine {
 
     data class MatchPayload(

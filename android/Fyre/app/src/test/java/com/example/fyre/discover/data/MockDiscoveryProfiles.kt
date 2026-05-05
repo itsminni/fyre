@@ -2,7 +2,7 @@ package com.example.fyre.discover.data
 
 import com.example.fyre.discover.model.DiscoveryProfile
 
-/** Dataset mock realistico per la schermata discovery. */
+
 object MockDiscoveryProfiles {
     val items: List<DiscoveryProfile> = listOf(
         DiscoveryProfile(

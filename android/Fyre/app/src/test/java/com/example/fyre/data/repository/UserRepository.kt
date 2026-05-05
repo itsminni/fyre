@@ -10,9 +10,6 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Repository locale file-based usato come fallback quando il backend non e disponibile.
- */
 class UserRepository(private val context: Context) : AuthRepository {
 
     private companion object {

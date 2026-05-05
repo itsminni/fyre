@@ -8,24 +8,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-/**
- * Campo di testo personalizzato con lo stile Fyre.
- *
- * OutlinedTextField Material 3 con angoli arrotondati e colori del tema.
- * Supporta etichetta, placeholder, icona iniziale e messaggio di errore.
- *
- * @param value Valore corrente del campo
- * @param onValueChange Callback eseguita quando il valore cambia
- * @param label Etichetta del campo
- * @param modifier Modifier opzionale
- * @param placeholder Testo placeholder opzionale
- * @param leadingIcon Icona a sinistra opzionale (composable)
- * @param singleLine Se il campo accetta solo una riga
- * @param isError Se il campo è in stato di errore
- * @param supportingText Testo di supporto/errore sotto il campo
- */
 @Composable
 fun FyreTextField(
     value: String,
@@ -61,17 +46,31 @@ fun FyreTextField(
                 )
             }
         } else null,
-        shape = RoundedCornerShape(16.dp), // Angoli arrotondati coerenti col design
+        shape = RoundedCornerShape(16.dp), 
         colors = OutlinedTextFieldDefaults.colors(
-            // Colori del bordo
+            focusedTextColor = RegistrationFieldText,
+            unfocusedTextColor = RegistrationFieldText,
+            errorTextColor = RegistrationFieldText,
+            focusedContainerColor = Color.White,
+            unfocusedContainerColor = Color.White,
+            errorContainerColor = Color.White,
+            
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-            // Colori dell'etichetta
+            unfocusedBorderColor = RegistrationFieldBorder,
+            
             focusedLabelColor = MaterialTheme.colorScheme.primary,
-            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            // Colore del cursore
+            unfocusedLabelColor = RegistrationFieldLabel,
+            focusedPlaceholderColor = RegistrationFieldLabel,
+            unfocusedPlaceholderColor = RegistrationFieldLabel,
+            focusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+            unfocusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+            
             cursorColor = MaterialTheme.colorScheme.primary
         )
     )
 }
+
+private val RegistrationFieldText = Color(0xFF6F6877)
+private val RegistrationFieldLabel = Color(0xFFA8A1B0)
+private val RegistrationFieldBorder = Color(0xFF8D8797)
 

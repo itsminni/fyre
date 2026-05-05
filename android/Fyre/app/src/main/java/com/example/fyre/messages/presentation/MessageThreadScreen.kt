@@ -10,16 +10,21 @@ import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -33,8 +38,12 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -58,13 +67,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.fyre.R
 import com.example.fyre.account.model.ChatBackgroundStyle
 import com.example.fyre.account.model.ChatBubblePalette
@@ -72,12 +87,22 @@ import com.example.fyre.account.model.ChatCustomizationSettings
 import com.example.fyre.messages.model.AttachmentType
 import com.example.fyre.messages.model.ChatMessage
 import com.example.fyre.messages.model.MessageAuthor
+import com.example.fyre.messages.model.MessageAttachment
 import com.example.fyre.messages.model.MessageSyncStatus
 import com.example.fyre.messages.model.MessageThread
 import com.example.fyre.messages.model.RelationshipAction
+import com.example.fyre.messages.model.VoiceNote
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.PlayerView
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -104,14 +129,19 @@ fun MessageThreadScreen(
     onCancelReply: () -> Unit,
     onSendAttachment: (PickedMessageAttachment) -> Unit,
     onSendVoice: (String, Int) -> Unit,
+    onToggleThreadNotifications: (Boolean) -> Unit,
     onRelationshipAction: (RelationshipAction) -> Unit,
     chatSettings: ChatCustomizationSettings = ChatCustomizationSettings(),
+    imageHeaders: Map<String, String> = emptyMap(),
     onBack: () -> Unit
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
-    val voiceController = remember { LocalVoiceNoteController() }
+    val voiceController = remember(context.applicationContext) {
+        LocalVoiceNoteController(context.applicationContext)
+    }
     val micPermission = rememberPermissionState(permission = Manifest.permission.RECORD_AUDIO)
+    val cameraPermission = rememberPermissionState(permission = Manifest.permission.CAMERA)
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -136,6 +166,20 @@ fun MessageThreadScreen(
                     type = AttachmentType.File,
                     fallbackMimeType = "application/octet-stream",
                     fallbackNamePrefix = "file"
+                )
+            )
+        }
+    }
+    val videoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let {
+            onSendAttachment(
+                context.resolvePickedAttachment(
+                    uri = it,
+                    type = AttachmentType.Video,
+                    fallbackMimeType = "video/mp4",
+                    fallbackNamePrefix = "video"
                 )
             )
         }
@@ -175,7 +219,6 @@ fun MessageThreadScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
             .background(chatBackgroundBrush(chatSettings))
     ) {
         Row(
@@ -191,14 +234,23 @@ fun MessageThreadScreen(
                     contentDescription = stringResource(R.string.messages_back_to_inbox_cd)
                 )
             }
-            Text(
-                text = thread.displayName,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            ThreadAvatar(thread = thread)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = thread.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = threadPresenceText(thread),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             Box {
                 IconButton(onClick = { relationshipMenuExpanded = true }) {
                     Icon(
@@ -210,6 +262,31 @@ fun MessageThreadScreen(
                     expanded = relationshipMenuExpanded,
                     onDismissRequest = { relationshipMenuExpanded = false }
                 ) {
+                    DropdownMenuItem(
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (thread.notificationsEnabled) {
+                                    Icons.Filled.NotificationsOff
+                                } else {
+                                    Icons.Filled.Notifications
+                                },
+                                contentDescription = null
+                            )
+                        },
+                        text = {
+                            Text(
+                                if (thread.notificationsEnabled) {
+                                    stringResource(R.string.messages_mute_action)
+                                } else {
+                                    stringResource(R.string.messages_unmute_action)
+                                }
+                            )
+                        },
+                        onClick = {
+                            relationshipMenuExpanded = false
+                            onToggleThreadNotifications(!thread.notificationsEnabled)
+                        }
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.messages_archive_action)) },
                         onClick = {
@@ -328,7 +405,7 @@ fun MessageThreadScreen(
                 .weight(1f)
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(if (chatSettings.compactBubbles) 4.dp else 8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             itemsIndexed(messages, key = { _, message -> message.id }) { _, message ->
                 MessageBubble(
@@ -338,17 +415,21 @@ fun MessageThreadScreen(
                     },
                     isPlayingVoice = message.voiceNote?.localPath == playingPath,
                     chatSettings = chatSettings,
+                    imageHeaders = imageHeaders,
                     replyVoiceLabel = replyVoiceLabel,
                     replyGenericLabel = replyGenericLabel,
+                    peerReadAt = thread.otherParticipantReadAt,
                     onPlayVoice = { path ->
                         if (playingPath == path) {
                             voiceController.stopPlayback()
                             playingPath = null
                         } else {
-                            voiceController.play(path) {
-                                playingPath = null
-                            }
-                            playingPath = path
+                            val started = voiceController.play(
+                                source = path,
+                                requestHeaders = imageHeaders,
+                                onCompleted = { playingPath = null }
+                            )
+                            playingPath = if (started) path else null
                         }
                     },
                     onReply = { onReply(message.id) }
@@ -434,10 +515,23 @@ fun MessageThreadScreen(
                                 }
                             )
                             DropdownMenuItem(
+                                text = { Text(stringResource(R.string.messages_attachment_video)) },
+                                onClick = {
+                                    attachmentMenuExpanded = false
+                                    videoPicker.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text(stringResource(R.string.messages_take_photo)) },
                                 onClick = {
                                     attachmentMenuExpanded = false
-                                    cameraLauncher.launch(null)
+                                    if (cameraPermission.status.isGranted) {
+                                        cameraLauncher.launch(null)
+                                    } else {
+                                        cameraPermission.launchPermissionRequest()
+                                    }
                                 }
                             )
                         }
@@ -452,7 +546,15 @@ fun MessageThreadScreen(
                         shape = RoundedCornerShape(24.dp)
                     )
 
-                    IconButton(onClick = { cameraLauncher.launch(null) }) {
+                    IconButton(
+                        onClick = {
+                            if (cameraPermission.status.isGranted) {
+                                cameraLauncher.launch(null)
+                            } else {
+                                cameraPermission.launchPermissionRequest()
+                            }
+                        }
+                    ) {
                         Icon(
                             imageVector = Icons.Filled.PhotoCamera,
                             contentDescription = stringResource(R.string.messages_take_photo)
@@ -512,16 +614,67 @@ fun MessageThreadScreen(
 }
 
 @Composable
+private fun ThreadAvatar(thread: MessageThread) {
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary),
+        contentAlignment = Alignment.Center
+    ) {
+        if (!thread.avatarUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = thread.avatarUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Text(
+                text = thread.avatarLabel,
+                color = MaterialTheme.colorScheme.onPrimary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        if (thread.isOnline) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(11.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF2ECC71))
+            )
+        }
+    }
+}
+
+@Composable
+private fun threadPresenceText(thread: MessageThread): String {
+    if (!thread.notificationsEnabled) {
+        return stringResource(R.string.messages_muted_label)
+    }
+    if (thread.isOnline) {
+        return stringResource(R.string.messages_presence_online)
+    }
+    return thread.lastSeenAt?.let {
+        stringResource(R.string.messages_presence_last_seen, formatLastSeenTimestamp(it))
+    } ?: stringResource(R.string.messages_presence_offline)
+}
+
+@Composable
 private fun MessageBubble(
     message: ChatMessage,
     repliedMessage: ChatMessage?,
     isPlayingVoice: Boolean,
     chatSettings: ChatCustomizationSettings,
+    imageHeaders: Map<String, String>,
     replyVoiceLabel: String,
     replyGenericLabel: String,
+    peerReadAt: Long?,
     onPlayVoice: (String) -> Unit,
     onReply: () -> Unit
 ) {
+    val context = LocalContext.current
     val isMine = message.author == MessageAuthor.Me
     val bubblePalette = if (isMine) {
         chatSettings.outgoingBubblePalette
@@ -531,6 +684,54 @@ private fun MessageBubble(
     val bubbleBrush = chatBubbleBrush(bubblePalette, isMine)
     val textColor = chatBubbleTextColor(bubblePalette, isMine)
     val bubbleShape = RoundedCornerShape(16.dp)
+    var previewAttachment by remember(message.id) { mutableStateOf<MessageAttachment?>(null) }
+    var showMessageInfo by remember(message.id) { mutableStateOf(false) }
+    val hasOnlyRichMedia = message.text.isBlank() &&
+        message.voiceNote == null &&
+        message.attachments.isNotEmpty() &&
+        message.attachments.all { attachment ->
+            attachment.isDisplayImage() || attachment.isDisplayVideo()
+        }
+    val hasVoiceNote = message.voiceNote != null
+    val horizontalPadding = if (hasOnlyRichMedia) 3.dp else 12.dp
+    val verticalPadding = if (hasOnlyRichMedia) 3.dp else 8.dp
+
+    previewAttachment?.let { attachment ->
+        AlertDialog(
+            onDismissRequest = { previewAttachment = null },
+            title = {
+                Text(
+                    text = attachment.displayName,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
+            text = {
+                AsyncImage(
+                    model = attachment.chatImageModel(context, imageHeaders),
+                    contentDescription = attachment.displayName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 240.dp, max = 520.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { previewAttachment = null }) {
+                    Text(stringResource(R.string.messages_close_image_preview))
+                }
+            }
+        )
+    }
+
+    if (showMessageInfo) {
+        MessageInfoDialog(
+            message = message,
+            peerReadAt = peerReadAt,
+            onDismiss = { showMessageInfo = false }
+        )
+    }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -540,14 +741,14 @@ private fun MessageBubble(
             shape = bubbleShape,
             color = Color.Transparent,
             tonalElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth(if (chatSettings.compactBubbles) 0.64f else 0.78f)
+            modifier = Modifier.fillMaxWidth(0.78f)
         ) {
             Column(
                 modifier = Modifier
                     .background(bubbleBrush, bubbleShape)
                     .padding(
-                        horizontal = if (chatSettings.compactBubbles) 10.dp else 12.dp,
-                        vertical = if (chatSettings.compactBubbles) 6.dp else 8.dp
+                        horizontal = horizontalPadding,
+                        vertical = verticalPadding
                     ),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
@@ -557,6 +758,18 @@ private fun MessageBubble(
                             text = stringResource(
                                 R.string.messages_reply_prefix,
                                 previewForReply(repliedMessage, replyVoiceLabel, replyGenericLabel)
+                            ),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else if (!message.replyPreviewText.isNullOrBlank()) {
+                    Surface(shape = RoundedCornerShape(10.dp), tonalElevation = 1.dp) {
+                        Text(
+                            text = stringResource(
+                                R.string.messages_reply_prefix,
+                                message.replyPreviewText
                             ),
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             maxLines = 1,
@@ -574,55 +787,103 @@ private fun MessageBubble(
                 }
 
                 message.attachments.forEach { attachment ->
-                    Surface(shape = RoundedCornerShape(10.dp), tonalElevation = 1.dp) {
-                        val typeLabel = when (attachment.type) {
-                            AttachmentType.Image -> stringResource(R.string.messages_attachment_image)
-                            AttachmentType.Video -> stringResource(R.string.messages_attachment_video)
-                            AttachmentType.File -> stringResource(R.string.messages_attachment_file)
-                        }
-                        Text(
-                            text = stringResource(
-                                R.string.messages_attachment_item,
-                                typeLabel,
-                                attachment.displayName
-                            ),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                    if (attachment.isDisplayImage()) {
+                        ChatImageAttachment(
+                            attachment = attachment,
+                            message = message,
+                            isMine = isMine,
+                            imageHeaders = imageHeaders,
+                            showTimestamp = true,
+                            onOpenPreview = { previewAttachment = attachment }
                         )
+                    } else if (attachment.isDisplayVideo()) {
+                        ChatVideoAttachment(
+                            attachment = attachment,
+                            message = message,
+                            isMine = isMine,
+                            requestHeaders = imageHeaders,
+                            showTimestamp = true
+                        )
+                    } else {
+                        Surface(shape = RoundedCornerShape(10.dp), tonalElevation = 1.dp) {
+                            val typeLabel = when (attachment.type) {
+                                AttachmentType.Image -> stringResource(R.string.messages_attachment_image)
+                                AttachmentType.Video -> stringResource(R.string.messages_attachment_video)
+                                AttachmentType.File -> stringResource(R.string.messages_attachment_file)
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { context.openAttachmentExternally(attachment) }
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.AttachFile,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = attachment.displayName,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = typeLabel,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
                 val voice = message.voiceNote
                 if (voice != null) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(onClick = { onPlayVoice(voice.localPath) }) {
-                            Text(
-                                if (isPlayingVoice) {
-                                    stringResource(R.string.messages_stop)
-                                } else {
-                                    stringResource(R.string.messages_play_voice)
-                                }
-                            )
-                        }
-                        Text(stringResource(R.string.messages_voice_duration, voice.durationSec))
-                    }
+                    ChatVoiceNote(
+                        voice = voice,
+                        message = message,
+                        isMine = isMine,
+                        isPlaying = isPlayingVoice,
+                        textColor = textColor,
+                        showTimestamp = true,
+                        onPlayVoice = { onPlayVoice(voice.localPath) }
+                    )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = onReply) {
-                        Text(stringResource(R.string.messages_reply_action))
-                    }
-                    if (chatSettings.showTimestamps) {
+                if (!hasOnlyRichMedia && !hasVoiceNote) {
+                    val actionTextColor = textColor.copy(alpha = 0.94f)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = onReply) {
+                                Text(
+                                    text = stringResource(R.string.messages_reply_action),
+                                    color = actionTextColor,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            if (isMine) {
+                                TextButton(onClick = { showMessageInfo = true }) {
+                                    Text(
+                                        text = stringResource(R.string.messages_info_action),
+                                        color = actionTextColor,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
                         MessageStatusRow(
                             message = message,
                             isMine = isMine,
-                            textColor = textColor.copy(alpha = 0.75f)
+                            textColor = textColor.copy(alpha = 0.75f),
+                            showTimestamp = true
                         )
                     }
                 }
@@ -632,20 +893,335 @@ private fun MessageBubble(
 }
 
 @Composable
+private fun MessageInfoDialog(
+    message: ChatMessage,
+    peerReadAt: Long?,
+    onDismiss: () -> Unit
+) {
+    val readAt = if (message.isRead) peerReadAt else null
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.messages_info_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(
+                        R.string.messages_info_sent_at,
+                        formatMessageFullTimestamp(message.timestamp)
+                    )
+                )
+                Text(
+                    text = readAt?.let {
+                        stringResource(R.string.messages_info_read_at, formatMessageFullTimestamp(it))
+                    } ?: stringResource(R.string.messages_info_not_read)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.messages_close_image_preview))
+            }
+        }
+    )
+}
+
+@Composable
+private fun ChatImageAttachment(
+    attachment: MessageAttachment,
+    message: ChatMessage,
+    isMine: Boolean,
+    imageHeaders: Map<String, String>,
+    showTimestamp: Boolean,
+    onOpenPreview: () -> Unit
+) {
+    val context = LocalContext.current
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onOpenPreview)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = attachment.chatImageModel(context, imageHeaders),
+                contentDescription = attachment.displayName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            MediaTimestampBadge(
+                message = message,
+                isMine = isMine,
+                showTimestamp = showTimestamp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(7.dp)
+            )
+        }
+    }
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun ChatVideoAttachment(
+    attachment: MessageAttachment,
+    message: ChatMessage,
+    isMine: Boolean,
+    requestHeaders: Map<String, String>,
+    showTimestamp: Boolean
+) {
+    val context = LocalContext.current
+    val mediaUri = attachment.mediaUri()
+    var isPlaying by remember(mediaUri) { mutableStateOf(false) }
+    val player = remember(mediaUri, requestHeaders) {
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(requestHeaders)
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(context)
+                    .setDataSourceFactory(dataSourceFactory)
+            )
+            .build()
+            .apply {
+                setMediaItem(MediaItem.fromUri(mediaUri))
+                prepare()
+                playWhenReady = false
+            }
+    }
+
+    DisposableEffect(player) {
+        onDispose {
+            player.release()
+            isPlaying = false
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+            .clip(RoundedCornerShape(14.dp))
+    ) {
+        Box(modifier = Modifier.background(Color.Black)) {
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        this.player = player
+                        useController = false
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    }
+                },
+                update = { view -> view.player = player },
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable {
+                        if (isPlaying) {
+                            player.pause()
+                            isPlaying = false
+                        } else {
+                            player.play()
+                            isPlaying = true
+                        }
+                    }
+            )
+            if (!isPlaying) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.48f),
+                    contentColor = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(58.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = stringResource(R.string.messages_play_video),
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = Color.Black.copy(alpha = 0.52f),
+                contentColor = Color.White,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.messages_attachment_video),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                )
+            }
+            MediaTimestampBadge(
+                message = message,
+                isMine = isMine,
+                showTimestamp = showTimestamp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(7.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatVoiceNote(
+    voice: VoiceNote,
+    message: ChatMessage,
+    isMine: Boolean,
+    isPlaying: Boolean,
+    textColor: Color,
+    showTimestamp: Boolean,
+    onPlayVoice: () -> Unit
+) {
+    val waveform = remember(message.id) { voiceWaveform(message.id) }
+    val accentColor = if (isMine) Color.White else MaterialTheme.colorScheme.primary
+    val inactiveWaveColor = textColor.copy(alpha = 0.34f)
+    val activeWaveColor = accentColor.copy(alpha = 0.88f)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp, bottom = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = accentColor.copy(alpha = if (isMine) 0.20f else 0.14f),
+            contentColor = accentColor,
+            modifier = Modifier
+                .size(44.dp)
+                .clickable(onClick = onPlayVoice)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) {
+                        stringResource(R.string.messages_stop_voice)
+                    } else {
+                        stringResource(R.string.messages_play_voice)
+                    },
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            VoiceWaveform(
+                values = waveform,
+                active = isPlaying,
+                activeColor = activeWaveColor,
+                inactiveColor = inactiveWaveColor,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(30.dp)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.messages_voice_duration, voice.durationSec),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.78f)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                MessageStatusRow(
+                    message = message,
+                    isMine = isMine,
+                    textColor = textColor.copy(alpha = 0.78f),
+                    showTimestamp = showTimestamp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceWaveform(
+    values: List<Float>,
+    active: Boolean,
+    activeColor: Color,
+    inactiveColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val count = values.size.coerceAtLeast(1)
+        val gap = size.width / (count * 2.5f)
+        val barWidth = gap.coerceAtLeast(2f)
+        val step = size.width / count
+        values.forEachIndexed { index, raw ->
+            val normalized = raw.coerceIn(0.16f, 1f)
+            val barHeight = (size.height * normalized).coerceAtLeast(5f)
+            val x = index * step
+            val color = if (active && index % 3 != 0) activeColor else inactiveColor
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(x, (size.height - barHeight) / 2f),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth, barWidth)
+            )
+        }
+    }
+}
+
+@Composable
+private fun MediaTimestampBadge(
+    message: ChatMessage,
+    isMine: Boolean,
+    showTimestamp: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = Color.Black.copy(alpha = 0.54f),
+        contentColor = Color.White,
+        modifier = modifier
+    ) {
+        Box(modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)) {
+            MessageStatusRow(
+                message = message,
+                isMine = isMine,
+                textColor = Color.White.copy(alpha = 0.88f),
+                showTimestamp = showTimestamp
+            )
+        }
+    }
+}
+
+@Composable
 private fun MessageStatusRow(
     message: ChatMessage,
     isMine: Boolean,
-    textColor: Color
+    textColor: Color,
+    showTimestamp: Boolean = true
 ) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = formatMessageTimestamp(message.timestamp),
-            style = MaterialTheme.typography.labelSmall,
-            color = textColor
-        )
+        if (showTimestamp) {
+            Text(
+                text = formatMessageTimestamp(message.timestamp),
+                style = MaterialTheme.typography.labelSmall,
+                color = textColor
+            )
+        }
 
         if (isMine) {
             val (icon, tint, description) = when (message.syncStatus) {
@@ -688,6 +1264,15 @@ private fun MessageStatusRow(
     }
 }
 
+private fun voiceWaveform(seed: String): List<Float> {
+    val normalizedSeed = seed.ifBlank { "voice" }
+    val base = normalizedSeed.fold(0) { acc, char -> acc + char.code }
+    return List(34) { index ->
+        val value = ((base + index * 31 + (index % 5) * 17) % 74) / 100f
+        (0.22f + value).coerceAtMost(1f)
+    }
+}
+
 private fun previewForReply(
     message: ChatMessage,
     voiceFallback: String,
@@ -698,8 +1283,67 @@ private fun previewForReply(
     return message.attachments.firstOrNull()?.displayName ?: genericFallback
 }
 
+private fun MessageAttachment.chatImageModel(
+    context: Context,
+    imageHeaders: Map<String, String>
+): Any {
+    val source = backendUrl?.takeIf { it.isNotBlank() } ?: localUri
+    if (!source.startsWith("http", ignoreCase = true)) {
+        return source
+    }
+
+    return ImageRequest.Builder(context)
+        .data(source)
+        .apply {
+            imageHeaders.forEach { (name, value) ->
+                addHeader(name, value)
+            }
+        }
+        .build()
+}
+
+private fun MessageAttachment.isDisplayImage(): Boolean {
+    return type == AttachmentType.Image || mimeType.startsWith("image/", ignoreCase = true)
+}
+
+private fun MessageAttachment.isDisplayVideo(): Boolean {
+    return type == AttachmentType.Video || mimeType.startsWith("video/", ignoreCase = true)
+}
+
+private fun MessageAttachment.mediaUri(): Uri {
+    val source = backendUrl?.takeIf { it.isNotBlank() } ?: localUri
+    return when {
+        source.startsWith("http://", ignoreCase = true) ||
+            source.startsWith("https://", ignoreCase = true) ||
+            source.startsWith("content://", ignoreCase = true) ||
+            source.startsWith("file://", ignoreCase = true) -> Uri.parse(source)
+
+        else -> Uri.fromFile(File(source))
+    }
+}
+
 private fun formatMessageTimestamp(timestamp: Long): String {
     return SimpleDateFormat("HH:mm", Locale.ITALY).format(Date(timestamp))
+}
+
+private fun formatMessageFullTimestamp(timestamp: Long): String {
+    return SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(Date(timestamp))
+}
+
+private fun formatLastSeenTimestamp(timestamp: Long): String {
+    return SimpleDateFormat("dd/MM HH:mm", Locale.ITALY).format(Date(timestamp))
+}
+
+private fun Context.openAttachmentExternally(attachment: MessageAttachment) {
+    val uri = attachment.mediaUri()
+    val mimeType = attachment.mimeType.ifBlank { "*/*" }
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, mimeType)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    runCatching {
+        startActivity(Intent.createChooser(intent, attachment.displayName))
+    }
 }
 
 private fun Context.resolvePickedAttachment(
@@ -715,8 +1359,14 @@ private fun Context.resolvePickedAttachment(
         mimeType = resolvedMimeType
     )
 
+    val resolvedType = when {
+        resolvedMimeType.startsWith("image/", ignoreCase = true) -> AttachmentType.Image
+        resolvedMimeType.startsWith("video/", ignoreCase = true) -> AttachmentType.Video
+        else -> type
+    }
+
     return PickedMessageAttachment(
-        type = type,
+        type = resolvedType,
         displayName = displayName,
         localUri = uri.toString(),
         mimeType = resolvedMimeType

@@ -49,38 +49,16 @@ class AccountViewModelTest {
         val current = viewModel.uiState.value.discoveryPreferences
         viewModel.updateDiscoveryPreferences(
             current.copy(
-                minAge = 24,
-                maxAge = 34,
-                maxDistanceKm = 15,
-                showOnlyVerified = true,
-                intent = "Relazione seria"
+                showAge = false,
+                showDistance = false,
+                showInstagramTag = false
             )
         )
 
         val updated = viewModel.uiState.value.discoveryPreferences
-        assertEquals(24, updated.minAge)
-        assertEquals(34, updated.maxAge)
-        assertEquals(15, updated.maxDistanceKm)
-        assertTrue(updated.showOnlyVerified)
-        assertEquals("Relazione seria", updated.intent)
-    }
-
-    @Test
-    fun update_discovery_preferences_normalizes_age_range() {
-        val viewModel = viewModel()
-
-        viewModel.updateDiscoveryPreferences(
-            viewModel.uiState.value.discoveryPreferences.copy(
-                minAge = 120,
-                maxAge = 20,
-                maxDistanceKm = 0
-            )
-        )
-
-        val updated = viewModel.uiState.value.discoveryPreferences
-        assertEquals(98, updated.minAge)
-        assertEquals(99, updated.maxAge)
-        assertEquals(1, updated.maxDistanceKm)
+        assertFalse(updated.showAge)
+        assertFalse(updated.showDistance)
+        assertFalse(updated.showInstagramTag)
     }
 
     @Test
@@ -90,34 +68,6 @@ class AccountViewModelTest {
         viewModel.setThemeMode(ThemeMode.Dark)
 
         assertEquals(ThemeMode.Dark, viewModel.uiState.value.appearanceSettings.themeMode)
-        assertFalse(viewModel.uiState.value.appearanceSettings.compactMode)
-    }
-
-    @Test
-    fun update_appearance_settings_keeps_compact_mode() {
-        val viewModel = viewModel()
-
-        viewModel.updateAppearanceSettings(
-            viewModel.uiState.value.appearanceSettings.copy(compactMode = true)
-        )
-
-        assertTrue(viewModel.uiState.value.appearanceSettings.compactMode)
-    }
-
-    @Test
-    fun update_security_settings_updates_ui_state() {
-        val viewModel = viewModel()
-
-        viewModel.updateSecuritySettings(
-            viewModel.uiState.value.securitySettings.copy(
-                biometricUnlock = true,
-                hideOnlineStatus = true
-            )
-        )
-
-        val security = viewModel.uiState.value.securitySettings
-        assertTrue(security.biometricUnlock)
-        assertTrue(security.hideOnlineStatus)
     }
 
     @Test
@@ -145,14 +95,14 @@ class AccountViewModelTest {
 
         viewModel.updateChatCustomizationSettings(
             viewModel.uiState.value.chatCustomizationSettings.copy(
-                compactBubbles = true,
-                showTimestamps = false
+                backgroundColor1Hex = "#111111",
+                sendButtonColor1Hex = "#222222"
             )
         )
 
         val chat = viewModel.uiState.value.chatCustomizationSettings
-        assertTrue(chat.compactBubbles)
-        assertFalse(chat.showTimestamps)
+        assertEquals("#111111", chat.backgroundColor1Hex)
+        assertEquals("#222222", chat.sendButtonColor1Hex)
     }
 }
 

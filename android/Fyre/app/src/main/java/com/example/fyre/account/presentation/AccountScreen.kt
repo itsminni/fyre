@@ -1,10 +1,17 @@
 package com.example.fyre.account.presentation
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +42,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -44,7 +52,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -72,29 +79,38 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.fyre.R
 import com.example.fyre.account.model.AccountSection
 import com.example.fyre.account.model.AccountUiState
+import com.example.fyre.account.model.AppLanguage
+import com.example.fyre.account.model.AppIconVariant
 import com.example.fyre.account.model.ChatBackgroundStyle
 import com.example.fyre.account.model.ChatBubblePalette
 import com.example.fyre.account.model.ChatCustomizationSettings
 import com.example.fyre.account.model.DiscoveryPreferences
 import com.example.fyre.account.model.ProfileDraft
 import com.example.fyre.account.model.ThemeMode
+import com.example.fyre.core.appicon.AppIconManager
 import com.example.fyre.data.AppGraphProvider
 import com.example.fyre.data.local.UserSettingsDataStore
 import com.example.fyre.data.model.ProfileFieldValues
@@ -104,9 +120,24 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 private const val MaxProfilePhotoCount = 6
 private const val SupportEmail = "support@example.com"
+
+private enum class ChatColorSlot(val labelRes: Int) {
+    Background1(R.string.account_chat_background_color_1),
+    Background2(R.string.account_chat_background_color_2),
+    Background3(R.string.account_chat_background_color_3),
+    Send1(R.string.account_chat_send_color_1),
+    Send2(R.string.account_chat_send_color_2),
+    Send3(R.string.account_chat_send_color_3)
+}
 
 private data class ProfileOption(
     val value: String,
@@ -130,14 +161,6 @@ private val OrientationOptions = listOf(
 )
 
 private val IntentOptions = listOf(
-    ProfileOption(ProfileFieldValues.IntentRelationship, R.string.profile_intent_relationship),
-    ProfileOption(ProfileFieldValues.IntentCasual, R.string.profile_intent_casual),
-    ProfileOption(ProfileFieldValues.IntentFriendship, R.string.profile_intent_friendship),
-    ProfileOption(ProfileFieldValues.IntentNotSure, R.string.profile_intent_not_sure)
-)
-
-private val DiscoveryIntentOptions = listOf(
-    ProfileOption("Tutti", R.string.common_all),
     ProfileOption(ProfileFieldValues.IntentRelationship, R.string.profile_intent_relationship),
     ProfileOption(ProfileFieldValues.IntentCasual, R.string.profile_intent_casual),
     ProfileOption(ProfileFieldValues.IntentFriendship, R.string.profile_intent_friendship),
@@ -201,15 +224,14 @@ fun AccountScreen(
         null -> AccountHubSection(
             state = state,
             onOpenSection = vm::openSection,
-            onPickAvatar = pickAvatar
+            onPickAvatar = pickAvatar,
+            onLogout = onLogout
         )
 
         AccountSection.EditProfile -> EditProfileSection(
             state = state,
             onBack = vm::backToHub,
             onDraftChange = vm::updateProfileDraft,
-            onSave = vm::saveProfile,
-            onLogout = onLogout,
             onPickAvatar = pickAvatar,
             onAddPhotos = addProfilePhotos
         )
@@ -228,15 +250,18 @@ fun AccountScreen(
 
         AccountSection.Security -> SecuritySection(
             state = state,
-            onBack = vm::backToHub,
-            onUpdate = vm::updateSecuritySettings
+            onBack = vm::backToHub
         )
 
         AccountSection.Appearance -> AppearanceSection(
             state = state,
             onBack = vm::backToHub,
             onSetThemeMode = vm::setThemeMode,
-            onUpdate = vm::updateAppearanceSettings,
+            onSetAppLanguage = vm::setAppLanguage,
+            onSetAppIconVariant = { variant ->
+                vm.setAppIconVariant(variant)
+                AppIconManager.apply(context, variant)
+            },
             onUpdateChatCustomization = vm::updateChatCustomizationSettings
         )
 
@@ -251,7 +276,8 @@ fun AccountScreen(
 private fun AccountHubSection(
     state: AccountUiState,
     onOpenSection: (AccountSection) -> Unit,
-    onPickAvatar: () -> Unit
+    onPickAvatar: () -> Unit,
+    onLogout: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -298,6 +324,20 @@ private fun AccountHubSection(
                 state = state,
                 onOpenEvents = { onOpenSection(AccountSection.EventHistory) }
             )
+        }
+
+        item {
+            Button(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Logout,
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                Text(text = stringResource(R.string.common_logout))
+            }
             Spacer(modifier = Modifier.height(18.dp))
         }
     }
@@ -466,8 +506,6 @@ private fun EditProfileSection(
     state: AccountUiState,
     onBack: () -> Unit,
     onDraftChange: (ProfileDraft) -> Unit,
-    onSave: () -> Unit,
-    onLogout: () -> Unit,
     onPickAvatar: () -> Unit,
     onAddPhotos: () -> Unit
 ) {
@@ -589,6 +627,18 @@ private fun EditProfileSection(
                 }
             )
 
+            ProfileToggleField(
+                title = stringResource(R.string.profile_exclude_smokers),
+                checked = profile.excludeSmokers,
+                onCheckedChange = { onDraftChange(profile.copy(excludeSmokers = it)) }
+            )
+
+            ProfileToggleField(
+                title = stringResource(R.string.profile_exclude_drinkers),
+                checked = profile.excludeDrinkers,
+                onCheckedChange = { onDraftChange(profile.copy(excludeDrinkers = it)) }
+            )
+
             ProfileAgeRangeField(
                 minAge = profile.minPreferredAge,
                 maxAge = profile.maxPreferredAge,
@@ -618,6 +668,17 @@ private fun EditProfileSection(
             )
         }
 
+        Text(
+            text = if (state.isSavingProfile) {
+                stringResource(R.string.account_profile_auto_saving)
+            } else {
+                stringResource(R.string.account_profile_auto_save)
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        )
+
         state.statusMessage?.let { message ->
             Text(
                 text = message,
@@ -629,37 +690,6 @@ private fun EditProfileSection(
                 },
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
-        }
-
-        Button(
-            onClick = onSave,
-            enabled = !state.isSavingProfile,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Save,
-                contentDescription = null,
-                modifier = Modifier.padding(end = 8.dp)
-            )
-            Text(
-                if (state.isSavingProfile) {
-                    stringResource(R.string.profile_completion_loading)
-                } else {
-                    stringResource(R.string.profile_save_changes)
-                }
-            )
-        }
-
-        Button(
-            onClick = onLogout,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Logout,
-                contentDescription = null,
-                modifier = Modifier.padding(end = 8.dp)
-            )
-            Text(text = stringResource(R.string.common_logout))
         }
     }
 }
@@ -1184,73 +1214,39 @@ private fun DiscoveryPreferencesSection(
             subtitle = stringResource(R.string.account_preferences_hint),
             icon = Icons.Filled.Tune
         ) {
-            ProfilePickerField(
-                title = stringResource(R.string.account_intent_label),
-                selectedValue = prefs.intent,
-                options = DiscoveryIntentOptions,
-                onValueChange = { onUpdate(prefs.copy(intent = it)) }
-            )
-
-            ProfileAgeRangeField(
-                minAge = prefs.minAge,
-                maxAge = prefs.maxAge,
-                onMinAgeChange = { nextMin ->
-                    val clampedMin = nextMin.coerceIn(18, 98)
-                    val nextMax = if (prefs.maxAge <= clampedMin) {
-                        maxOf(clampedMin + 1, 19).coerceAtMost(99)
-                    } else {
-                        prefs.maxAge
-                    }
-                    onUpdate(prefs.copy(minAge = clampedMin, maxAge = nextMax))
-                },
-                onMaxAgeChange = { nextMax ->
-                    val minimum = maxOf(prefs.minAge + 1, 19)
-                    onUpdate(prefs.copy(maxAge = nextMax.coerceIn(minimum, 99)))
-                }
-            )
-
-            EditableNumberField(
-                title = stringResource(R.string.account_distance_max_label),
-                value = prefs.maxDistanceKm,
-                minValue = 1,
-                maxValue = 999,
-                maxDigits = 3,
-                suffix = "km",
-                onValidValueChange = { onUpdate(prefs.copy(maxDistanceKm = it)) }
-            )
-
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_only_verified),
-                checked = prefs.showOnlyVerified,
-                onCheckedChange = { onUpdate(prefs.copy(showOnlyVerified = it)) }
-            )
             SettingSwitchRow(
                 label = stringResource(R.string.account_switch_show_age),
+                subtitle = stringResource(R.string.account_switch_show_age_hint),
                 checked = prefs.showAge,
                 onCheckedChange = { onUpdate(prefs.copy(showAge = it)) }
             )
             SettingSwitchRow(
                 label = stringResource(R.string.account_switch_show_distance),
+                subtitle = stringResource(R.string.account_switch_show_distance_hint),
                 checked = prefs.showDistance,
                 onCheckedChange = { onUpdate(prefs.copy(showDistance = it)) }
             )
             SettingSwitchRow(
                 label = stringResource(R.string.account_switch_show_intent),
+                subtitle = stringResource(R.string.account_switch_show_intent_hint),
                 checked = prefs.showIntent,
                 onCheckedChange = { onUpdate(prefs.copy(showIntent = it)) }
             )
             SettingSwitchRow(
                 label = stringResource(R.string.account_switch_show_interests),
+                subtitle = stringResource(R.string.account_switch_show_interests_hint),
                 checked = prefs.showInterests,
                 onCheckedChange = { onUpdate(prefs.copy(showInterests = it)) }
             )
             SettingSwitchRow(
                 label = stringResource(R.string.account_switch_show_instagram),
+                subtitle = stringResource(R.string.account_switch_show_instagram_hint),
                 checked = prefs.showInstagramTag,
                 onCheckedChange = { onUpdate(prefs.copy(showInstagramTag = it)) }
             )
             SettingSwitchRow(
                 label = stringResource(R.string.account_switch_show_spotify),
+                subtitle = stringResource(R.string.account_switch_show_spotify_hint),
                 checked = prefs.showSpotifyTag,
                 onCheckedChange = { onUpdate(prefs.copy(showSpotifyTag = it)) }
             )
@@ -1267,6 +1263,7 @@ private fun NotificationsSection(
     onBack: () -> Unit,
     onUpdate: (com.example.fyre.account.model.NotificationSettings) -> Unit
 ) {
+    val context = LocalContext.current
     val notifications = state.notificationSettings
 
     SectionScaffold(title = stringResource(R.string.account_section_notifications), onBack = onBack) {
@@ -1277,29 +1274,37 @@ private fun NotificationsSection(
         ) {
             SettingSwitchRow(
                 label = stringResource(R.string.account_switch_push_notifications),
+                subtitle = stringResource(R.string.account_notifications_master_hint),
                 checked = notifications.pushEnabled,
                 onCheckedChange = { onUpdate(notifications.copy(pushEnabled = it)) }
             )
             SettingSwitchRow(
-                label = stringResource(R.string.account_switch_messages),
-                checked = notifications.messageNotifications,
-                onCheckedChange = { onUpdate(notifications.copy(messageNotifications = it)) }
-            )
-            SettingSwitchRow(
                 label = stringResource(R.string.account_switch_matches),
+                subtitle = stringResource(R.string.account_notifications_matches_hint),
                 checked = notifications.matchNotifications,
+                enabled = notifications.pushEnabled,
                 onCheckedChange = { onUpdate(notifications.copy(matchNotifications = it)) }
             )
             SettingSwitchRow(
-                label = stringResource(R.string.account_switch_event_reminders),
-                checked = notifications.eventReminders,
-                onCheckedChange = { onUpdate(notifications.copy(eventReminders = it)) }
+                label = stringResource(R.string.account_switch_messages),
+                subtitle = stringResource(R.string.account_notifications_messages_hint),
+                checked = notifications.messageNotifications,
+                enabled = notifications.pushEnabled,
+                onCheckedChange = { onUpdate(notifications.copy(messageNotifications = it)) }
             )
             SettingSwitchRow(
-                label = stringResource(R.string.account_switch_marketing),
-                checked = notifications.marketingUpdates,
-                onCheckedChange = { onUpdate(notifications.copy(marketingUpdates = it)) }
+                label = stringResource(R.string.account_switch_event_reminders),
+                subtitle = stringResource(R.string.account_notifications_events_hint),
+                checked = notifications.eventReminders,
+                enabled = notifications.pushEnabled,
+                onCheckedChange = { onUpdate(notifications.copy(eventReminders = it)) }
             )
+            Button(
+                onClick = { context.openSystemNotificationSettings() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.account_notifications_open_settings))
+            }
         }
         state.statusMessage?.let {
             Text(text = it, style = MaterialTheme.typography.labelMedium)
@@ -1310,10 +1315,10 @@ private fun NotificationsSection(
 @Composable
 private fun SecuritySection(
     state: AccountUiState,
-    onBack: () -> Unit,
-    onUpdate: (com.example.fyre.account.model.SecuritySettings) -> Unit
+    onBack: () -> Unit
 ) {
-    val security = state.securitySettings
+    val context = LocalContext.current
+    var securityMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     SectionScaffold(title = stringResource(R.string.account_section_security), onBack = onBack) {
         AccountCard(
@@ -1321,30 +1326,44 @@ private fun SecuritySection(
             subtitle = stringResource(R.string.profile_section_security_hint),
             icon = Icons.Filled.Lock
         ) {
+            Text(
+                text = stringResource(R.string.profile_security_reset_description),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             ProfileReadOnlyRow(
                 title = stringResource(R.string.common_email),
                 value = state.email.ifBlank { stringResource(R.string.common_dash) }
             )
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_biometric),
-                checked = security.biometricUnlock,
-                onCheckedChange = { onUpdate(security.copy(biometricUnlock = it)) }
-            )
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_two_factor),
-                checked = security.twoFactorEnabled,
-                onCheckedChange = { onUpdate(security.copy(twoFactorEnabled = it)) }
-            )
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_hide_online),
-                checked = security.hideOnlineStatus,
-                onCheckedChange = { onUpdate(security.copy(hideOnlineStatus = it)) }
-            )
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_session_pin),
-                checked = security.sessionPinEnabled,
-                onCheckedChange = { onUpdate(security.copy(sessionPinEnabled = it)) }
-            )
+            Button(
+                onClick = {
+                    securityMessage = context.openSupportEmail(
+                        subject = "Password reset request",
+                        body = "Profile email: ${state.email}"
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.profile_security_reset_action))
+            }
+            OutlinedButton(
+                onClick = {
+                    securityMessage = context.openSupportEmail(
+                        subject = "Email change request",
+                        body = "Current profile email: ${state.email}\nNew email: "
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.profile_security_change_email_action))
+            }
+            securityMessage?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
         state.statusMessage?.let {
             Text(text = it, style = MaterialTheme.typography.labelMedium)
@@ -1357,7 +1376,8 @@ private fun AppearanceSection(
     state: AccountUiState,
     onBack: () -> Unit,
     onSetThemeMode: (ThemeMode) -> Unit,
-    onUpdate: (com.example.fyre.account.model.AppearanceSettings) -> Unit,
+    onSetAppLanguage: (AppLanguage) -> Unit,
+    onSetAppIconVariant: (AppIconVariant) -> Unit,
     onUpdateChatCustomization: (ChatCustomizationSettings) -> Unit
 ) {
     val appearance = state.appearanceSettings
@@ -1385,32 +1405,39 @@ private fun AppearanceSection(
                 }
             }
             Text(text = stringResource(R.string.account_theme_current, appearance.themeMode.name))
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_dynamic_color),
-                checked = appearance.dynamicColor,
-                onCheckedChange = { onUpdate(appearance.copy(dynamicColor = it)) }
-            )
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_compact_mode),
-                checked = appearance.compactMode,
-                onCheckedChange = { onUpdate(appearance.copy(compactMode = it)) }
-            )
+        }
+
+        AccountCard(
+            title = stringResource(R.string.account_language_label),
+            icon = Icons.Filled.Settings
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AppLanguage.entries.forEach { language ->
+                    OutlinedButton(onClick = { onSetAppLanguage(language) }) {
+                        Text(stringResource(language.labelRes))
+                    }
+                }
+            }
+            Text(text = stringResource(R.string.account_language_current, stringResource(appearance.appLanguage.labelRes)))
+        }
+
+        AccountCard(
+            title = stringResource(R.string.account_app_icon_label),
+            icon = Icons.Filled.Image
+        ) {
+            AppIconVariant.entries.forEach { variant ->
+                AppIconChoiceRow(
+                    variant = variant,
+                    selected = appearance.appIconVariant == variant,
+                    onClick = { onSetAppIconVariant(variant) }
+                )
+            }
         }
 
         AccountCard(
             title = stringResource(R.string.account_chat_label),
             icon = Icons.Filled.Settings
         ) {
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_compact_bubbles),
-                checked = chat.compactBubbles,
-                onCheckedChange = { onUpdateChatCustomization(chat.copy(compactBubbles = it)) }
-            )
-            SettingSwitchRow(
-                label = stringResource(R.string.account_switch_show_timestamps),
-                checked = chat.showTimestamps,
-                onCheckedChange = { onUpdateChatCustomization(chat.copy(showTimestamps = it)) }
-            )
             SettingCycleRow(
                 label = stringResource(R.string.account_chat_background_style),
                 value = chat.backgroundStyle.name,
@@ -1435,23 +1462,9 @@ private fun AppearanceSection(
                 label = { Text(stringResource(R.string.account_chat_background_brightness)) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
-            OutlinedTextField(
-                value = chat.backgroundColor1Hex,
-                onValueChange = { onUpdateChatCustomization(chat.copy(backgroundColor1Hex = it.sanitizeHexColor())) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.account_chat_background_color_1)) }
-            )
-            OutlinedTextField(
-                value = chat.backgroundColor2Hex,
-                onValueChange = { onUpdateChatCustomization(chat.copy(backgroundColor2Hex = it.sanitizeHexColor())) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.account_chat_background_color_2)) }
-            )
-            OutlinedTextField(
-                value = chat.backgroundColor3Hex,
-                onValueChange = { onUpdateChatCustomization(chat.copy(backgroundColor3Hex = it.sanitizeHexColor())) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.account_chat_background_color_3)) }
+            ChatColorWheelSettings(
+                chat = chat,
+                onUpdate = onUpdateChatCustomization
             )
             SettingCycleRow(
                 label = stringResource(R.string.account_chat_bubble_outgoing),
@@ -1481,27 +1494,237 @@ private fun AppearanceSection(
                     )
                 }
             )
-            OutlinedTextField(
-                value = chat.sendButtonColor1Hex,
-                onValueChange = { onUpdateChatCustomization(chat.copy(sendButtonColor1Hex = it.sanitizeHexColor())) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.account_chat_send_color_1)) }
-            )
-            OutlinedTextField(
-                value = chat.sendButtonColor2Hex,
-                onValueChange = { onUpdateChatCustomization(chat.copy(sendButtonColor2Hex = it.sanitizeHexColor())) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.account_chat_send_color_2)) }
-            )
-            OutlinedTextField(
-                value = chat.sendButtonColor3Hex,
-                onValueChange = { onUpdateChatCustomization(chat.copy(sendButtonColor3Hex = it.sanitizeHexColor())) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.account_chat_send_color_3)) }
-            )
         }
         state.statusMessage?.let {
             Text(text = it, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun AppIconChoiceRow(
+    variant: AppIconVariant,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                },
+                shape = RoundedCornerShape(8.dp)
+            ),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (selected) 0.82f else 0.48f),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Image(
+                painter = painterResource(variant.previewRes),
+                contentDescription = stringResource(variant.labelRes),
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(14.dp))
+            )
+            Text(
+                text = stringResource(variant.labelRes),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier.weight(1f)
+            )
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatColorWheelSettings(
+    chat: ChatCustomizationSettings,
+    onUpdate: (ChatCustomizationSettings) -> Unit
+) {
+    var selectedSlotName by rememberSaveable { mutableStateOf(ChatColorSlot.Background1.name) }
+    val selectedSlot = ChatColorSlot.entries.firstOrNull { it.name == selectedSlotName }
+        ?: ChatColorSlot.Background1
+    val selectedHex = selectedSlot.colorFrom(chat)
+
+    FieldSurface {
+        Text(
+            text = stringResource(R.string.account_chat_background_colors),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        ChatColorChoiceRow(
+            slots = listOf(ChatColorSlot.Background1, ChatColorSlot.Background2, ChatColorSlot.Background3),
+            selectedSlot = selectedSlot,
+            chat = chat,
+            onSelect = { selectedSlotName = it.name }
+        )
+        Text(
+            text = stringResource(R.string.account_chat_send_colors),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        ChatColorChoiceRow(
+            slots = listOf(ChatColorSlot.Send1, ChatColorSlot.Send2, ChatColorSlot.Send3),
+            selectedSlot = selectedSlot,
+            chat = chat,
+            onSelect = { selectedSlotName = it.name }
+        )
+        Text(
+            text = stringResource(R.string.account_chat_color_picker),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        ColorWheelPicker(
+            colorHex = selectedHex,
+            onColorChange = { hex ->
+                onUpdate(selectedSlot.updated(chat, hex))
+            }
+        )
+    }
+}
+
+@Composable
+private fun ChatColorChoiceRow(
+    slots: List<ChatColorSlot>,
+    selectedSlot: ChatColorSlot,
+    chat: ChatCustomizationSettings,
+    onSelect: (ChatColorSlot) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        slots.forEach { slot ->
+            val selected = slot == selectedSlot
+            val color = slot.colorFrom(chat).composeColorOrFallback(MaterialTheme.colorScheme.primary)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onSelect(slot) }
+                    .border(
+                        width = if (selected) 2.dp else 1.dp,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                        },
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = if (selected) 0.80f else 0.48f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                    )
+                    Text(
+                        text = stringResource(slot.labelRes),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorWheelPicker(
+    colorHex: String,
+    onColorChange: (String) -> Unit
+) {
+    var wheelSize by remember { mutableStateOf(IntSize.Zero) }
+    val marker = remember(colorHex, wheelSize) {
+        markerOffsetForColor(colorHex, wheelSize)
+    }
+
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(
+            modifier = Modifier
+                .size(184.dp)
+                .onSizeChanged { wheelSize = it }
+                .pointerInput(wheelSize) {
+                    detectTapGestures { offset ->
+                        colorHexFromWheelOffset(offset, wheelSize)?.let(onColorChange)
+                    }
+                }
+                .pointerInput(wheelSize) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            colorHexFromWheelOffset(offset, wheelSize)?.let(onColorChange)
+                        },
+                        onDrag = { change, _ ->
+                            colorHexFromWheelOffset(change.position, wheelSize)?.let(onColorChange)
+                        }
+                    )
+                }
+        ) {
+            val radius = min(size.width, size.height) / 2f
+            val center = Offset(size.width / 2f, size.height / 2f)
+            drawCircle(
+                brush = Brush.sweepGradient(
+                    listOf(
+                        Color.Red,
+                        Color.Yellow,
+                        Color.Green,
+                        Color.Cyan,
+                        Color.Blue,
+                        Color.Magenta,
+                        Color.Red
+                    ),
+                    center = center
+                ),
+                radius = radius,
+                center = center
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color.White, Color.Transparent),
+                    center = center,
+                    radius = radius
+                ),
+                radius = radius,
+                center = center
+            )
+            if (marker != null) {
+                drawCircle(
+                    color = Color.White,
+                    radius = 8.dp.toPx(),
+                    center = marker
+                )
+                drawCircle(
+                    color = Color.Black.copy(alpha = 0.65f),
+                    radius = 5.dp.toPx(),
+                    center = marker
+                )
+            }
         }
     }
 }
@@ -1674,17 +1897,37 @@ private fun ProfileAvatar(
 @Composable
 private fun SettingSwitchRow(
     label: String,
+    subtitle: String? = null,
     checked: Boolean,
+    enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
     FieldSurface {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (enabled) 1f else 0.45f),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = label, style = MaterialTheme.typography.bodyLarge)
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(text = label, style = MaterialTheme.typography.bodyLarge)
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Switch(
+                checked = checked,
+                enabled = enabled,
+                onCheckedChange = onCheckedChange
+            )
         }
     }
 }
@@ -1755,6 +1998,81 @@ private fun accountBackground(): Brush {
     )
 }
 
+private fun ChatColorSlot.colorFrom(chat: ChatCustomizationSettings): String {
+    return when (this) {
+        ChatColorSlot.Background1 -> chat.backgroundColor1Hex
+        ChatColorSlot.Background2 -> chat.backgroundColor2Hex
+        ChatColorSlot.Background3 -> chat.backgroundColor3Hex
+        ChatColorSlot.Send1 -> chat.sendButtonColor1Hex
+        ChatColorSlot.Send2 -> chat.sendButtonColor2Hex
+        ChatColorSlot.Send3 -> chat.sendButtonColor3Hex
+    }
+}
+
+private fun ChatColorSlot.updated(chat: ChatCustomizationSettings, colorHex: String): ChatCustomizationSettings {
+    val sanitized = colorHex.sanitizeHexColor()
+    return when (this) {
+        ChatColorSlot.Background1 -> chat.copy(
+            backgroundStyle = ChatBackgroundStyle.CustomGradient,
+            backgroundColor1Hex = sanitized
+        )
+
+        ChatColorSlot.Background2 -> chat.copy(
+            backgroundStyle = ChatBackgroundStyle.CustomGradient,
+            backgroundColor2Hex = sanitized
+        )
+
+        ChatColorSlot.Background3 -> chat.copy(
+            backgroundStyle = ChatBackgroundStyle.CustomGradient,
+            backgroundColor3Hex = sanitized
+        )
+
+        ChatColorSlot.Send1 -> chat.copy(sendButtonColor1Hex = sanitized)
+        ChatColorSlot.Send2 -> chat.copy(sendButtonColor2Hex = sanitized)
+        ChatColorSlot.Send3 -> chat.copy(sendButtonColor3Hex = sanitized)
+    }
+}
+
+private fun String.composeColorOrFallback(fallback: Color): Color {
+    return runCatching {
+        Color(android.graphics.Color.parseColor(sanitizeHexColor()))
+    }.getOrElse { fallback }
+}
+
+private fun colorHexFromWheelOffset(offset: Offset, wheelSize: IntSize): String? {
+    val width = wheelSize.width.takeIf { it > 0 } ?: return null
+    val height = wheelSize.height.takeIf { it > 0 } ?: return null
+    val centerX = width / 2f
+    val centerY = height / 2f
+    val radius = min(width, height) / 2f
+    val dx = offset.x - centerX
+    val dy = offset.y - centerY
+    val distance = sqrt(dx * dx + dy * dy).coerceAtMost(radius)
+    val saturation = (distance / radius).coerceIn(0f, 1f)
+    val hue = ((atan2(dy, dx) * 180f / PI.toFloat()) + 360f) % 360f
+    val colorInt = android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, 1f))
+    return "#${(colorInt and 0xFFFFFF).toString(16).padStart(6, '0').uppercase()}"
+}
+
+private fun markerOffsetForColor(colorHex: String, wheelSize: IntSize): Offset? {
+    val width = wheelSize.width.takeIf { it > 0 } ?: return null
+    val height = wheelSize.height.takeIf { it > 0 } ?: return null
+    val hsv = FloatArray(3)
+    val parsed = runCatching {
+        android.graphics.Color.parseColor(colorHex.sanitizeHexColor())
+    }.getOrElse {
+        android.graphics.Color.WHITE
+    }
+    android.graphics.Color.colorToHSV(parsed, hsv)
+
+    val radius = min(width, height) / 2f * hsv[1].coerceIn(0f, 1f)
+    val angle = hsv[0] * PI.toFloat() / 180f
+    return Offset(
+        x = width / 2f + cos(angle) * radius,
+        y = height / 2f + sin(angle) * radius
+    )
+}
+
 private fun <T> nextEntry(entries: List<T>, current: T): T {
     val index = entries.indexOf(current)
     return entries[(index + 1).floorMod(entries.size)]
@@ -1772,6 +2090,35 @@ private fun Int.floorMod(modulus: Int): Int {
 private fun String.sanitizeHexColor(): String {
     val clean = trim().removePrefix("#").filter { it.isDigit() || it.lowercaseChar() in 'a'..'f' }.take(6)
     return if (clean.isEmpty()) "#" else "#${clean.uppercase()}"
+}
+
+private fun android.content.Context.openSupportEmail(
+    subject: String,
+    body: String
+): String {
+    val uri = Uri.parse(
+        "mailto:$SupportEmail?subject=${Uri.encode(subject)}&body=${Uri.encode(body)}"
+    )
+    val intent = Intent(Intent.ACTION_SENDTO, uri)
+    return runCatching {
+        startActivity(intent)
+        getString(R.string.profile_security_mail_opened)
+    }.getOrElse {
+        getString(R.string.profile_security_mail_failed)
+    }
+}
+
+private fun android.content.Context.openSystemNotificationSettings() {
+    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+        putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+    }
+    runCatching { startActivity(intent) }.onFailure {
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+        )
+    }
 }
 
 private fun String.digitsOrNull(): Int? {

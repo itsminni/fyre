@@ -42,7 +42,11 @@ class MockEventsDataRepository : EventsRepository {
         description: String,
         deadlineText: String,
         capacity: Int,
-        rules: List<String>
+        rules: List<String>,
+        maleLimit: Int,
+        femaleLimit: Int,
+        cancellationDeadlineText: String,
+        adminEmails: String
     ): Result<Unit> {
         val updated = MockEventsRepository.adminUpdateEvent(
             eventId = eventId,
@@ -53,7 +57,11 @@ class MockEventsDataRepository : EventsRepository {
             description = description,
             deadlineText = deadlineText,
             capacity = capacity,
-            rules = rules
+            rules = rules,
+            maleLimit = maleLimit,
+            femaleLimit = femaleLimit,
+            cancellationDeadlineText = cancellationDeadlineText,
+            adminEmails = adminEmails
         )
 
         return if (updated) {

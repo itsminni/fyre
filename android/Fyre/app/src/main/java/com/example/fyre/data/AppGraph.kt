@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.fyre.data.appwrite.AppwriteConfiguration
 import com.example.fyre.data.appwrite.AppwriteConfigurationException
 import com.example.fyre.data.appwrite.AppwriteGateway
+import com.example.fyre.data.local.LocalMatchRequestStore
+import com.example.fyre.data.local.LocalRecentChatStore
 import com.example.fyre.data.model.User
 import com.example.fyre.data.model.UserProfile
 import com.example.fyre.data.repository.AppwriteAuthRepository
@@ -33,6 +35,8 @@ class AppGraph(
     val appwriteConfiguration: AppwriteConfiguration? = AppwriteConfiguration.fromBuildConfig()
     private val appwriteGateway: AppwriteGateway? = appwriteConfiguration
         ?.let { configuration -> AppwriteGateway(appContext, configuration) }
+    val localMatchRequestStore = LocalMatchRequestStore(appContext)
+    private val localRecentChatStore = LocalRecentChatStore(appContext)
 
     val authRepository: AuthRepository = appwriteGateway
         ?.let { gateway -> AppwriteAuthRepository(gateway) }
@@ -41,7 +45,12 @@ class AppGraph(
     val discoveryRepository: DiscoveryRepository = if (
         appwriteConfiguration != null && appwriteGateway != null
     ) {
-        AppwriteDiscoveryRepository(appwriteGateway, appwriteConfiguration)
+        AppwriteDiscoveryRepository(
+            appwriteGateway,
+            appwriteConfiguration,
+            localMatchRequestStore,
+            localRecentChatStore
+        )
     } else {
         BackendUnavailableDiscoveryRepository(backendUnavailableMessage)
     }
@@ -49,7 +58,7 @@ class AppGraph(
     val messagesRepository: MessagesRepository = if (
         appwriteConfiguration != null && appwriteGateway != null
     ) {
-        AppwriteMessagesRepository(appwriteGateway, appwriteConfiguration)
+        AppwriteMessagesRepository(appwriteGateway, appwriteConfiguration, localRecentChatStore)
     } else {
         BackendUnavailableMessagesRepository(backendUnavailableMessage)
     }
@@ -151,6 +160,11 @@ private class BackendUnavailableMessagesRepository(
 
     override suspend fun markAsRead(threadId: String): Result<Unit> = unavailable()
 
+    override suspend fun setThreadNotifications(threadId: String, enabled: Boolean): Result<MessageThread> =
+        unavailable()
+
+    override suspend fun markCurrentUserPresence(isOnline: Boolean): Result<Unit> = unavailable()
+
     override suspend fun updateRelationship(threadId: String, action: RelationshipAction): Result<Unit> =
         unavailable()
 
@@ -184,7 +198,11 @@ private class BackendUnavailableEventsRepository(
         description: String,
         deadlineText: String,
         capacity: Int,
-        rules: List<String>
+        rules: List<String>,
+        maleLimit: Int,
+        femaleLimit: Int,
+        cancellationDeadlineText: String,
+        adminEmails: String
     ): Result<Unit> = unavailable()
 
     override suspend fun adminSetParticipantStatus(

@@ -103,7 +103,12 @@ fun EventsScreen(
                 viewModel.joinSelected()
                 val updatedSelected = viewModel.selectedEvent()
                 val shouldNotify = notificationSettings.pushEnabled && notificationSettings.eventReminders
-                if (updatedSelected != null && shouldNotify && updatedSelected.userState == EventUserState.Registered) {
+                if (
+                    updatedSelected != null &&
+                    shouldNotify &&
+                    (updatedSelected.userState == EventUserState.Registered ||
+                        updatedSelected.userState == EventUserState.Promoted)
+                ) {
                     EventReminderScheduler.scheduleSimulatedReminder(
                         context = context,
                         eventId = updatedSelected.id,
@@ -119,7 +124,18 @@ fun EventsScreen(
             },
             onCancel = { viewModel.cancelSelected() },
             onWaitlist = { viewModel.waitlistSelected() },
-            onAdminUpdateEvent = { title, dateText, place, description, deadlineText, capacity, rules ->
+            onAdminUpdateEvent = {
+                    title,
+                    dateText,
+                    place,
+                    description,
+                    deadlineText,
+                    capacity,
+                    rules,
+                    maleLimit,
+                    femaleLimit,
+                    cancellationDeadlineText,
+                    adminEmails ->
                 viewModel.adminUpdateSelectedEvent(
                     title = title,
                     dateText = dateText,
@@ -127,7 +143,11 @@ fun EventsScreen(
                     description = description,
                     deadlineText = deadlineText,
                     capacity = capacity,
-                    rules = rules
+                    rules = rules,
+                    maleLimit = maleLimit,
+                    femaleLimit = femaleLimit,
+                    cancellationDeadlineText = cancellationDeadlineText,
+                    adminEmails = adminEmails
                 )
             },
             onAdminSetParticipantStatus = { participantId, status ->
@@ -423,6 +443,7 @@ private fun EventMiniBadge(
 private fun registrationBadge(event: EventItem): String? {
     return when (event.userState) {
         EventUserState.Registered -> stringResource(R.string.events_badge_confirmed)
+        EventUserState.Promoted -> stringResource(R.string.events_badge_promoted)
         EventUserState.Waitlist -> stringResource(R.string.events_badge_waitlisted)
         EventUserState.NotRegistered,
         EventUserState.Closed -> null

@@ -38,20 +38,6 @@ import com.example.fyre.ui.components.FyreButton
 import com.example.fyre.ui.theme.FyreGradientEnd
 import com.example.fyre.ui.theme.FyreGradientStart
 
-/**
- * Schermata di Benvenuto (Welcome / Onboarding).
- *
- * È la prima schermata che l'utente vede all'apertura dell'app.
- * Mostra il brand "Fyre" con animazioni di entrata, una breve
- * descrizione e due pulsanti per accedere o registrarsi.
- *
- * Design: gradiente caldo di sfondo, logo grande animato,
- * layout centrato e pulsanti ben distinti (filled + outlined).
- *
- * @param onNavigateToLogin Callback per navigare alla schermata di login
- * @param onNavigateToRegister Callback per navigare alla schermata di registrazione
- * @param onNavigateToTerms Callback per navigare a termini e privacy
- */
 @Composable
 fun WelcomeScreen(
     onNavigateToLogin: () -> Unit,
@@ -60,44 +46,36 @@ fun WelcomeScreen(
 ) {
     val appName = stringResource(R.string.app_name)
 
-    // ============================================================
-    // Animazioni di entrata
-    // ============================================================
-
-    // Animazione scala per il logo (parte da 0.5 e arriva a 1.0)
-    val logoScale = remember { Animatable(0.5f) }
-    // Animazione opacità per il contenuto testuale
+val logoScale = remember { Animatable(0.5f) }
+    
     val contentAlpha = remember { Animatable(0f) }
-    // Animazione opacità per i bottoni (appare dopo il testo)
+    
     val buttonsAlpha = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
-        // 1. Anima il logo
+        
         logoScale.animateTo(
             targetValue = 1f,
             animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
         )
-        // 2. Anima il testo
+        
         contentAlpha.animateTo(
             targetValue = 1f,
             animationSpec = tween(durationMillis = 600)
         )
-        // 3. Anima i bottoni
+        
         buttonsAlpha.animateTo(
             targetValue = 1f,
             animationSpec = tween(durationMillis = 500)
         )
     }
 
-    // ============================================================
-    // Layout principale
-    // ============================================================
-    Box(
+Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // --- Cerchio decorativo in alto a destra ---
+        
         Box(
             modifier = Modifier
                 .size(200.dp)
@@ -115,7 +93,7 @@ fun WelcomeScreen(
                 )
         )
 
-        // --- Cerchio decorativo in basso a sinistra ---
+        
         Box(
             modifier = Modifier
                 .size(260.dp)
@@ -133,17 +111,14 @@ fun WelcomeScreen(
                 )
         )
 
-        // ============================================================
-        // Contenuto centrato
-        // ============================================================
-        Column(
+Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // --- Logo animato ---
+            
             Text(
                 text = "🔥",
                 fontSize = 80.sp,
@@ -153,7 +128,7 @@ fun WelcomeScreen(
                 textAlign = TextAlign.Center
             )
 
-            // --- Nome app ---
+            
             Text(
                 text = appName,
                 style = MaterialTheme.typography.displayLarge.copy(
@@ -168,7 +143,7 @@ fun WelcomeScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // --- Tagline / descrizione breve ---
+            
             Column(
                 modifier = Modifier.alpha(contentAlpha.value),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -193,22 +168,19 @@ fun WelcomeScreen(
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            // ============================================================
-            // Bottoni di azione
-            // ============================================================
-            Column(
+Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .alpha(buttonsAlpha.value),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // --- Bottone primario: Accedi ---
+                
                 FyreButton(
                     text = stringResource(R.string.welcome_cta_login),
                     onClick = onNavigateToLogin
                 )
 
-                // --- Bottone secondario: Registrati (outlined) ---
+                
                 OutlinedButton(
                     onClick = onNavigateToRegister,
                     modifier = Modifier
@@ -236,10 +208,7 @@ fun WelcomeScreen(
             }
         }
 
-        // ============================================================
-        // Footer — testo in basso
-        // ============================================================
-        Text(
+Text(
             text = stringResource(R.string.welcome_footer, appName),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.3f),
@@ -250,6 +219,4 @@ fun WelcomeScreen(
         )
     }
 }
-
-
 

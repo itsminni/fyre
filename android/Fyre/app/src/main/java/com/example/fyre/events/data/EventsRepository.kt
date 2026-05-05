@@ -24,7 +24,11 @@ interface EventsRepository {
         description: String,
         deadlineText: String,
         capacity: Int,
-        rules: List<String>
+        rules: List<String>,
+        maleLimit: Int = (capacity / 2).coerceAtLeast(1),
+        femaleLimit: Int = (capacity / 2).coerceAtLeast(1),
+        cancellationDeadlineText: String = deadlineText,
+        adminEmails: String = ""
     ): Result<Unit>
 
     suspend fun adminSetParticipantStatus(

@@ -27,16 +27,6 @@ import com.example.fyre.ui.profile.ProfileCompletionScreen
 import com.example.fyre.ui.welcome.WelcomeScreen
 import kotlinx.coroutines.launch
 
-/**
- * Grafo di navigazione dell'app Fyre.
- *
- * Definisce tutte le schermate e le transizioni tra di esse.
- * Il ViewModel è condiviso tra le schermate di autenticazione per
- * mantenere lo stato dei campi durante la navigazione.
- *
- * @param navController Il controller di navigazione
- * @param authViewModel Il ViewModel condiviso per l'autenticazione
- */
 @Composable
 fun NavGraph(
     navController: NavHostController,
@@ -56,7 +46,7 @@ fun NavGraph(
         return
     }
 
-    // Root navigation guidata dallo stato logico della sessione backend.
+    
     LaunchedEffect(sessionState, currentRoute) {
         when (sessionState) {
             AppSessionState.Loading -> Unit

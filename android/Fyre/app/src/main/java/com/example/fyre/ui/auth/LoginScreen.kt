@@ -42,17 +42,6 @@ import com.example.fyre.ui.components.FyreButton
 import com.example.fyre.ui.components.FyrePasswordField
 import com.example.fyre.ui.components.FyreTextField
 
-/**
- * Schermata di Login.
- *
- * Presenta un form con email e password per l'accesso all'app.
- * Design moderno con card rialzata su sfondo colorato e titolo "Fyre".
- *
- * @param viewModel ViewModel condiviso per l'autenticazione
- * @param onNavigateBack Callback per tornare alla schermata precedente (Welcome)
- * @param onNavigateToRegister Callback per navigare alla registrazione
- * @param onLoginSuccess Callback eseguita dopo un login riuscito
- */
 @Composable
 fun LoginScreen(
     viewModel: AuthViewModel,
@@ -62,7 +51,7 @@ fun LoginScreen(
 ) {
     val appName = stringResource(R.string.app_name)
 
-    // Raccoglie lo stato dal ViewModel
+    
     val email by viewModel.email.collectAsState()
     val password by viewModel.password.collectAsState()
     val emailError by viewModel.emailError.collectAsState()
@@ -71,7 +60,7 @@ fun LoginScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val authState by viewModel.authState.collectAsState()
 
-    // Naviga automaticamente alla Home se il login ha successo
+    
     LaunchedEffect(authState) {
         if (authState is AuthState.Success) {
             onLoginSuccess()
@@ -86,17 +75,15 @@ fun LoginScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()) // Scrollabile per schermi piccoli
+                .verticalScroll(rememberScrollState()) 
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // ============================================================
-            // Header — Logo e titolo dell'app
-            // ============================================================
-            Spacer(modifier = Modifier.height(48.dp))
 
-            // Icona fuoco stilizzata con emoji (semplice ma efficace)
+Spacer(modifier = Modifier.height(48.dp))
+
+            
             Text(
                 text = "🔥",
                 style = MaterialTheme.typography.displayLarge,
@@ -106,7 +93,7 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Nome dell'app
+            
             Text(
                 text = appName,
                 style = MaterialTheme.typography.displayLarge,
@@ -114,7 +101,7 @@ fun LoginScreen(
                 fontWeight = FontWeight.Bold
             )
 
-            // Sottotitolo
+            
             Text(
                 text = stringResource(R.string.auth_login_subtitle),
                 style = MaterialTheme.typography.bodyLarge,
@@ -123,10 +110,7 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // ============================================================
-            // Card con il form di login
-            // ============================================================
-            Card(
+Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -140,7 +124,7 @@ fun LoginScreen(
                         .padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // --- Campo Email ---
+                    
                     FyreTextField(
                         value = email,
                         onValueChange = { viewModel.updateEmail(it) },
@@ -157,7 +141,7 @@ fun LoginScreen(
                         }
                     )
 
-                    // --- Campo Password ---
+                    
                     FyrePasswordField(
                         value = password,
                         onValueChange = { viewModel.updatePassword(it) },
@@ -173,7 +157,7 @@ fun LoginScreen(
                         }
                     )
 
-                    // --- Messaggio di errore ---
+                    
                     AnimatedVisibility(
                         visible = globalError != null,
                         enter = fadeIn(),
@@ -192,7 +176,7 @@ fun LoginScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // --- Bottone Login ---
+                    
                     FyreButton(
                         text = if (isLoading) {
                             stringResource(R.string.auth_login_loading)
@@ -207,10 +191,7 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // ============================================================
-            // Link alla registrazione
-            // ============================================================
-            TextButton(onClick = onNavigateToRegister) {
+TextButton(onClick = onNavigateToRegister) {
                 Text(
                     text = stringResource(R.string.auth_login_register_prompt),
                     style = MaterialTheme.typography.bodyMedium,
@@ -222,9 +203,7 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // --- Pulsante Indietro (torna alla Welcome) ---
-        // Posizionato per ultimo nel Box così resta sopra la Column e riceve i tocchi
-        IconButton(
+IconButton(
             onClick = onNavigateBack,
             modifier = Modifier
                 .align(Alignment.TopStart)

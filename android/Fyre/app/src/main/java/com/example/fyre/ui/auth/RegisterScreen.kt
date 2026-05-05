@@ -45,18 +45,6 @@ import com.example.fyre.ui.components.FyreButton
 import com.example.fyre.ui.components.FyrePasswordField
 import com.example.fyre.ui.components.FyreTextField
 
-/**
- * Schermata di Registrazione.
- *
- * Form completo con nome, email, password e conferma password.
- * Include validazione in tempo reale della robustezza della password.
- *
- * @param viewModel ViewModel condiviso per l'autenticazione
- * @param onNavigateBack Callback per tornare alla schermata precedente
- * @param onNavigateToLogin Callback per tornare al login
- * @param onNavigateToTerms Callback per aprire termini/privacy
- * @param onRegisterSuccess Callback eseguita dopo una registrazione riuscita
- */
 @Composable
 fun RegisterScreen(
     viewModel: AuthViewModel,
@@ -67,7 +55,7 @@ fun RegisterScreen(
 ) {
     val appName = stringResource(R.string.app_name)
 
-    // Raccoglie lo stato dal ViewModel
+    
     val displayName by viewModel.displayName.collectAsState()
     val email by viewModel.email.collectAsState()
     val password by viewModel.password.collectAsState()
@@ -82,7 +70,7 @@ fun RegisterScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val authState by viewModel.authState.collectAsState()
 
-    // Naviga automaticamente alla Home se la registrazione ha successo
+    
     LaunchedEffect(authState) {
         if (authState is AuthState.Success) {
             onRegisterSuccess()
@@ -102,10 +90,8 @@ fun RegisterScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // ============================================================
-            // Header — Titolo della schermata
-            // ============================================================
-            Spacer(modifier = Modifier.height(32.dp))
+
+Spacer(modifier = Modifier.height(32.dp))
 
             Text(
                 text = stringResource(R.string.auth_register_title),
@@ -122,10 +108,7 @@ fun RegisterScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // ============================================================
-            // Card con il form di registrazione
-            // ============================================================
-            Card(
+Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -139,7 +122,7 @@ fun RegisterScreen(
                         .padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // --- Campo Nome ---
+                    
                     FyreTextField(
                         value = displayName,
                         onValueChange = { viewModel.updateDisplayName(it) },
@@ -156,7 +139,7 @@ fun RegisterScreen(
                         }
                     )
 
-                    // --- Campo Email ---
+                    
                     FyreTextField(
                         value = email,
                         onValueChange = { viewModel.updateEmail(it) },
@@ -173,7 +156,7 @@ fun RegisterScreen(
                         }
                     )
 
-                    // --- Campo Password con validazione in tempo reale ---
+                    
                     FyrePasswordField(
                         value = password,
                         onValueChange = { viewModel.updatePassword(it) },
@@ -194,7 +177,7 @@ fun RegisterScreen(
                             }
                     )
 
-                    // --- Campo Conferma Password ---
+                    
                     FyrePasswordField(
                         value = confirmPassword,
                         onValueChange = { viewModel.updateConfirmPassword(it) },
@@ -240,7 +223,7 @@ fun RegisterScreen(
                         )
                     }
 
-                    // --- Messaggio di errore dal server/repository ---
+                    
                     AnimatedVisibility(
                         visible = globalError != null,
                         enter = fadeIn(),
@@ -259,7 +242,7 @@ fun RegisterScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // --- Bottone Registrazione ---
+                    
                     FyreButton(
                         text = if (isLoading) {
                             stringResource(R.string.auth_register_loading)
@@ -274,10 +257,7 @@ fun RegisterScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // ============================================================
-            // Link al login
-            // ============================================================
-            TextButton(onClick = onNavigateToLogin) {
+TextButton(onClick = onNavigateToLogin) {
                 Text(
                     text = stringResource(R.string.auth_register_login_prompt),
                     style = MaterialTheme.typography.bodyMedium,
@@ -289,9 +269,7 @@ fun RegisterScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // --- Pulsante Indietro (torna alla schermata precedente) ---
-        // Posizionato per ultimo nel Box così resta sopra la Column e riceve i tocchi
-        IconButton(
+IconButton(
             onClick = onNavigateBack,
             modifier = Modifier
                 .align(Alignment.TopStart)

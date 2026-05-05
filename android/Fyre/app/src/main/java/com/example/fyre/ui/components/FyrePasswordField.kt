@@ -17,26 +17,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 
-/**
- * Campo password personalizzato con lo stile Fyre.
- *
- * Estende il design di [FyreTextField] con funzionalità specifiche per le password:
- * - Toggle per mostrare/nascondere la password
- * - Icona a destra per il toggle di visibilità
- * - VisualTransformation per mascherare i caratteri
- *
- * @param value Valore corrente del campo
- * @param onValueChange Callback eseguita quando il valore cambia
- * @param label Etichetta del campo
- * @param modifier Modifier opzionale
- * @param leadingIcon Icona a sinistra opzionale (composable)
- * @param isError Se il campo è in stato di errore
- * @param supportingText Testo di supporto/errore sotto il campo
- */
 @Composable
 fun FyrePasswordField(
     value: String,
@@ -47,7 +32,7 @@ fun FyrePasswordField(
     isError: Boolean = false,
     supportingText: String? = null
 ) {
-    // Stato locale per la visibilità della password (sopravvive alla ricomposizione)
+    
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
 
     OutlinedTextField(
@@ -70,13 +55,13 @@ fun FyrePasswordField(
                 )
             }
         } else null,
-        // Mostra/nasconde i caratteri della password
+        
         visualTransformation = if (passwordVisible) {
             VisualTransformation.None
         } else {
             PasswordVisualTransformation()
         },
-        // Icona toggle visibilità password
+        
         trailingIcon = {
             IconButton(onClick = { passwordVisible = !passwordVisible }) {
                 Icon(
@@ -96,12 +81,24 @@ fun FyrePasswordField(
         },
         shape = RoundedCornerShape(16.dp),
         colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = RegistrationFieldText,
+            unfocusedTextColor = RegistrationFieldText,
+            errorTextColor = RegistrationFieldText,
+            focusedContainerColor = Color.White,
+            unfocusedContainerColor = Color.White,
+            errorContainerColor = Color.White,
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+            unfocusedBorderColor = RegistrationFieldBorder,
             focusedLabelColor = MaterialTheme.colorScheme.primary,
-            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unfocusedLabelColor = RegistrationFieldLabel,
+            focusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+            unfocusedSupportingTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
             cursorColor = MaterialTheme.colorScheme.primary
         )
     )
 }
+
+private val RegistrationFieldText = Color(0xFF6F6877)
+private val RegistrationFieldLabel = Color(0xFFA8A1B0)
+private val RegistrationFieldBorder = Color(0xFF8D8797)
 

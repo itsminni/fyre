@@ -1,5 +1,6 @@
 package com.example.fyre.account.model
 
+import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import com.example.fyre.R
 import com.example.fyre.data.model.ProfileFieldValues
@@ -31,16 +32,13 @@ data class ProfileDraft(
     val maxDistanceKm: Int? = 50,
     val smokes: Boolean = false,
     val drinks: Boolean = false,
+    val excludeSmokers: Boolean = false,
+    val excludeDrinkers: Boolean = false,
     val avatarUri: String? = null,
     val profilePhotoUris: List<String> = emptyList()
 )
 
 data class DiscoveryPreferences(
-    val minAge: Int = 18,
-    val maxAge: Int = 35,
-    val maxDistanceKm: Int = 30,
-    val showOnlyVerified: Boolean = false,
-    val intent: String = "Tutti",
     val showAge: Boolean = true,
     val showDistance: Boolean = true,
     val showIntent: Boolean = true,
@@ -53,8 +51,7 @@ data class NotificationSettings(
     val pushEnabled: Boolean = true,
     val matchNotifications: Boolean = true,
     val messageNotifications: Boolean = true,
-    val eventReminders: Boolean = true,
-    val marketingUpdates: Boolean = false
+    val eventReminders: Boolean = true
 )
 
 enum class ChatBackgroundStyle {
@@ -76,8 +73,6 @@ enum class ChatBubblePalette {
 }
 
 data class ChatCustomizationSettings(
-    val compactBubbles: Boolean = false,
-    val showTimestamps: Boolean = true,
     val backgroundStyle: ChatBackgroundStyle = ChatBackgroundStyle.DefaultDark,
     val backgroundBrightness: Float = 0f,
     val backgroundColor1Hex: String = "#3F4755",
@@ -90,27 +85,52 @@ data class ChatCustomizationSettings(
     val sendButtonColor3Hex: String = "#E14D33"
 )
 
-data class SecuritySettings(
-    val biometricUnlock: Boolean = false,
-    val twoFactorEnabled: Boolean = false,
-    val hideOnlineStatus: Boolean = false,
-    val sessionPinEnabled: Boolean = false
-)
-
 enum class ThemeMode {
     System,
     Light,
     Dark
 }
 
+enum class AppLanguage(
+    @param:StringRes val labelRes: Int,
+    val languageTag: String?
+) {
+    System(R.string.account_language_system, null),
+    English(R.string.account_language_english, "en"),
+    Italian(R.string.account_language_italian, "it")
+}
+
+enum class AppIconVariant(
+    @param:StringRes val labelRes: Int,
+    @param:DrawableRes val previewRes: Int,
+    val launcherComponentName: String
+) {
+    Fyre1(
+        labelRes = R.string.account_app_icon_fyre_1,
+        previewRes = R.drawable.logofyre1,
+        launcherComponentName = "com.example.fyre.MainActivityIconFyre1"
+    ),
+    Fyre2(
+        labelRes = R.string.account_app_icon_fyre_2,
+        previewRes = R.drawable.logofyre2,
+        launcherComponentName = "com.example.fyre.MainActivityIconFyre2"
+    ),
+    Fyre3(
+        labelRes = R.string.account_app_icon_fyre_3,
+        previewRes = R.drawable.logofyre3,
+        launcherComponentName = "com.example.fyre.MainActivityIconFyre3"
+    )
+}
+
 data class AppearanceSettings(
     val themeMode: ThemeMode = ThemeMode.System,
-    val dynamicColor: Boolean = true,
-    val compactMode: Boolean = false
+    val appLanguage: AppLanguage = AppLanguage.System,
+    val appIconVariant: AppIconVariant = AppIconVariant.Fyre1
 )
 
 enum class EventHistoryStatus {
     Registered,
+    Promoted,
     Attended,
     Cancelled,
     Waitlisted
@@ -132,7 +152,6 @@ data class AccountUiState(
     val discoveryPreferences: DiscoveryPreferences = DiscoveryPreferences(),
     val chatCustomizationSettings: ChatCustomizationSettings = ChatCustomizationSettings(),
     val notificationSettings: NotificationSettings = NotificationSettings(),
-    val securitySettings: SecuritySettings = SecuritySettings(),
     val appearanceSettings: AppearanceSettings = AppearanceSettings(),
     val eventHistory: List<EventHistoryItem> = emptyList(),
     val statusMessage: String? = null,
