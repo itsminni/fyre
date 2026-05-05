@@ -2,7 +2,7 @@
 
 ## Italiano
 
-Questa cartella contiene l'app Android di Fyre, sviluppata in Kotlin con Jetpack Compose. La versione Android copre autenticazione, completamento profilo, discovery, messaggi, eventi, account, preferenze locali, notifiche e integrazione Appwrite tramite REST e funzioni backend.
+Questa cartella contiene l'app Android di Fyre, sviluppata in Kotlin con Jetpack Compose.
 
 ### Requisiti
 
@@ -10,7 +10,7 @@ Questa cartella contiene l'app Android di Fyre, sviluppata in Kotlin con Jetpack
 - JDK compatibile con il progetto Gradle.
 - Android SDK configurato.
 - Emulatore o dispositivo Android.
-- Configurazione Appwrite tramite `local.properties`, variabili Gradle o variabili d'ambiente.
+- Configurazione Appwrite pubblica già inclusa nel progetto.
 
 ### Quick start
 
@@ -20,10 +20,10 @@ Questa cartella contiene l'app Android di Fyre, sviluppata in Kotlin con Jetpack
    cd android/Fyre
    ```
 
-2. Compilare la build debug:
+2. Compilare la build release:
 
    ```bash
-   ./gradlew assembleDebug
+   ./gradlew assembleRelease
    ```
 
 3. Per eseguire i test unitari:
@@ -52,22 +52,6 @@ Le librerie esterne sono gestite da Gradle tramite `gradle/libs.versions.toml` e
 
 Non serve installarle manualmente: Gradle le scarica automaticamente durante build o test.
 
-### Configurazione backend
-
-L'app legge i valori Appwrite da proprieta Gradle, `local.properties` o variabili d'ambiente. I nomi principali includono:
-
-- `APPWRITE_BACKEND_ENABLED`
-- `APPWRITE_ENDPOINT`
-- `APPWRITE_PROJECT_ID`
-- `APPWRITE_DATABASE_ID`
-- `APPWRITE_PROFILES_TABLE_ID`
-- `APPWRITE_EVENTS_TABLE_ID`
-- `APPWRITE_THREADS_TABLE_ID`
-- `APPWRITE_MESSAGES_TABLE_ID`
-- `APPWRITE_DISCOVER_PROFILES_FUNCTION_ID`
-- `APPWRITE_RECORD_SWIPE_FUNCTION_ID`
-- `APPWRITE_SEND_MESSAGE_FUNCTION_ID`
-
 ### Struttura principale
 
 - `app/src/main/java/com/example/fyre/ui`: flussi UI principali.
@@ -79,7 +63,7 @@ L'app legge i valori Appwrite da proprieta Gradle, `local.properties` o variabil
 
 ## English
 
-This folder contains the Fyre Android app, built with Kotlin and Jetpack Compose. The Android version covers authentication, profile completion, discovery, messages, events, account management, local preferences, notifications, and Appwrite integration through REST and backend functions.
+This folder contains the Fyre Android app, built with Kotlin and Jetpack Compose.
 
 ### Requirements
 
@@ -87,7 +71,7 @@ This folder contains the Fyre Android app, built with Kotlin and Jetpack Compose
 - A JDK compatible with the Gradle project.
 - Android SDK configured.
 - Android emulator or physical device.
-- Appwrite configuration through `local.properties`, Gradle properties, or environment variables.
+- Public Appwrite configuration already included in the project.
 
 ### Quick start
 
@@ -97,10 +81,10 @@ This folder contains the Fyre Android app, built with Kotlin and Jetpack Compose
    cd android/Fyre
    ```
 
-2. Build the debug version:
+2. Build the release version:
 
    ```bash
-   ./gradlew assembleDebug
+   ./gradlew assembleRelease
    ```
 
 3. Run unit tests:
@@ -111,7 +95,7 @@ This folder contains the Fyre Android app, built with Kotlin and Jetpack Compose
 
 4. To run the app, open `android/Fyre` in Android Studio and use Run on an emulator or device.
 
-### External libraries
+### External Libraries
 
 External libraries are managed by Gradle through `gradle/libs.versions.toml` and `app/build.gradle.kts`. The main ones are:
 
@@ -129,23 +113,7 @@ External libraries are managed by Gradle through `gradle/libs.versions.toml` and
 
 They do not need to be installed manually: Gradle downloads them automatically during build or test tasks.
 
-### Backend configuration
-
-The app reads Appwrite values from Gradle properties, `local.properties`, or environment variables. Main names include:
-
-- `APPWRITE_BACKEND_ENABLED`
-- `APPWRITE_ENDPOINT`
-- `APPWRITE_PROJECT_ID`
-- `APPWRITE_DATABASE_ID`
-- `APPWRITE_PROFILES_TABLE_ID`
-- `APPWRITE_EVENTS_TABLE_ID`
-- `APPWRITE_THREADS_TABLE_ID`
-- `APPWRITE_MESSAGES_TABLE_ID`
-- `APPWRITE_DISCOVER_PROFILES_FUNCTION_ID`
-- `APPWRITE_RECORD_SWIPE_FUNCTION_ID`
-- `APPWRITE_SEND_MESSAGE_FUNCTION_ID`
-
-### Main structure
+### Main Structure
 
 - `app/src/main/java/com/example/fyre/ui`: main UI flows.
 - `app/src/main/java/com/example/fyre/discover`: discovery and compatible profiles.

@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChatAvatar } from '../../components/messages/ChatAvatar';
 import { Button } from '../../components/ui/Button';
 import { useAppStore } from '../../hooks/useAppStore';
-import { formatLastSeen } from '../../context/AppContext';
 import { ChatAttachment, ChatMessage } from '../../types/models';
+import { formatLastSeen } from '../../utils/formatLastSeen';
 
 const CHAT_ATTACHMENT_EXTENSIONS = [
   'heif',

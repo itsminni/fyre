@@ -12,6 +12,31 @@ val localProperties = Properties().apply {
     }
 }
 
+val defaultAppwriteConfig = mapOf(
+    "APPWRITE_ENDPOINT" to "http://localhost/v1",
+    "APPWRITE_PROJECT_ID" to "fyre-development",
+    "APPWRITE_DATABASE_ID" to "fyre",
+    "APPWRITE_PROFILES_TABLE_ID" to "profiles",
+    "APPWRITE_AVATARS_BUCKET_ID" to "avatars",
+    "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID" to "chat-attachments",
+    "APPWRITE_EVENTS_TABLE_ID" to "events",
+    "APPWRITE_EVENT_REGISTRATIONS_TABLE_ID" to "eventregistrations",
+    "APPWRITE_THREADS_TABLE_ID" to "threads",
+    "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID" to "threadparticipants",
+    "APPWRITE_MESSAGES_TABLE_ID" to "messages",
+    "APPWRITE_SWIPES_TABLE_ID" to "swipe",
+    "APPWRITE_MATCHES_TABLE_ID" to "matches",
+    "APPWRITE_RELATIONSHIPS_TABLE_ID" to "relationships",
+    "APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID" to "registerforevent",
+    "APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID" to "canceleventregistration",
+    "APPWRITE_EVENT_ADMIN_FUNCTION_ID" to "manageeventadmin",
+    "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID" to "createorgetthread",
+    "APPWRITE_SEND_MESSAGE_FUNCTION_ID" to "sendmessage",
+    "APPWRITE_RECORD_SWIPE_FUNCTION_ID" to "recordswipe",
+    "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID" to "discoverprofiles",
+    "APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID" to "managerelationship"
+)
+
 fun appwriteConfigValue(name: String): String {
     val fromGradleProperty = providers.gradleProperty(name).orNull
     if (!fromGradleProperty.isNullOrBlank()) {
@@ -28,7 +53,7 @@ fun appwriteConfigValue(name: String): String {
         return fromEnvironment.trim()
     }
 
-    return ""
+    return defaultAppwriteConfig[name].orEmpty()
 }
 
 fun asBuildConfigString(value: String): String {

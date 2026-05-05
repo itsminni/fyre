@@ -20,7 +20,6 @@ import {
   EventAdminMutableStatus,
   EventAdminState,
   EventHistoryItem,
-  LocalUserSummary,
   MainEventConfig,
   MainEventInfo,
   MainEventSnapshot,
@@ -40,9 +39,7 @@ import {
   normalizeUser,
   normalizeEmail
 } from '../types/models';
-import { backendApi as mockBackendApi } from '../services/mockBackend';
 import {
-  createDefaultPersistedState,
   loadPersistedState,
   persistState
 } from '../services/persistence';
@@ -90,7 +87,6 @@ interface AppContextValue {
   persisted: PersistedAppState;
   isBackendMode: boolean;
   currentUser: User | null;
-  localUsers: LocalUserSummary[];
   discoverProfiles: DiscoverProfile[];
   mainEventConfig: MainEventConfig;
   mainEventInfo: MainEventInfo;
@@ -106,13 +102,8 @@ interface AppContextValue {
   unreadThreadsCount: number;
   notificationPermission: NotificationPermission | 'unsupported';
   signUp(email: string, password: string): Promise<string | null>;
-  createLocalUser(email: string, password: string): string | null;
   logIn(email: string, password: string): Promise<string | null>;
   logOut(): Promise<void>;
-  switchLocalUser(email: string): string | null;
-  removeLocalUser(email: string): string | null;
-  seedDemoUsers(): number;
-  resetLocalData(): void;
   updateProfileImage(imageData: string): Promise<string | null>;
   updateProfileImages(imageDataItems: string[]): Promise<string | null>;
   updateProfile(input: ProfileUpdateInput): Promise<string | null>;
@@ -181,106 +172,19 @@ const EVENT_ADMIN_MESSAGE_BY_KEY: Record<string, string> = {
 const EVENT_MESSAGE_BY_KEY: Record<string, string> = {
   'events.error.genderRequired': 'Completa il genere nel profilo prima di iscriverti.',
   'events.error.genderUnsupported': 'Per questo evento sono ammessi solo uomo/donna.',
-  'events.error.orientationUnsupported': 'Per questo evento e richiesto orientamento straight.',
+  'events.error.orientationUnsupported': 'Per questo evento è richiesto orientamento straight.',
   'events.error.notRegistered': 'Nessuna iscrizione evento trovata.',
   'events.error.registrationClosed': 'Le iscrizioni per questo evento sono chiuse.',
-  'events.error.cancellationClosed': 'La finestra per la disdetta e terminata.',
+  'events.error.cancellationClosed': 'La finestra per la disdetta è terminata.',
   'events.error.alreadyRegistered': 'Sei già registrato a questo evento.',
   'events.error.alreadyWaitlisted': 'Sei già in waiting list.',
-  'events.error.capacityFull': 'L evento e al completo.',
+  'events.error.capacityFull': 'L\'evento è al completo.',
   'events.error.requestFailed': 'Operazione evento non riuscita. Riprova.'
 };
 
-const DEMO_USERS: User[] = [
-  {
-    email: 'giulia.demo@fyre.local',
-    password: 'DEMO_PASSWORD_REDACTED',
-    firstName: 'Giulia',
-    lastName: 'Rossi',
-    city: 'Reggio Emilia',
-    cityLat: 44.6983,
-    cityLng: 10.6318,
-    birthDate: '1998-05-22',
-    gender: 'female',
-    orientation: 'straight',
-    showMe: 'men',
-    smokes: false,
-    drinks: true,
-    bio: 'Amo concerti, viaggi brevi e persone genuine.',
-    ageRangeMin: 24,
-    ageRangeMax: 38,
-    maxDistanceKm: 45,
-    intent: 'relationship',
-    hobbies: 'Concerti e viaggi brevi',
-    passions: 'Arte contemporanea',
-    lookingFor: 'Connessioni autentiche',
-    instagram: 'giulia.fyre',
-    telegram: 'giuliafyre',
-    website: '',
-    favoriteSong: 'Dancing Queen',
-    favoriteMovie: 'La La Land'
-  },
-  {
-    email: 'marco.demo@fyre.local',
-    password: 'DEMO_PASSWORD_REDACTED',
-    firstName: 'Marco',
-    lastName: 'Bianchi',
-    city: 'Parma',
-    cityLat: 44.8015,
-    cityLng: 10.3279,
-    birthDate: '1995-09-03',
-    gender: 'male',
-    orientation: 'straight',
-    showMe: 'women',
-    smokes: false,
-    drinks: true,
-    bio: 'Sport, cocktail bar e road trip spontanei.',
-    ageRangeMin: 23,
-    ageRangeMax: 36,
-    maxDistanceKm: 60,
-    intent: 'casual',
-    hobbies: 'Sport e trekking',
-    passions: 'Musica live',
-    lookingFor: 'Nuove conoscenze',
-    instagram: 'marco.ontheroad',
-    telegram: '',
-    website: '',
-    favoriteSong: 'Lose Yourself',
-    favoriteMovie: 'Inception'
-  },
-  {
-    email: 'sara.demo@fyre.local',
-    password: 'DEMO_PASSWORD_REDACTED',
-    firstName: 'Sara',
-    lastName: 'Neri',
-    city: 'Modena',
-    cityLat: 44.6471,
-    cityLng: 10.9252,
-    birthDate: '1996-12-14',
-    gender: 'female',
-    orientation: 'bisexual',
-    showMe: 'everyone',
-    smokes: false,
-    drinks: false,
-    bio: 'Fotografia, yoga e chiacchiere profonde.',
-    ageRangeMin: 24,
-    ageRangeMax: 42,
-    maxDistanceKm: 70,
-    intent: 'friendship',
-    hobbies: 'Fotografia e yoga',
-    passions: 'Cinema e podcast',
-    lookingFor: 'Persone affini',
-    instagram: '',
-    telegram: 'saraflow',
-    website: '',
-    favoriteSong: 'Halo',
-    favoriteMovie: 'Arrival'
-  }
-];
-
 const appwriteConfiguration = loadAppwriteConfiguration();
-const appwriteService = appwriteConfiguration ? new AppwriteService(appwriteConfiguration) : null;
-const IS_BACKEND_MODE = appwriteService !== null;
+const appwriteService = new AppwriteService(appwriteConfiguration);
+const IS_BACKEND_MODE = true;
 const IS_EVENT_ADMIN_ENABLED = IS_BACKEND_MODE && Boolean(appwriteConfiguration?.eventAdminFunctionId);
 
 function upsertUser(users: User[], user: User): User[] {
@@ -399,37 +303,6 @@ function eventErrorMessage(error: unknown, fallbackMessage: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function formatLastSeen(dateIso: string | undefined): string {
-  if (!dateIso) {
-    return 'Ultimo accesso non disponibile';
-  }
-
-  const timestamp = new Date(dateIso).getTime();
-  if (Number.isNaN(timestamp)) {
-    return 'Ultimo accesso non disponibile';
-  }
-
-  const diffMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
-  if (diffMinutes <= 1) {
-    return 'Attivo poco fa';
-  }
-  if (diffMinutes < 60) {
-    return `Attivo ${diffMinutes} min fa`;
-  }
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) {
-    return `Attivo ${diffHours} h fa`;
-  }
-
-  return `Attivo il ${new Intl.DateTimeFormat('it-IT', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(timestamp))}`;
 }
 
 function isNotificationEnabledForType(
@@ -726,8 +599,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       }
     }
 
-    const profiles = await mockBackendApi.fetchDiscoverProfiles();
-    setDiscoverProfiles(profiles);
+    setDiscoverProfiles([]);
   }, []);
 
   const hydrateThreads = useCallback(async (): Promise<void> => {
@@ -838,21 +710,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       return false;
     }
 
-    return currentUser.email === 'admin@fyre.local' || currentUser.email.endsWith('.demo@fyre.local');
+    return currentUser.email === 'admin@fyre.local';
   }, [currentUser]);
-
-  const localUsers = useMemo<LocalUserSummary[]>(
-    () =>
-      persisted.users
-        .map((user) => ({
-          email: user.email,
-          displayName: getDisplayName(user),
-          isProfileComplete: isProfileComplete(user),
-          isCurrent: user.email === persisted.currentUserEmail
-        }))
-        .sort((left, right) => left.email.localeCompare(right.email)),
-    [persisted.currentUserEmail, persisted.users]
-  );
 
   const resolvedMainEventConfig = useMemo<MainEventConfig>(() => {
     if (!IS_BACKEND_MODE || !remoteMainEventState) {
@@ -1015,34 +874,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     [commitCurrentUser, persisted.users]
   );
 
-  const createLocalUser = useCallback(
-    (email: string, password: string): string | null => {
-      if (!isValidEmail(email)) {
-        return 'Inserisci un indirizzo email valido.';
-      }
-
-      if (password.length < 8) {
-        return 'La password deve contenere almeno 8 caratteri.';
-      }
-
-      const normalized = normalizeEmail(email);
-      const alreadyExists = persisted.users.some((candidate) => candidate.email === normalized);
-      if (alreadyExists) {
-        return 'Esiste già un account con questa email.';
-      }
-
-      const nextUser = createEmptyUser(normalized, password);
-
-      setPersisted((prev) => ({
-        ...prev,
-        users: [...prev.users, nextUser]
-      }));
-
-      return null;
-    },
-    [persisted.users]
-  );
-
   const logIn = useCallback(
     async (email: string, password: string): Promise<string | null> => {
       if (!isValidEmail(email)) {
@@ -1097,78 +928,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       realtimeState: 'disconnected'
     }));
   }, [commitCurrentUser]);
-
-  const switchLocalUser = useCallback(
-    (email: string): string | null => {
-      const normalized = normalizeEmail(email);
-      const exists = persisted.users.some((candidate) => candidate.email === normalized);
-
-      if (!exists) {
-        return 'Utente non trovato nella memoria locale.';
-      }
-
-      setPersisted((prev) => ({
-        ...prev,
-        currentUserEmail: normalized
-      }));
-
-      return null;
-    },
-    [persisted.users]
-  );
-
-  const removeLocalUser = useCallback(
-    (email: string): string | null => {
-      const normalized = normalizeEmail(email);
-      const exists = persisted.users.some((candidate) => candidate.email === normalized);
-
-      if (!exists) {
-        return 'Utente non trovato nella memoria locale.';
-      }
-
-      setPersisted((prev) => {
-        const users = prev.users.filter((candidate) => candidate.email !== normalized);
-        const nextCurrentUserEmail =
-          prev.currentUserEmail === normalized ? users[0]?.email ?? null : prev.currentUserEmail;
-
-        return {
-          ...prev,
-          users,
-          currentUserEmail: nextCurrentUserEmail,
-          mainEventState: {
-            participants: prev.mainEventState.participants.filter((item) => item.email !== normalized),
-            waitingList: prev.mainEventState.waitingList.filter((item) => item.email !== normalized),
-            history: prev.mainEventState.history.filter((item) => item.email !== normalized)
-          }
-        };
-      });
-
-      return null;
-    },
-    [persisted.users]
-  );
-
-  const seedDemoUsers = useCallback((): number => {
-    const existingEmails = new Set(persisted.users.map((user) => user.email));
-    const usersToAdd = DEMO_USERS.map((user) => normalizeUser(user)).filter(
-      (user) => !existingEmails.has(user.email)
-    );
-
-    if (usersToAdd.length === 0) {
-      return 0;
-    }
-
-    setPersisted((prev) => ({
-      ...prev,
-      users: [...prev.users, ...usersToAdd]
-    }));
-
-    return usersToAdd.length;
-  }, [persisted.users]);
-
-  const resetLocalData = useCallback(() => {
-    setPersisted(createDefaultPersistedState());
-  }, []);
 
   const updateProfileImage = useCallback(
     async (imageData: string): Promise<string | null> => {
@@ -2369,7 +2128,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       persisted,
       isBackendMode: IS_BACKEND_MODE,
       currentUser,
-      localUsers,
       discoverProfiles,
       mainEventConfig: resolvedMainEventConfig,
       mainEventInfo,
@@ -2382,13 +2140,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       unreadThreadsCount,
       notificationPermission,
       signUp,
-      createLocalUser,
       logIn,
       logOut,
-      switchLocalUser,
-      removeLocalUser,
-      seedDemoUsers,
-      resetLocalData,
       updateProfileImage,
       updateProfileImages,
       updateProfile,
@@ -2419,7 +2172,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     [
       persisted,
       currentUser,
-      localUsers,
       discoverProfiles,
       resolvedMainEventConfig,
       mainEventInfo,
@@ -2431,13 +2183,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       unreadThreadsCount,
       notificationPermission,
       signUp,
-      createLocalUser,
       logIn,
       logOut,
-      switchLocalUser,
-      removeLocalUser,
-      seedDemoUsers,
-      resetLocalData,
       updateProfileImage,
       updateProfileImages,
       updateProfile,
@@ -2477,5 +2224,3 @@ export function useAppStoreContext(): AppContextValue {
   }
   return context;
 }
-
-export { formatLastSeen };

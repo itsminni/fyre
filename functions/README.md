@@ -2,12 +2,12 @@
 
 ## Italiano
 
-Questa cartella contiene le funzioni Appwrite usate dal backend di Fyre. Le funzioni centralizzano la logica piu delicata del progetto, in modo che i client iOS, Android e web condividano le stesse regole applicative.
+Questa cartella contiene le funzioni Appwrite usate dal backend di Fyre. Le funzioni centralizzano la logica più delicata del progetto, in modo che i client iOS, Android e web condividano le stesse regole.
 
 ### Funzioni disponibili
 
 - `discoverprofiles`: restituisce profili compatibili per la discovery.
-- `recordswipe`: registra like o skip e crea un match quando l'interesse e reciproco.
+- `recordswipe`: registra like o skip e crea un match quando l'interesse è reciproco.
 - `createorgetthread`: crea o recupera una conversazione tra utenti.
 - `sendmessage`: invia messaggi e aggiorna la preview del thread.
 - `managerelationship`: gestisce archiviazione, unmatch o blocco.
@@ -32,8 +32,6 @@ Questa cartella contiene le funzioni Appwrite usate dal backend di Fyre. Le funz
 ### Librerie esterne
 
 Le funzioni non dichiarano librerie npm esterne nei rispettivi `package.json`. Usano JavaScript ES Modules, `fetch`, API standard del runtime Node/Appwrite e helper locali presenti nei file sorgente.
-
-Di conseguenza non e necessario eseguire `npm install` per le funzioni nello stato attuale. Se in futuro venissero aggiunte dipendenze, dovranno essere dichiarate nel `package.json` della funzione interessata e installate o incluse secondo il flusso di deploy Appwrite.
 
 ### Test
 
@@ -71,8 +69,6 @@ This folder contains the Appwrite functions used by the Fyre backend. The functi
 ### External libraries
 
 The functions do not declare external npm libraries in their `package.json` files. They use JavaScript ES Modules, `fetch`, standard Node/Appwrite runtime APIs, and local helpers included in the source files.
-
-As a result, `npm install` is not required for the functions in their current state. If dependencies are added later, they should be declared in the related function `package.json` and installed or bundled according to the Appwrite deployment flow.
 
 ### Tests
 

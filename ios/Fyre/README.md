@@ -2,7 +2,7 @@
 
 ## Italiano
 
-Questa cartella contiene l'app iOS di Fyre, sviluppata in SwiftUI. La versione iOS include il flusso di autenticazione, completamento profilo, discovery con swipe, match, messaggistica, eventi, account, preferenze, notifiche locali e integrazione realtime con Appwrite.
+Questa cartella contiene l'app iOS di Fyre, sviluppata in SwiftUI.
 
 ### Requisiti
 
@@ -21,7 +21,7 @@ Questa cartella contiene l'app iOS di Fyre, sviluppata in SwiftUI. La versione i
 
 La versione iOS non dichiara librerie esterne nel `Podfile`. L'app usa SwiftUI, Foundation, UserNotifications e altri framework Apple inclusi in Xcode.
 
-Il file `ios/Fyre/Podfile` è comunque presente come manifest delle dipendenze. 
+Il file `ios/Fyre/Podfile` è presente come manifest delle dipendenze.
 
 ### Architettura
 
@@ -43,7 +43,7 @@ Da Xcode si possono eseguire:
 
 ## English
 
-This folder contains the Fyre iOS app, built with SwiftUI. The iOS version includes authentication, profile completion, swipe-based discovery, matches, messaging, events, account management, preferences, local notifications, and realtime Appwrite integration.
+This folder contains the Fyre iOS app, built with SwiftUI.
 
 ### Requirements
 
