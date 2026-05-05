@@ -487,7 +487,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'events.detail.registrationCountdown': 'Iscrizioni aperte ancora per: {countdown}',
     'events.action.cancel': 'Annulla iscrizione',
     'events.action.leaveWaitlist': 'Esci dalla waiting list',
-    'events.action.join': 'Partecipa all evento',
+    'events.action.join': 'Partecipa all\'evento',
     'events.admin.title': 'Amministrazione evento',
     'events.admin.subtitle': 'Aggiorna dati evento e gestisci partecipanti e waiting list.',
     'events.admin.eventTitle': 'Titolo evento',

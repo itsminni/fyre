@@ -1,4 +1,4 @@
-import { CSSProperties, ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChatAvatar } from '../../components/messages/ChatAvatar';
 import { Button } from '../../components/ui/Button';
@@ -24,6 +24,9 @@ const CHAT_ATTACHMENT_EXTENSIONS = [
 const CHAT_ATTACHMENT_ACCEPT = CHAT_ATTACHMENT_EXTENSIONS.map((extension) => `.${extension}`).join(',');
 const CHAT_ATTACHMENT_EXTENSION_SET = new Set<string>(CHAT_ATTACHMENT_EXTENSIONS);
 type VoiceRecorderState = 'idle' | 'recording' | 'processing';
+const CHAT_LINK_PATTERN =
+  /\b((?:https?:\/\/|www\.)[^\s<]+|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?:\/[^\s<]*)?)/gi;
+const CHAT_LINK_TRAILING_PUNCTUATION_PATTERN = /[),.!?;:]+$/;
 
 interface VoiceRecorderResources {
   stream: MediaStream;
@@ -230,6 +233,90 @@ function formatMessageDateTime(value: string | undefined): string {
     minute: '2-digit',
     second: '2-digit'
   }).format(date);
+}
+
+function messageTimestamp(message: ChatMessage): number {
+  const timestamp = Date.parse(message.createdAt);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function isSameMessageBlock(current: ChatMessage, adjacent: ChatMessage | undefined): boolean {
+  if (!adjacent || current.isMe !== adjacent.isMe) {
+    return false;
+  }
+
+  if (current.replyToMessageId || adjacent.replyToMessageId) {
+    return false;
+  }
+
+  const currentTimestamp = messageTimestamp(current);
+  const adjacentTimestamp = messageTimestamp(adjacent);
+  if (!currentTimestamp || !adjacentTimestamp) {
+    return current.time === adjacent.time;
+  }
+
+  const currentDate = new Date(currentTimestamp);
+  const adjacentDate = new Date(adjacentTimestamp);
+  const sameDay = currentDate.toDateString() === adjacentDate.toDateString();
+  const gapMs = Math.abs(adjacentTimestamp - currentTimestamp);
+  return sameDay && gapMs <= 5 * 60 * 1000;
+}
+
+function normalizeChatLinkHref(value: string): string | null {
+  const href = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+
+  try {
+    const url = new URL(href);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function renderMessageTextWithLinks(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+
+  for (const match of text.matchAll(CHAT_LINK_PATTERN)) {
+    const rawMatch = match[0];
+    const matchIndex = match.index ?? 0;
+    const trailingMatch = rawMatch.match(CHAT_LINK_TRAILING_PUNCTUATION_PATTERN);
+    const trailingText = trailingMatch?.[0] ?? '';
+    const linkText = trailingText ? rawMatch.slice(0, -trailingText.length) : rawMatch;
+    const href = normalizeChatLinkHref(linkText);
+
+    if (!href || linkText.length === 0) {
+      continue;
+    }
+
+    if (matchIndex > cursor) {
+      nodes.push(text.slice(cursor, matchIndex));
+    }
+
+    nodes.push(
+      <a
+        key={`${matchIndex}-${linkText}`}
+        className="chat-message-link"
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+      >
+        {linkText}
+      </a>
+    );
+
+    if (trailingText) {
+      nodes.push(trailingText);
+    }
+
+    cursor = matchIndex + rawMatch.length;
+  }
+
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
+
+  return nodes.length > 0 ? nodes : [text];
 }
 
 function attachmentLabel(attachment: ChatAttachment): string {
@@ -849,68 +936,80 @@ export function ChatDetailPage(): JSX.Element {
       </header>
 
       <div className="chat-messages" ref={messagesRef}>
-        {thread.messages.map((message) => {
+        {thread.messages.map((message, index) => {
           const replied = message.replyToMessageId
             ? thread.messages.find((candidate) => candidate.id === message.replyToMessageId)
             : undefined;
+          const isGroupedWithPrevious = isSameMessageBlock(message, thread.messages[index - 1]);
+          const isGroupedWithNext = isSameMessageBlock(message, thread.messages[index + 1]);
+          const shouldShowMeta = !isGroupedWithNext;
+          const rowClassName = [
+            'chat-message-row',
+            message.isMe ? 'chat-message-row--me' : '',
+            isGroupedWithPrevious ? 'chat-message-row--grouped' : '',
+            isGroupedWithNext ? 'chat-message-row--continues' : ''
+          ].filter(Boolean).join(' ');
 
           return (
-            <article
-              key={message.id}
-              className={message.isMe ? 'chat-message-row chat-message-row--me' : 'chat-message-row'}
-            >
-              <div className={message.isMe ? 'chat-bubble chat-bubble--me' : 'chat-bubble'}>
-                {replied && (
-                  <div className="chat-reply-preview">
-                    <small>{replied.isMe ? 'Tu' : thread.name}</small>
-                    <p>
-                      {replied.text
-                        || (replied.attachments?.[0]
-                          ? attachmentLabel(replied.attachments[0])
-                          : 'Allegato')}
-                    </p>
-                  </div>
-                )}
+            <article key={message.id} className={rowClassName}>
+              <div className="chat-message-row__body">
+                <div className={message.isMe ? 'chat-bubble chat-bubble--me' : 'chat-bubble'}>
+                  {replied && (
+                    <div className="chat-reply-preview">
+                      <small>{replied.isMe ? 'Tu' : thread.name}</small>
+                      <p>
+                        {replied.text
+                          || (replied.attachments?.[0]
+                            ? attachmentLabel(replied.attachments[0])
+                            : 'Allegato')}
+                      </p>
+                    </div>
+                  )}
 
-                {message.text ? <p>{message.text}</p> : null}
+                  {message.text ? <p>{renderMessageTextWithLinks(message.text)}</p> : null}
 
-                {message.attachments && message.attachments.length > 0 ? (
-                  <ul className="chat-attachments-list">
-                    {message.attachments.map((attachment) => (
-                      <li key={attachment.id}>
-                        <ChatAttachmentItem attachment={attachment} onOpenImage={setImagePreviewAttachment} />
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
+                  {message.attachments && message.attachments.length > 0 ? (
+                    <ul className="chat-attachments-list">
+                      {message.attachments.map((attachment) => (
+                        <li key={attachment.id}>
+                          <ChatAttachmentItem attachment={attachment} onOpenImage={setImagePreviewAttachment} />
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
 
-              <div className="chat-message-row__meta">
-                <span>{message.time}</span>
-                {message.isMe && (
-                  <span className="chat-bubble__delivery">
-                    {formatDeliveryLabel(message.deliveryState, message.readAt)}
-                  </span>
-                )}
+                <div className="chat-message-row__quick-actions">
+                  {message.isMe && (
+                    <button
+                      type="button"
+                      aria-label="Info messaggio"
+                      onClick={() => setMessageInfo(message)}
+                    >
+                      Info
+                    </button>
+                  )}
 
-                {message.isMe && (
                   <button
-                    className="chat-bubble__reply-action"
                     type="button"
-                    onClick={() => setMessageInfo(message)}
+                    aria-label="Rispondi al messaggio"
+                    onClick={() => setReplyToId(message.id)}
                   >
-                    Info
+                    Rispondi
                   </button>
-                )}
-
-                <button
-                  className="chat-bubble__reply-action"
-                  type="button"
-                  onClick={() => setReplyToId(message.id)}
-                >
-                  Rispondi
-                </button>
+                </div>
               </div>
+
+              {shouldShowMeta && (
+                <div className="chat-message-row__meta">
+                  <span>{message.time}</span>
+                  {message.isMe && (
+                    <span className="chat-bubble__delivery">
+                      {formatDeliveryLabel(message.deliveryState, message.readAt)}
+                    </span>
+                  )}
+                </div>
+              )}
             </article>
           );
         })}

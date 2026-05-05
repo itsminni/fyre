@@ -1,4 +1,13 @@
-import { CSSProperties, ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CSSProperties,
+  ChangeEvent,
+  PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -70,6 +79,24 @@ const iosSendButtonColors = {
   sendButtonColor2: '#FF8A1F',
   sendButtonColor3: '#E14D33'
 };
+const MAX_PROFILE_PHOTOS = 6;
+const SWIPE_PHOTO_WIDTH = 1080;
+const SWIPE_PHOTO_HEIGHT = 1920;
+const SWIPE_PHOTO_JPEG_QUALITY = 0.88;
+
+interface SwipePhotoCropState {
+  source: string;
+  zoom: number;
+  offsetX: number;
+  remainingFiles: File[];
+  skippedFilesCount: number;
+}
+
+interface SwipePhotoCropDragState {
+  pointerId: number;
+  startX: number;
+  startOffsetX: number;
+}
 
 // Chat background and bubble palettes intentionally removed for web appearance.
 
@@ -110,6 +137,10 @@ function parseDistanceInput(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -125,12 +156,47 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+function loadImage(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Impossibile leggere l\'immagine'));
+    image.src = source;
+  });
+}
+
+async function cropSwipePhotoDataUrl({ source, zoom, offsetX }: SwipePhotoCropState): Promise<string> {
+  const image = await loadImage(source);
+  const canvas = document.createElement('canvas');
+  canvas.width = SWIPE_PHOTO_WIDTH;
+  canvas.height = SWIPE_PHOTO_HEIGHT;
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Canvas non disponibile');
+  }
+
+  const scale = Math.max(canvas.width / image.width, canvas.height / image.height);
+  const drawWidth = image.width * scale * zoom;
+  const drawHeight = image.height * scale * zoom;
+  const maxShiftX = Math.max(0, (drawWidth - canvas.width) / 2);
+  const drawX = (canvas.width - drawWidth) / 2 + (offsetX / 50) * maxShiftX;
+  const drawY = (canvas.height - drawHeight) / 2;
+
+  context.fillStyle = '#160f0b';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+
+  return canvas.toDataURL('image/jpeg', SWIPE_PHOTO_JPEG_QUALITY);
+}
+
 export function AccountPage(): JSX.Element {
   const {
     currentUser,
     currentUserUpcomingEventHistory,
     persisted,
     updateProfileImage,
+    updateProfileImages,
     updateAccountPreferences,
     updateSettings,
     willUserLoseEventRegistrations,
@@ -147,6 +213,9 @@ export function AccountPage(): JSX.Element {
   const [profileFeedback, setProfileFeedback] = useState<FeedbackState | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<FeedbackState | null>(null);
   const [securityFeedback, setSecurityFeedback] = useState<FeedbackState | null>(null);
+  const [isSavingSwipePhotos, setIsSavingSwipePhotos] = useState(false);
+  const [pendingSwipePhotoCrop, setPendingSwipePhotoCrop] = useState<SwipePhotoCropState | null>(null);
+  const [swipePhotoCropDrag, setSwipePhotoCropDrag] = useState<SwipePhotoCropDragState | null>(null);
   const accountAutosaveReadyRef = useRef(false);
   const accountAutosaveTimerRef = useRef<number | null>(null);
   const lastAccountAutosaveKeyRef = useRef('');
@@ -393,6 +462,8 @@ export function AccountPage(): JSX.Element {
   }
 
   const currentEmail = currentUser.email;
+  const swipePhotos = currentUser.profilePhotoDataItems ?? [];
+  const remainingSwipePhotoSlots = MAX_PROFILE_PHOTOS - swipePhotos.length;
 
   function togglePreferredGender(option: UserGender): void {
     setPreferredGenders((current) =>
@@ -420,6 +491,143 @@ export function AccountPage(): JSX.Element {
       setProfileFeedback({ isError: true, message: 'Impossibile caricare la foto.' });
     } finally {
       event.target.value = '';
+    }
+  }
+
+  async function handleAvatarRemove(): Promise<void> {
+    const error = await updateProfileImage('');
+    setProfileFeedback(
+      error
+        ? { isError: true, message: error }
+        : { isError: false, message: 'Foto profilo rimossa.' }
+    );
+  }
+
+  async function handleSwipePhotosChange(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files ?? []);
+    if (remainingSwipePhotoSlots <= 0) {
+      setProfileFeedback({ isError: true, message: t('profileSetup.photos.max') });
+      event.target.value = '';
+      return;
+    }
+
+    const files = selectedFiles.slice(0, remainingSwipePhotoSlots);
+    if (files.length === 0) {
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const [firstFile, ...remainingFiles] = files;
+      await openSwipePhotoCrop(firstFile, remainingFiles, selectedFiles.length - files.length);
+    } catch {
+      setProfileFeedback({ isError: true, message: 'Impossibile leggere le foto per lo swipe.' });
+    } finally {
+      event.target.value = '';
+    }
+  }
+
+  async function openSwipePhotoCrop(
+    file: File,
+    remainingFiles: File[],
+    skippedFilesCount: number
+  ): Promise<void> {
+    const source = await readFileAsDataUrl(file);
+    setPendingSwipePhotoCrop({
+      source,
+      zoom: 1,
+      offsetX: 0,
+      remainingFiles,
+      skippedFilesCount
+    });
+  }
+
+  function onSwipePhotoCropPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (!pendingSwipePhotoCrop) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSwipePhotoCropDrag({
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startOffsetX: pendingSwipePhotoCrop.offsetX
+    });
+  }
+
+  function onSwipePhotoCropPointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (!swipePhotoCropDrag || swipePhotoCropDrag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const deltaX = ((event.clientX - swipePhotoCropDrag.startX) / bounds.width) * 100;
+
+    setPendingSwipePhotoCrop((current) =>
+      current
+        ? {
+            ...current,
+            offsetX: clamp(swipePhotoCropDrag.startOffsetX + deltaX, -50, 50)
+          }
+        : current
+    );
+  }
+
+  function endSwipePhotoCropDrag(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (swipePhotoCropDrag?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      setSwipePhotoCropDrag(null);
+    }
+  }
+
+  async function applySwipePhotoCrop(): Promise<void> {
+    if (!pendingSwipePhotoCrop) {
+      return;
+    }
+
+    setIsSavingSwipePhotos(true);
+    try {
+      const croppedPhoto = await cropSwipePhotoDataUrl(pendingSwipePhotoCrop);
+      const nextPhotos = [...swipePhotos, croppedPhoto].slice(0, MAX_PROFILE_PHOTOS);
+      const error = await updateProfileImages(nextPhotos);
+      if (error) {
+        setProfileFeedback({ isError: true, message: error });
+        return;
+      }
+
+      const [nextFile, ...remainingFiles] = pendingSwipePhotoCrop.remainingFiles;
+      if (nextFile && nextPhotos.length < MAX_PROFILE_PHOTOS) {
+        await openSwipePhotoCrop(nextFile, remainingFiles, pendingSwipePhotoCrop.skippedFilesCount);
+        return;
+      }
+
+      setPendingSwipePhotoCrop(null);
+      setProfileFeedback({
+        isError: pendingSwipePhotoCrop.skippedFilesCount > 0,
+        message:
+          pendingSwipePhotoCrop.skippedFilesCount > 0
+            ? t('profileSetup.error.maxPhotos')
+            : 'Foto per lo swipe aggiornate.'
+      });
+    } catch {
+      setProfileFeedback({ isError: true, message: t('profileSetup.error.cropPhoto') });
+    } finally {
+      setIsSavingSwipePhotos(false);
+    }
+  }
+
+  async function removeSwipePhoto(index: number): Promise<void> {
+    setIsSavingSwipePhotos(true);
+    try {
+      const nextPhotos = swipePhotos.filter((_, photoIndex) => photoIndex !== index);
+      const error = await updateProfileImages(nextPhotos);
+      setProfileFeedback(
+        error
+          ? { isError: true, message: error }
+          : { isError: false, message: 'Foto per lo swipe aggiornate.' }
+      );
+    } finally {
+      setIsSavingSwipePhotos(false);
     }
   }
 
@@ -482,10 +690,66 @@ export function AccountPage(): JSX.Element {
               </div>
             </div>
 
-            <label className="account-inline-file account-inline-file--profile">
-              <input type="file" accept="image/*" onChange={handleAvatarChange} />
-              {t('account.changePhoto')}
-            </label>
+            <div className="account-avatar-actions">
+              <label className="account-inline-file account-inline-file--profile">
+                <input type="file" accept="image/*" onChange={handleAvatarChange} />
+                {t('account.changePhoto')}
+              </label>
+
+              {currentUser.profileImageData && (
+                <Button variant="ghost" onClick={() => void handleAvatarRemove()}>
+                  Rimuovi foto
+                </Button>
+              )}
+            </div>
+
+            <section className="account-swipe-photos">
+              <div>
+                <h4>{t('profileSetup.photos.title')}</h4>
+                <p>{t('profileSetup.photos.subtitle')}</p>
+              </div>
+
+              <label
+                className={
+                  remainingSwipePhotoSlots > 0 && !isSavingSwipePhotos
+                    ? 'account-inline-file account-inline-file--profile'
+                    : 'account-inline-file account-inline-file--profile is-disabled'
+                }
+              >
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleSwipePhotosChange}
+                  disabled={remainingSwipePhotoSlots <= 0 || isSavingSwipePhotos}
+                />
+                {remainingSwipePhotoSlots > 0
+                  ? t('profileSetup.photos.add', { count: swipePhotos.length })
+                  : t('profileSetup.photos.max')}
+              </label>
+
+              {swipePhotos.length === 0 ? (
+                <p className="text-muted">{t('profileSetup.photos.empty')}</p>
+              ) : (
+                <ul className="profile-photo-strip account-swipe-photos__strip">
+                  {swipePhotos.map((photo, index) => (
+                    <li key={`${photo.slice(0, 32)}-${index}`} className="profile-photo-strip__item">
+                      <img src={photo} alt={t('profileSetup.photos.alt', { index: index + 1 })} />
+                      {index === 0 && <span>{t('profileSetup.photos.first')}</span>}
+                      <button
+                        className="profile-photo-strip__remove"
+                        type="button"
+                        onClick={() => void removeSwipePhoto(index)}
+                        aria-label={t('profileSetup.photos.remove')}
+                        disabled={isSavingSwipePhotos}
+                      >
+                        x
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
 
             <dl className="account-details">
               <div>
@@ -981,6 +1245,75 @@ export function AccountPage(): JSX.Element {
               {t('account.events.openHistory')}
             </Link>
           </Card>
+        </div>
+      )}
+
+      {pendingSwipePhotoCrop && (
+        <div className="profile-avatar-crop-modal" role="dialog" aria-modal="true" aria-label={t('profileSetup.crop.photo.title')}>
+          <div className="profile-avatar-crop-panel">
+            <div>
+              <h3>{t('profileSetup.crop.photo.title')}</h3>
+              <p>{t('profileSetup.crop.photo.body')}</p>
+            </div>
+
+            <div
+              className={swipePhotoCropDrag ? 'profile-swipe-crop-stage is-dragging' : 'profile-swipe-crop-stage'}
+              onPointerDown={onSwipePhotoCropPointerDown}
+              onPointerMove={onSwipePhotoCropPointerMove}
+              onPointerUp={endSwipePhotoCropDrag}
+              onPointerCancel={endSwipePhotoCropDrag}
+            >
+              <img
+                src={pendingSwipePhotoCrop.source}
+                alt={t('profileSetup.crop.photo.alt')}
+                draggable={false}
+                style={{
+                  transform: `translateX(${pendingSwipePhotoCrop.offsetX}%) scale(${pendingSwipePhotoCrop.zoom})`
+                }}
+              />
+            </div>
+
+            <div className="profile-avatar-crop-controls">
+              <label>
+                {t('profileSetup.crop.zoom')}
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.05}
+                  value={pendingSwipePhotoCrop.zoom}
+                  onChange={(event) =>
+                    setPendingSwipePhotoCrop((current) =>
+                      current ? { ...current, zoom: Number(event.target.value) } : current
+                    )
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="profile-avatar-crop-actions">
+              <Button
+                variant="ghost"
+                type="button"
+                onClick={() => {
+                  setPendingSwipePhotoCrop(null);
+                  setSwipePhotoCropDrag(null);
+                }}
+              >
+                {t('profileSetup.crop.cancel')}
+              </Button>
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => setPendingSwipePhotoCrop({ ...pendingSwipePhotoCrop, zoom: 1, offsetX: 0 })}
+              >
+                {t('profileSetup.crop.reset')}
+              </Button>
+              <Button type="button" onClick={() => void applySwipePhotoCrop()} disabled={isSavingSwipePhotos}>
+                {t('profileSetup.crop.photo.use')}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </section>

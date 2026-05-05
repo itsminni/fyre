@@ -172,7 +172,7 @@ const EVENT_ADMIN_MESSAGE_BY_KEY: Record<string, string> = {
 const EVENT_MESSAGE_BY_KEY: Record<string, string> = {
   'events.error.genderRequired': 'Completa il genere nel profilo prima di iscriverti.',
   'events.error.genderUnsupported': 'Per questo evento sono ammessi solo uomo/donna.',
-  'events.error.orientationUnsupported': 'Per questo evento è richiesto orientamento straight.',
+  'events.error.orientationUnsupported': 'Per questo evento è richiesto orientamento etero.',
   'events.error.notRegistered': 'Nessuna iscrizione evento trovata.',
   'events.error.registrationClosed': 'Le iscrizioni per questo evento sono chiuse.',
   'events.error.cancellationClosed': 'La finestra per la disdetta è terminata.',
@@ -366,18 +366,111 @@ function shouldPreferCachedThread(cachedThread: ChatThread, fetchedThread: ChatT
     && cachedTimestamp === fetchedTimestamp;
 }
 
+function isClientGeneratedMessageId(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
+function messageAttachmentFingerprint(message: ChatMessage): string {
+  return (message.attachments ?? [])
+    .map((attachment) => `${attachment.type}:${attachment.name}:${attachment.sizeBytes}`)
+    .join('|');
+}
+
+function isSameMessageCandidate(left: ChatMessage, right: ChatMessage): boolean {
+  if (
+    left.isMe !== right.isMe
+    || left.text.trim() !== right.text.trim()
+    || (left.replyToMessageId ?? '') !== (right.replyToMessageId ?? '')
+    || messageAttachmentFingerprint(left) !== messageAttachmentFingerprint(right)
+  ) {
+    return false;
+  }
+
+  const leftTimestamp = Date.parse(left.createdAt);
+  const rightTimestamp = Date.parse(right.createdAt);
+  if (Number.isNaN(leftTimestamp) || Number.isNaN(rightTimestamp)) {
+    return left.time === right.time;
+  }
+
+  return Math.abs(leftTimestamp - rightTimestamp) <= 20_000;
+}
+
+function canDedupeChatMessagePair(left: ChatMessage, right: ChatMessage): boolean {
+  if (left.id === right.id) {
+    return true;
+  }
+
+  const leftIsClientGenerated = isClientGeneratedMessageId(left.id);
+  const rightIsClientGenerated = isClientGeneratedMessageId(right.id);
+  if (leftIsClientGenerated === rightIsClientGenerated) {
+    return false;
+  }
+
+  return isSameMessageCandidate(left, right);
+}
+
+function messageCompletenessScore(message: ChatMessage): number {
+  return [
+    message.readAt,
+    message.deliveryState,
+    message.senderName,
+    message.attachments?.length ? 'attachments' : ''
+  ].filter(Boolean).length;
+}
+
+function preferChatMessage(existing: ChatMessage, candidate: ChatMessage): ChatMessage {
+  return messageCompletenessScore(candidate) >= messageCompletenessScore(existing)
+    ? { ...existing, ...candidate }
+    : { ...candidate, ...existing };
+}
+
+function dedupeChatMessages(messages: ChatMessage[]): ChatMessage[] {
+  const deduped: ChatMessage[] = [];
+
+  for (const message of messages) {
+    const duplicateIndex = deduped.findIndex((existing) => canDedupeChatMessagePair(existing, message));
+    if (duplicateIndex >= 0) {
+      deduped[duplicateIndex] = preferChatMessage(deduped[duplicateIndex], message);
+    } else {
+      deduped.push(message);
+    }
+  }
+
+  return deduped.sort((left, right) => {
+    const leftTimestamp = Date.parse(left.createdAt);
+    const rightTimestamp = Date.parse(right.createdAt);
+    return (Number.isNaN(leftTimestamp) ? 0 : leftTimestamp)
+      - (Number.isNaN(rightTimestamp) ? 0 : rightTimestamp);
+  });
+}
+
+function mergeChatMessages(existingMessages: ChatMessage[], incomingMessages: ChatMessage[]): ChatMessage[] {
+  return dedupeChatMessages([...existingMessages, ...incomingMessages]);
+}
+
 function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThread[]): ChatThread[] {
-  const merged = [...fetchedThreads];
+  const merged = fetchedThreads.map((thread) => ({
+    ...thread,
+    messages: dedupeChatMessages(thread.messages)
+  }));
   const fetchedThreadIds = new Set(fetchedThreads.map((thread) => thread.id));
 
   for (const cachedThread of cachedThreads) {
+    const normalizedCachedThread = {
+      ...cachedThread,
+      messages: dedupeChatMessages(cachedThread.messages)
+    };
     const existingIndex = merged.findIndex((thread) => thread.id === cachedThread.id);
     if (existingIndex >= 0) {
-      if (shouldPreferCachedThread(cachedThread, merged[existingIndex])) {
-        merged[existingIndex] = cachedThread;
-      }
-    } else if (!fetchedThreadIds.has(cachedThread.id)) {
-      merged.unshift(cachedThread);
+      const mergedMessages = mergeChatMessages(merged[existingIndex].messages, normalizedCachedThread.messages);
+      merged[existingIndex] = {
+        ...(shouldPreferCachedThread(normalizedCachedThread, merged[existingIndex])
+          ? normalizedCachedThread
+          : merged[existingIndex]),
+        messages: mergedMessages
+      };
+    } else if (!fetchedThreadIds.has(normalizedCachedThread.id)) {
+      merged.unshift(normalizedCachedThread);
     }
   }
 
@@ -966,6 +1059,26 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         .filter((value) => typeof value === 'string' && value.trim().length > 0)
         .slice(0, 6);
 
+      const nextUser = normalizeUser({
+        ...currentUser,
+        profilePhotoDataItems: sanitizedImages,
+        photoFileIds: sanitizedImages.length === 0
+          ? []
+          : (currentUser.photoFileIds ?? []).filter((fileId) =>
+              sanitizedImages.some((image) => image.includes(fileId))
+            )
+      });
+
+      if (IS_BACKEND_MODE && appwriteService) {
+        try {
+          const updatedUser = await appwriteService.updateProfile(nextUser);
+          commitCurrentUser(updatedUser);
+          return null;
+        } catch (error) {
+          return mapAppwriteError(error, 'Impossibile aggiornare le foto per lo swipe.');
+        }
+      }
+
       withCurrentUser((existing) => ({
         ...normalizeUser(existing),
         profilePhotoDataItems: sanitizedImages,
@@ -978,7 +1091,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       return null;
     },
-    [currentUser, withCurrentUser]
+    [commitCurrentUser, currentUser, withCurrentUser]
   );
 
   const willUserLoseEventRegistrations = useCallback(
@@ -1265,7 +1378,28 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     if (IS_BACKEND_MODE && appwriteService) {
       if (!currentUser) {
         return {
-          message: 'Effettua di nuovo l accesso.',
+          message: 'Effettua di nuovo l\'accesso.',
+          isError: true
+        };
+      }
+
+      if (!currentUser.gender) {
+        return {
+          message: EVENT_MESSAGE_BY_KEY['events.error.genderRequired'],
+          isError: true
+        };
+      }
+
+      if (currentUser.gender !== 'male' && currentUser.gender !== 'female') {
+        return {
+          message: EVENT_MESSAGE_BY_KEY['events.error.genderUnsupported'],
+          isError: true
+        };
+      }
+
+      if (currentUser.orientation !== 'straight') {
+        return {
+          message: EVENT_MESSAGE_BY_KEY['events.error.orientationUnsupported'],
           isError: true
         };
       }
@@ -1276,6 +1410,13 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         const status = await appwriteService.registerForMainEvent(currentUser, remoteMainEventState?.eventId);
         const nextState = await refreshRemoteMainEventState(currentUser);
         const resolvedStatus = nextState?.currentStatus ?? status;
+
+        if (!nextState?.currentStatus) {
+          return {
+            message: 'Iscrizione non confermata dal server. Riprova.',
+            isError: true
+          };
+        }
 
         return {
           message:
@@ -1333,7 +1474,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     if (IS_BACKEND_MODE && appwriteService) {
       if (!currentUser) {
         return {
-          message: 'Effettua di nuovo l accesso.',
+          message: 'Effettua di nuovo l\'accesso.',
           isError: true
         };
       }
@@ -1619,7 +1760,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
                 return {
                   ...thread,
                   unreadCount: 0,
-                  messages: [...thread.messages, ...sentMessages],
+                  messages: mergeChatMessages(thread.messages, sentMessages),
                   isTyping: false
                 };
               })

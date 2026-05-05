@@ -295,7 +295,7 @@ export function EventAdminPage(): JSX.Element {
       {isLoading && (
         <div className="empty-panel">
           <h3>Caricamento in corso</h3>
-          <p>Sto recuperando lo stato admin dell evento.</p>
+          <p>Sto recuperando lo stato admin dell'evento.</p>
         </div>
       )}
 

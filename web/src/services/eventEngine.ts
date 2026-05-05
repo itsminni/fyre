@@ -173,7 +173,7 @@ export function registerForMainEvent(
   if (!user) {
     return {
       nextState: state,
-      message: 'Accedi per gestire l iscrizione.',
+      message: 'Accedi per gestire l\'iscrizione.',
       isError: true
     };
   }
@@ -277,7 +277,7 @@ export function cancelMainEventRegistration(
   if (!user) {
     return {
       nextState: state,
-      message: 'Accedi per gestire l iscrizione.',
+      message: 'Accedi per gestire l\'iscrizione.',
       isError: true
     };
   }

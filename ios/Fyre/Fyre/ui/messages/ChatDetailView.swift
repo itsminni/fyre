@@ -187,6 +187,10 @@ private struct ComposerLayoutMetrics {
 }
 
 struct ChatDetailView: View {
+    private static let messageLinkDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+    )
+
     private struct PendingRelationshipAction: Identifiable {
         let id = UUID()
         let action: RelationshipActionDTO
@@ -240,7 +244,6 @@ struct ChatDetailView: View {
     @State private var isLoadingAttachmentPreview = false
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var bottomAnchorMinY: CGFloat = 0
-    @State private var initialScrollTicket = UUID()
     @State private var pendingRelationshipAction: PendingRelationshipAction?
     @State private var messageReadInfoMessage: ChatMessage?
     @State private var avatarPreview: AvatarPreview?
@@ -278,7 +281,6 @@ struct ChatDetailView: View {
                         .frame(height: 1)
                         .background(ChatBottomAnchorReader())
                 }
-                .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: "chatScrollView")
                 .background(ChatScrollViewportHeightReader())
                 .onPreferenceChange(ChatScrollViewportHeightPreferenceKey.self) { value in
@@ -295,12 +297,13 @@ struct ChatDetailView: View {
                     markThreadAsRead()
                 }
                 .onChange(of: messages.last?.id, initial: false) {
-                    scrollToLatestMessage(using: proxy, animated: true)
-                    markThreadAsRead()
-                }
-                .onChange(of: initialScrollTicket, initial: false) {
-                    scrollToLatestMessage(using: proxy, animated: false)
-                    settleInitialScroll(using: proxy)
+                    // Only auto-scroll when the user is already at (or near) the bottom.
+                    // If the user has scrolled up to read older messages, respect that and
+                    // show the "scroll to latest" affordance instead.
+                    if !showsScrollToLatestButton {
+                        scrollToLatestMessage(using: proxy, animated: true)
+                        markThreadAsRead()
+                    }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if showsScrollToLatestButton {
@@ -1715,8 +1718,61 @@ struct ChatDetailView: View {
     }
 
     private func messageTextStyle(isOutgoing: Bool) -> AnyShapeStyle {
+        AnyShapeStyle(messageTextColor(isOutgoing: isOutgoing))
+    }
+
+    private func messageTextColor(isOutgoing: Bool) -> Color {
         let palette = isOutgoing ? outgoingBubbleStyle : incomingBubbleStyle
-        return AnyShapeStyle(palette.textColor(colorScheme: colorScheme, isOutgoing: isOutgoing))
+        return palette.textColor(colorScheme: colorScheme, isOutgoing: isOutgoing)
+    }
+
+    private func messageLinkColor(isOutgoing: Bool) -> Color {
+        if isOutgoing {
+            return colorScheme == .dark ? .white : Color(red: 0.70, green: 0.24, blue: 0.08)
+        }
+
+        return Color(uiColor: .systemBlue)
+    }
+
+    private func attributedMessageText(_ text: String, isOutgoing: Bool) -> AttributedString {
+        var attributed = AttributedString(text)
+        attributed.foregroundColor = messageTextColor(isOutgoing: isOutgoing)
+
+        guard let detector = Self.messageLinkDetector else {
+            return attributed
+        }
+
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = detector.matches(in: text, options: [], range: nsRange)
+        for match in matches {
+            guard
+                let stringRange = Range(match.range, in: text),
+                let attributedRange = Range(stringRange, in: attributed),
+                let url = normalizedMessageURL(for: String(text[stringRange]), detectedURL: match.url)
+            else {
+                continue
+            }
+
+            attributed[attributedRange].link = url
+            attributed[attributedRange].foregroundColor = messageLinkColor(isOutgoing: isOutgoing)
+            attributed[attributedRange].underlineStyle = .single
+        }
+
+        return attributed
+    }
+
+    private func normalizedMessageURL(for text: String, detectedURL: URL?) -> URL? {
+        let trimmed = text.trimmingCharacters(in: CharacterSet(charactersIn: ".,!?;:)"))
+        guard !trimmed.isEmpty else { return nil }
+
+        let candidate = detectedURL ?? URL(string: trimmed)
+        if let candidate,
+           let scheme = candidate.scheme?.lowercased(),
+           ["http", "https", "mailto", "tel"].contains(scheme) {
+            return candidate
+        }
+
+        return URL(string: "https://\(trimmed)")
     }
 
     @ViewBuilder
@@ -1804,10 +1860,9 @@ struct ChatDetailView: View {
             }
 
             if !message.text.isEmpty {
-                Text(message.text)
+                Text(attributedMessageText(message.text, isOutgoing: message.isMe))
                     .font(.body)
                     .multilineTextAlignment(.leading)
-                    .foregroundStyle(messageTextStyle(isOutgoing: message.isMe))
             }
         }
     }
@@ -2245,14 +2300,21 @@ struct ChatDetailView: View {
     ) -> some View {
         switch messageType {
         case .image:
+            let imageSize = attachmentDisplaySize(
+                attachment: attachment,
+                maxWidth: isEmbeddedInBubble ? max(messageMaxWidth - 24, 120) : min(messageMaxWidth + 24, 292),
+                maxHeight: 292
+            )
+
             RemoteChatAttachmentImage(
                 fileId: attachment.fileId,
                 localData: localAttachmentDataByFileId[attachment.fileId]
             )
-                .frame(
-                    maxWidth: isEmbeddedInBubble ? max(messageMaxWidth - 24, 180) : min(messageMaxWidth + 24, 292),
-                    maxHeight: 292
-                )
+            .frame(
+                width: imageSize.width,
+                height: imageSize.height,
+                alignment: .center
+            )
                 .clipShape(RoundedRectangle(cornerRadius: isEmbeddedInBubble ? 16 : 22, style: .continuous))
                 .overlay {
                     if !isEmbeddedInBubble {
@@ -2266,11 +2328,17 @@ struct ChatDetailView: View {
                 }
 
         case .video:
-            attachmentCard(
-                systemImage: "video.fill",
-                title: attachment.name ?? "Video",
-                subtitle: attachment.duration.map { "\($0)s" } ?? "Video"
+            RemoteChatAttachmentVideoPreview(
+                fileId: attachment.fileId,
+                localData: localAttachmentDataByFileId[attachment.fileId],
+                title: attachment.name,
+                duration: attachment.duration
             )
+            .frame(
+                maxWidth: isEmbeddedInBubble ? max(messageMaxWidth - 24, 180) : min(messageMaxWidth + 24, 292),
+                maxHeight: 292
+            )
+            .clipShape(RoundedRectangle(cornerRadius: isEmbeddedInBubble ? 16 : 22, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .onTapGesture {
                 openAttachmentPreview(attachment, as: .video)
@@ -2317,6 +2385,29 @@ struct ChatDetailView: View {
         case .text:
             EmptyView()
         }
+    }
+
+    private func attachmentDisplaySize(
+        attachment: MessageAttachmentDTO,
+        maxWidth: CGFloat,
+        maxHeight: CGFloat
+    ) -> CGSize {
+        let width = CGFloat(attachment.width ?? 0)
+        let height = CGFloat(attachment.height ?? 0)
+        let aspectRatio = (width > 0 && height > 0) ? width / height : 1
+
+        var displayWidth = maxWidth
+        var displayHeight = displayWidth / aspectRatio
+
+        if displayHeight > maxHeight {
+            displayHeight = maxHeight
+            displayWidth = displayHeight * aspectRatio
+        }
+
+        return CGSize(
+            width: max(1, displayWidth.rounded(.down)),
+            height: max(1, displayHeight.rounded(.down))
+        )
     }
 
     private func attachmentCard(systemImage: String, title: String, subtitle: String) -> some View {
@@ -2624,8 +2715,9 @@ struct ChatDetailView: View {
             )
 
             await MainActor.run {
-                messages = refreshedMessages
-                initialScrollTicket = UUID()
+                if messages != refreshedMessages {
+                    messages = refreshedMessages
+                }
 
                 if !ThreadNaming.isPlaceholderThreadName(dto.name) || ThreadNaming.isPlaceholderThreadName(threadName) {
                     threadName = dto.name
@@ -3024,7 +3116,7 @@ struct ChatDetailView: View {
     private func settleInitialScroll(using proxy: ScrollViewProxy) {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 140_000_000)
-            guard let latestID = messages.last?.id else { return }
+            guard !showsScrollToLatestButton, let latestID = messages.last?.id else { return }
             proxy.scrollTo(latestID, anchor: .bottom)
         }
     }
@@ -3666,13 +3758,13 @@ private struct RemoteChatAttachmentImage: View {
                     .resizable()
                     .interpolation(.high)
                     .antialiased(true)
-                    .scaledToFill()
+                    .scaledToFit()
             } else if let image {
                 Image(uiImage: image)
                     .resizable()
                     .interpolation(.high)
                     .antialiased(true)
-                    .scaledToFill()
+                    .scaledToFit()
             } else {
                 Rectangle()
                     .fill(.white.opacity(0.06))
@@ -3703,6 +3795,100 @@ private struct RemoteChatAttachmentImage: View {
         }
 
         return image.preparingForDisplay() ?? image
+    }
+}
+
+private struct RemoteChatAttachmentVideoPreview: View {
+    @Environment(AppServices.self) private var services
+    let fileId: String
+    var localData: Data? = nil
+    let title: String?
+    let duration: Int?
+    @State private var thumbnail: UIImage?
+    @State private var isLoading = false
+
+    var body: some View {
+        ZStack(alignment: .center) {
+            if let thumb = thumbnail {
+                Image(uiImage: thumb)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.white.opacity(0.06))
+                    .overlay {
+                        VStack(spacing: 6) {
+                            Image(systemName: "video.fill")
+                                .font(.title2)
+                                .foregroundStyle(.orange)
+
+                            if let dur = duration {
+                                Text("\(dur)s")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            } else if isLoading {
+                                ProgressView()
+                            }
+                        }
+                    }
+            }
+
+            // Play icon overlay
+            Circle()
+                .fill(Color.black.opacity(0.36))
+                .frame(width: 48, height: 48)
+                .overlay {
+                    Image(systemName: "play.fill")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                }
+                .shadow(color: .black.opacity(0.24), radius: 6, y: 2)
+        }
+        .task(id: fileId) {
+            guard thumbnail == nil, !isLoading else { return }
+            isLoading = true
+            do {
+                let data: Data?
+                if let local = localData {
+                    data = local
+                } else if !isLocalAttachmentFileId(fileId) {
+                    data = try await services.backend.fetchAttachmentData(fileId: fileId)
+                } else {
+                    data = nil
+                }
+
+                if let data, !data.isEmpty {
+                    // write to temporary file and generate a thumbnail using AVAsset
+                    let tmpUrl = try writeTempVideo(data: data, baseName: title)
+                    let asset = AVAsset(url: tmpUrl)
+                    let generator = AVAssetImageGenerator(asset: asset)
+                    generator.appliesPreferredTrackTransform = true
+                    let duration = try await asset.load(.duration)
+                    let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(duration)), preferredTimescale: 600)
+                    if let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) {
+                        thumbnail = UIImage(cgImage: cgImage).preparingForDisplay() ?? UIImage(cgImage: cgImage)
+                    }
+                }
+            } catch {
+#if DEBUG
+                debugPrint("Video thumbnail generation failed for \(fileId): \(error.localizedDescription)")
+#endif
+            }
+            isLoading = false
+        }
+    }
+
+    private func writeTempVideo(data: Data, baseName: String?) throws -> URL {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("ChatAttachmentPreview", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let cleaned = (baseName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? baseName! : UUID().uuidString
+        let url = directory.appendingPathComponent("\(cleaned)-\(UUID().uuidString).mp4")
+        try data.write(to: url, options: .atomic)
+        return url
     }
 }
 
