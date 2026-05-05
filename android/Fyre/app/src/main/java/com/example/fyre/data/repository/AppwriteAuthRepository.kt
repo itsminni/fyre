@@ -347,7 +347,7 @@ class AppwriteAuthRepository(
             address.locality,
             address.subAdminArea,
             address.adminArea,
-            address.country
+            address.countryName
         )
             .mapNotNull { it?.trim() }
             .filter { it.isNotEmpty() }

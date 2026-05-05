@@ -108,6 +108,9 @@ interface AppContextValue {
   updateProfileImages(imageDataItems: string[]): Promise<string | null>;
   updateProfile(input: ProfileUpdateInput): Promise<string | null>;
   updateAccountPreferences(input: {
+    city?: string | null;
+    cityLat?: number;
+    cityLng?: number;
     orientation: UserOrientation;
     showMe: User['showMe'];
     preferredGenders: UserGender[];
@@ -1304,6 +1307,13 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const updatedUser = normalizeUser({
         ...currentUser,
+        ...(input.city !== undefined
+          ? {
+              city: input.city.trim(),
+              cityLat: input.cityLat,
+              cityLng: input.cityLng
+            }
+          : {}),
         orientation: input.orientation,
         showMe: inferShowMeFromPreferredGenders(preferredGenders, input.showMe),
         preferredGenders,

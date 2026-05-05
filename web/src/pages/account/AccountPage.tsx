@@ -15,6 +15,13 @@ import { SegmentedControl } from '../../components/ui/SegmentedControl';
 import { useAppStore } from '../../hooks/useAppStore';
 import { TranslationKey, useI18n } from '../../i18n';
 import {
+  GeocodeResult,
+  findCityByLabel,
+  mergeCityResults,
+  searchCities,
+  searchCitiesRemote
+} from '../../services/geocode';
+import {
   EventHistoryStatus,
   MatchIntent,
   ThemeMode,
@@ -219,12 +226,17 @@ export function AccountPage(): JSX.Element {
   const accountAutosaveReadyRef = useRef(false);
   const accountAutosaveTimerRef = useRef<number | null>(null);
   const lastAccountAutosaveKeyRef = useRef('');
+  const cityIsDirtyRef = useRef(false);
+  const [remoteCitySuggestions, setRemoteCitySuggestions] = useState<GeocodeResult[]>([]);
+  const [selectedCitySuggestion, setSelectedCitySuggestion] = useState<GeocodeResult | null>(null);
+  const [isCityFieldFocused, setIsCityFieldFocused] = useState(false);
 
   const [orientation, setOrientation] = useState<UserOrientation>(currentUser?.orientation ?? 'straight');
   const [showMe, setShowMe] = useState<UserShowMe>(currentUser?.showMe ?? 'everyone');
   const [preferredGenders, setPreferredGenders] = useState<UserGender[]>(
     defaultPreferredGenders(currentUser?.preferredGenders, currentUser?.showMe)
   );
+  const [city, setCity] = useState(currentUser?.city ?? '');
   const [smokes, setSmokes] = useState(Boolean(currentUser?.smokes));
   const [drinks, setDrinks] = useState(Boolean(currentUser?.drinks));
   const [excludeSmokers, setExcludeSmokers] = useState(Boolean(currentUser?.excludeSmokers));
@@ -249,14 +261,32 @@ export function AccountPage(): JSX.Element {
   const [favoriteSong, setFavoriteSong] = useState(currentUser?.favoriteSong ?? '');
   const [favoriteMovie, setFavoriteMovie] = useState(currentUser?.favoriteMovie ?? '');
 
+  const localCitySuggestions = useMemo(() => searchCities(city), [city]);
+  const citySuggestions = useMemo(
+    () => mergeCityResults(localCitySuggestions, remoteCitySuggestions),
+    [localCitySuggestions, remoteCitySuggestions]
+  );
+  const isSelectedCityValue = selectedCitySuggestion?.label === city || selectedCitySuggestion?.city === city;
+  const showCitySuggestions = isCityFieldFocused && city.trim().length > 0 && citySuggestions.length > 0;
+
   useEffect(() => {
     if (!currentUser) {
       return;
     }
 
+    const isCityBeingEdited = cityIsDirtyRef.current || isCityFieldFocused || city.trim().length > 0;
+
     setOrientation(currentUser.orientation ?? 'straight');
     setShowMe(currentUser.showMe ?? 'everyone');
     setPreferredGenders(defaultPreferredGenders(currentUser.preferredGenders, currentUser.showMe));
+    if (!isCityBeingEdited) {
+      setCity(currentUser.city ?? '');
+    }
+    if (!isCityBeingEdited) {
+      setRemoteCitySuggestions([]);
+      setSelectedCitySuggestion(null);
+      setIsCityFieldFocused(false);
+    }
     setSmokes(Boolean(currentUser.smokes));
     setDrinks(Boolean(currentUser.drinks));
     setExcludeSmokers(Boolean(currentUser.excludeSmokers));
@@ -287,6 +317,7 @@ export function AccountPage(): JSX.Element {
         orientation,
         showMe,
         preferredGenders: [...preferredGenders].sort(),
+        city,
         smokes,
         drinks,
         excludeSmokers,
@@ -312,6 +343,7 @@ export function AccountPage(): JSX.Element {
       orientation,
       showMe,
       preferredGenders,
+      city,
       smokes,
       drinks,
       excludeSmokers,
@@ -355,7 +387,17 @@ export function AccountPage(): JSX.Element {
     const parsedAgeRangeMax = ageRangeMax.trim().length > 0 ? Number(ageRangeMax) : 99;
     const parsedMaxDistanceKm = parseDistanceInput(maxDistanceKm);
 
+    const trimmedCity = city.trim();
+    const selectedCityValue = isSelectedCityValue ? selectedCitySuggestion : null;
+    const shouldPersistCity = trimmedCity.length === 0 || Boolean(selectedCityValue);
+    const resolvedCityValue = trimmedCity.length === 0 ? '' : selectedCityValue?.city ?? undefined;
+    const resolvedCityLat = selectedCityValue?.lat;
+    const resolvedCityLng = selectedCityValue?.lng;
+
     const error = await updateAccountPreferences({
+      city: shouldPersistCity ? resolvedCityValue : undefined,
+      cityLat: resolvedCityLat,
+      cityLng: resolvedCityLng,
       orientation,
       showMe,
       preferredGenders,
@@ -379,12 +421,19 @@ export function AccountPage(): JSX.Element {
       favoriteSong,
       favoriteMovie
     });
-
     setProfileFeedback(
       error
         ? { isError: true, message: error }
         : { isError: false, message: t('account.autosave.saved') }
     );
+
+    if (!error && shouldPersistCity) {
+      if (trimmedCity.length === 0) {
+        setCity('');
+      }
+      setSelectedCitySuggestion(null);
+      cityIsDirtyRef.current = false;
+    }
   }, [
     ageRangeMax,
     ageRangeMin,
@@ -395,6 +444,8 @@ export function AccountPage(): JSX.Element {
     excludeSmokers,
     favoriteMovie,
     favoriteSong,
+    city,
+    citySuggestions,
     hobbies,
     instagram,
     instagramTag,
@@ -413,6 +464,32 @@ export function AccountPage(): JSX.Element {
     website,
     willUserLoseEventRegistrations
   ]);
+
+  useEffect(() => {
+    const normalizedCity = city.trim();
+    if (normalizedCity.length < 2 || findCityByLabel(normalizedCity)) {
+      setRemoteCitySuggestions([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      searchCitiesRemote(normalizedCity, controller.signal)
+        .then(setRemoteCitySuggestions)
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            return;
+          }
+
+          setRemoteCitySuggestions([]);
+        });
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [city]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -492,6 +569,19 @@ export function AccountPage(): JSX.Element {
     } finally {
       event.target.value = '';
     }
+  }
+
+  function updateCityInput(value: string): void {
+    cityIsDirtyRef.current = true;
+    setCity(value);
+    setSelectedCitySuggestion(null);
+  }
+
+  function selectCitySuggestion(suggestion: GeocodeResult): void {
+    cityIsDirtyRef.current = true;
+    setCity(suggestion.label);
+    setSelectedCitySuggestion(suggestion);
+    setIsCityFieldFocused(false);
   }
 
   async function handleAvatarRemove(): Promise<void> {
@@ -761,10 +851,6 @@ export function AccountPage(): JSX.Element {
                 <dd>{currentUser.lastName ?? '-'}</dd>
               </div>
               <div>
-                <dt>{t('account.city')}</dt>
-                <dd>{currentUser.city ?? '-'}</dd>
-              </div>
-              <div>
                 <dt>{t('account.email')}</dt>
                 <dd>{currentUser.email}</dd>
               </div>
@@ -779,6 +865,35 @@ export function AccountPage(): JSX.Element {
             </dl>
 
             <div className="account-form-grid account-form-grid--ios">
+              <label>
+                {t('account.city')}
+                <div className="city-autocomplete">
+                  <input
+                    value={city}
+                    onBlur={() => window.setTimeout(() => setIsCityFieldFocused(false), 120)}
+                    onChange={(event) => updateCityInput(event.target.value)}
+                    onFocus={() => setIsCityFieldFocused(true)}
+                    placeholder={t('profileSetup.city.placeholder')}
+                    autoComplete="off"
+                  />
+                  {showCitySuggestions && (
+                    <div className="city-autocomplete__list" role="listbox">
+                      {citySuggestions.map((suggestion) => (
+                        <button
+                          key={`${suggestion.label}-${suggestion.lat}-${suggestion.lng}`}
+                          type="button"
+                          role="option"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => selectCitySuggestion(suggestion)}
+                        >
+                          {suggestion.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </label>
+
               <label>
                 {t('account.orientation')}
                 <select
