@@ -3,6 +3,11 @@ import { useI18n } from '../../i18n';
 
 type MobilePlatform = 'ios' | 'android' | 'generic';
 
+const MOBILE_APP_URLS: Record<'ios' | 'android', string | null> = {
+  ios: null,
+  android: null
+};
+
 function detectPlatform(): MobilePlatform {
   if (typeof navigator === 'undefined') {
     return 'generic';
@@ -33,9 +38,7 @@ export function MobileAppGate(): JSX.Element | null {
   }, []);
 
   const platform = useMemo(() => detectPlatform(), []);
-  const appUrl = platform === 'android'
-    ? import.meta.env.VITE_ANDROID_APP_URL
-    : import.meta.env.VITE_IOS_APP_URL;
+  const appUrl = platform === 'android' ? MOBILE_APP_URLS.android : MOBILE_APP_URLS.ios;
   const titleKey = platform === 'ios'
     ? 'mobile.title.ios'
     : platform === 'android'

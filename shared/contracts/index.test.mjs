@@ -31,6 +31,8 @@ test("makeDiscoverProfileContract normalizes rich payloads", () => {
     bio: "Ciao",
     imageUrl: "https://cdn.example.test/a.jpg",
     photos: ["https://cdn.example.test/a.jpg"],
+    photoFileIds: [],
+    avatarFileId: undefined,
     compatibilityScore: 88,
     distanceKm: 14,
     distance: 14,

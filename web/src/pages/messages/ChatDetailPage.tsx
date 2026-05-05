@@ -3,8 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChatAvatar } from '../../components/messages/ChatAvatar';
 import { Button } from '../../components/ui/Button';
 import { useAppStore } from '../../hooks/useAppStore';
-import { formatLastSeen } from '../../context/AppContext';
-import { ChatAttachment } from '../../types/models';
+import { ChatAttachment, ChatMessage } from '../../types/models';
+import { formatLastSeen } from '../../utils/formatLastSeen';
 
 const CHAT_ATTACHMENT_EXTENSIONS = [
   'heif',
@@ -212,6 +212,26 @@ function formatDeliveryLabel(deliveryState: string | undefined, readAt: string |
   return 'Inviato';
 }
 
+function formatMessageDateTime(value: string | undefined): string {
+  if (!value) {
+    return 'Non disponibile';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).format(date);
+}
+
 function attachmentLabel(attachment: ChatAttachment): string {
   switch (attachment.type) {
     case 'image':
@@ -245,6 +265,84 @@ function formatAttachmentDuration(duration: number | undefined): string {
   const minutes = Math.floor(duration / 60);
   const seconds = Math.max(0, Math.round(duration % 60));
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function MessageInfoDialog({
+  message,
+  onClose
+}: {
+  message: ChatMessage;
+  onClose: () => void;
+}): JSX.Element {
+  const deliveryLabel = formatDeliveryLabel(message.deliveryState, message.readAt);
+
+  return (
+    <div
+      className="chat-message-info"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Info messaggio"
+      onClick={onClose}
+    >
+      <article className="chat-message-info__panel" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <small>Messaggio</small>
+            <h3>Info</h3>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Chiudi info messaggio">
+            Chiudi
+          </button>
+        </header>
+
+        <dl className="chat-message-info__list">
+          <div>
+            <dt>Stato</dt>
+            <dd>{deliveryLabel}</dd>
+          </div>
+          <div>
+            <dt>Inviato</dt>
+            <dd>{formatMessageDateTime(message.createdAt)}</dd>
+          </div>
+          <div>
+            <dt>Letto</dt>
+            <dd>{message.readAt ? formatMessageDateTime(message.readAt) : 'Non ancora letto'}</dd>
+          </div>
+          {message.replyToMessageId && (
+            <div>
+              <dt>Risposta a</dt>
+              <dd>{message.replyToMessageId}</dd>
+            </div>
+          )}
+        </dl>
+
+        {message.text && (
+          <div className="chat-message-info__text">
+            <small>Testo</small>
+            <p>{message.text}</p>
+          </div>
+        )}
+
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="chat-message-info__attachments">
+            <small>Allegati</small>
+            <ul>
+              {message.attachments.map((attachment) => (
+                <li key={attachment.id}>
+                  <span>{attachmentLabel(attachment)}</span>
+                  <small>
+                    {[attachment.name, formatAttachmentSize(attachment.sizeBytes), formatAttachmentDuration(attachment.duration)]
+                      .filter(Boolean)
+                      .join(' - ')}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </article>
+    </div>
+  );
 }
 
 function VoiceMessagePlayer({ attachment }: { attachment: ChatAttachment }): JSX.Element {
@@ -309,16 +407,57 @@ function VoiceMessagePlayer({ attachment }: { attachment: ChatAttachment }): JSX
   );
 }
 
-function ChatAttachmentItem({ attachment }: { attachment: ChatAttachment }): JSX.Element {
+function ImagePreviewDialog({
+  attachment,
+  onClose
+}: {
+  attachment: ChatAttachment;
+  onClose: () => void;
+}): JSX.Element {
+  return (
+    <div
+      className="chat-image-preview"
+      role="dialog"
+      aria-modal="true"
+      aria-label={attachment.name}
+      onClick={onClose}
+    >
+      <button
+        className="chat-image-preview__close"
+        type="button"
+        onClick={onClose}
+        aria-label="Chiudi immagine"
+      >
+        Chiudi
+      </button>
+      <div className="chat-image-preview__image" onClick={(event) => event.stopPropagation()}>
+        <img src={attachment.dataUrl} alt={attachment.name} />
+      </div>
+    </div>
+  );
+}
+
+function ChatAttachmentItem({
+  attachment,
+  onOpenImage
+}: {
+  attachment: ChatAttachment;
+  onOpenImage?: (attachment: ChatAttachment) => void;
+}): JSX.Element {
   const subtitle = [formatAttachmentDuration(attachment.duration), formatAttachmentSize(attachment.sizeBytes)]
     .filter(Boolean)
     .join(' - ');
 
   if (attachment.type === 'image') {
     return (
-      <a className="chat-attachment-media" href={attachment.dataUrl} download={attachment.name} target="_blank" rel="noreferrer">
+      <button
+        className="chat-attachment-media"
+        type="button"
+        onClick={() => onOpenImage?.(attachment)}
+        aria-label={`Apri ${attachment.name}`}
+      >
         <img src={attachment.dataUrl} alt={attachment.name} />
-      </a>
+      </button>
     );
   }
 
@@ -378,9 +517,11 @@ export function ChatDetailPage(): JSX.Element {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [relationshipFeedback, setRelationshipFeedback] = useState<string | null>(null);
   const [isAvatarPreviewOpen, setIsAvatarPreviewOpen] = useState(false);
+  const [imagePreviewAttachment, setImagePreviewAttachment] = useState<ChatAttachment | null>(null);
+  const [messageInfo, setMessageInfo] = useState<ChatMessage | null>(null);
   const [voiceRecorderState, setVoiceRecorderState] = useState<VoiceRecorderState>('idle');
   const [voiceRecorderElapsed, setVoiceRecorderElapsed] = useState(0);
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
   const voiceRecorderRef = useRef<VoiceRecorderResources | null>(null);
   const voiceSamplesRef = useRef<Float32Array[]>([]);
 
@@ -397,15 +538,34 @@ export function ChatDetailPage(): JSX.Element {
   }, [replyToId, thread]);
 
   const themedSurfaceStyle = useMemo(() => chatSurfaceStyle(persisted.settings), [persisted.settings]);
+  const resolvedThreadId = thread?.id ?? null;
+  const latestMessageId = thread && thread.messages.length > 0
+    ? thread.messages[thread.messages.length - 1].id
+    : null;
 
   useEffect(() => {
-    if (!thread) {
+    if (!resolvedThreadId) {
       return;
     }
 
-    markThreadRead(thread.id);
-    endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  }, [markThreadRead, thread?.id, thread?.messages.length]);
+    markThreadRead(resolvedThreadId);
+  }, [markThreadRead, resolvedThreadId]);
+
+  useEffect(() => {
+    if (!resolvedThreadId) {
+      return;
+    }
+
+    const messagesElement = messagesRef.current;
+    if (!messagesElement) {
+      return;
+    }
+
+    messagesElement.scrollTo({
+      top: messagesElement.scrollHeight,
+      behavior: 'smooth'
+    });
+  }, [latestMessageId, resolvedThreadId]);
 
   useEffect(() => {
     if (voiceRecorderState !== 'recording') {
@@ -688,7 +848,7 @@ export function ChatDetailPage(): JSX.Element {
         </div>
       </header>
 
-      <div className="chat-messages">
+      <div className="chat-messages" ref={messagesRef}>
         {thread.messages.map((message) => {
           const replied = message.replyToMessageId
             ? thread.messages.find((candidate) => candidate.id === message.replyToMessageId)
@@ -718,7 +878,7 @@ export function ChatDetailPage(): JSX.Element {
                   <ul className="chat-attachments-list">
                     {message.attachments.map((attachment) => (
                       <li key={attachment.id}>
-                        <ChatAttachmentItem attachment={attachment} />
+                        <ChatAttachmentItem attachment={attachment} onOpenImage={setImagePreviewAttachment} />
                       </li>
                     ))}
                   </ul>
@@ -733,6 +893,16 @@ export function ChatDetailPage(): JSX.Element {
                   </span>
                 )}
 
+                {message.isMe && (
+                  <button
+                    className="chat-bubble__reply-action"
+                    type="button"
+                    onClick={() => setMessageInfo(message)}
+                  >
+                    Info
+                  </button>
+                )}
+
                 <button
                   className="chat-bubble__reply-action"
                   type="button"
@@ -744,7 +914,6 @@ export function ChatDetailPage(): JSX.Element {
             </article>
           );
         })}
-        <div ref={endRef} />
       </div>
 
       {replyMessage && (
@@ -821,6 +990,8 @@ export function ChatDetailPage(): JSX.Element {
             <li key={attachment.id}>
               {attachment.type === 'audio' ? (
                 <ChatAttachmentItem attachment={attachment} />
+              ) : attachment.type === 'image' ? (
+                <ChatAttachmentItem attachment={attachment} onOpenImage={setImagePreviewAttachment} />
               ) : (
                 <span>{attachment.name}</span>
               )}
@@ -857,6 +1028,17 @@ export function ChatDetailPage(): JSX.Element {
             <ChatAvatar name={thread.name} avatar={thread.avatar} size={220} isOnline={false} />
           </div>
         </div>
+      )}
+
+      {imagePreviewAttachment && (
+        <ImagePreviewDialog
+          attachment={imagePreviewAttachment}
+          onClose={() => setImagePreviewAttachment(null)}
+        />
+      )}
+
+      {messageInfo && (
+        <MessageInfoDialog message={messageInfo} onClose={() => setMessageInfo(null)} />
       )}
     </section>
   );
