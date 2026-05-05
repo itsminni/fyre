@@ -63,6 +63,10 @@ Il progetto utilizza librerie esterne diverse in base alla piattaforma:
 
 Per i dettagli specifici vedere i README delle singole versioni.
 
+### Visualizzazione admin
+
+Per visualizzare l'evento dalla modalità admin accedere con l'account di prova con mail *admin@example.com* e password *[redacted-password]*
+
 ## English
 
 Fyre is a multi-platform project for dating, social discovery, messaging, and event participation. The repository contains three application clients and an Appwrite-based backend:
@@ -125,3 +129,7 @@ The project uses different external libraries depending on the platform:
 - Appwrite backend: functions use JavaScript ES Modules and standard runtime APIs.
 
 See each version-specific README for platform details.
+
+### Admin view
+
+To view the event in admin mode, log in with the test account using the email *admin@example.com* and the password *[redacted-password]*.
