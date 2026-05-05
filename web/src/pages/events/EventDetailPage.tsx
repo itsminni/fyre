@@ -46,7 +46,7 @@ export function EventDetailPage(): JSX.Element {
     'participants'
   );
 
-  const eventDate = new Date(mainEventConfig.date);
+  const eventDate = useMemo(() => new Date(mainEventConfig.date), [mainEventConfig.date]);
 
   useEffect(() => {
     setAdminTitle(mainEventConfig.title);

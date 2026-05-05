@@ -618,7 +618,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         realtimeState: 'disconnected'
       }));
     }
-  }, [appwriteService]);
+  }, []);
 
   const commitCurrentUser = useCallback((user: User | null): void => {
     setPersisted((prev) => {
@@ -703,7 +703,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       window.removeEventListener('pagehide', markOffline);
       markOffline();
     };
-  }, [currentUser?.appwriteUserId, currentUser?.email]);
+  }, [currentUser]);
 
   useEffect(() => {
     if (!IS_BACKEND_MODE) {
@@ -831,7 +831,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       }
       unsubscribe();
     };
-  }, [appwriteService, currentUser?.appwriteUserId, refreshThreads]);
+  }, [currentUser?.appwriteUserId, refreshThreads]);
 
   const isEventAdmin = useMemo(() => {
     if (!currentUser) {
