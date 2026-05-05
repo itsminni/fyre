@@ -59,8 +59,8 @@ Il progetto utilizza librerie esterne diverse in base alla piattaforma:
 
 - Web: dipendenze npm definite in `web/package.json`, tra cui React, React Router, Appwrite SDK, TypeScript, Vite, ESLint e Vitest. Si installano con `npm install` dentro `web/`.
 - Android: dipendenze Gradle definite in `android/Fyre/gradle/libs.versions.toml` e `android/Fyre/app/build.gradle.kts`, tra cui Jetpack Compose, Navigation Compose, DataStore, Coil, Gson, OkHttp, Media3, WorkManager e Accompanist Permissions. Gradle le scarica automaticamente con `./gradlew assembleDebug` o `./gradlew testDebugUnitTest`.
-- iOS: al momento non sono dichiarate librerie esterne nel `Podfile`; l'app usa framework Apple e codice SwiftUI nativo. Il `Podfile` resta presente per tracciare eventuali librerie future.
-- Backend Appwrite: le funzioni usano JavaScript ES Modules e API runtime standard; non sono dichiarate dipendenze npm nei rispettivi `package.json`.
+- iOS: Non sono dichiarate librerie esterne nel `Podfile`.
+- Backend Appwrite: le funzioni usano JavaScript ES Modules e API runtime standard.
 
 Per i dettagli specifici vedere i README delle singole versioni.
 
@@ -123,7 +123,7 @@ The project uses different external libraries depending on the platform:
 
 - Web: npm dependencies defined in `web/package.json`, including React, React Router, Appwrite SDK, TypeScript, Vite, ESLint, and Vitest. Install them with `npm install` inside `web/`.
 - Android: Gradle dependencies defined in `android/Fyre/gradle/libs.versions.toml` and `android/Fyre/app/build.gradle.kts`, including Jetpack Compose, Navigation Compose, DataStore, Coil, Gson, OkHttp, Media3, WorkManager, and Accompanist Permissions. Gradle downloads them automatically with `./gradlew assembleDebug` or `./gradlew testDebugUnitTest`.
-- iOS: no external libraries are currently declared in the `Podfile`; the app uses Apple frameworks and native SwiftUI code. The `Podfile` remains in place to track future libraries.
-- Appwrite backend: functions use JavaScript ES Modules and standard runtime APIs; no npm dependencies are declared in the function `package.json` files.
+- iOS: no external libraries are currently declared in the `Podfile`.
+- Appwrite backend: functions use JavaScript ES Modules and standard runtime APIs.
 
 See each version-specific README for platform details.
