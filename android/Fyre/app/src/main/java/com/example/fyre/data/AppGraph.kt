@@ -39,7 +39,7 @@ class AppGraph(
     private val localRecentChatStore = LocalRecentChatStore(appContext)
 
     val authRepository: AuthRepository = appwriteGateway
-        ?.let { gateway -> AppwriteAuthRepository(gateway) }
+        ?.let { gateway -> AppwriteAuthRepository(gateway, appContext) }
         ?: BackendUnavailableAuthRepository(backendUnavailableMessage)
 
     val discoveryRepository: DiscoveryRepository = if (

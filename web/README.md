@@ -35,6 +35,19 @@ Questa cartella contiene il client web di Fyre, sviluppato con React, TypeScript
    npm run build
    ```
 
+### Configurazione Appwrite e geocoding
+
+Nel progetto Appwrite sono registrate le platform web per gli hostname usati in sviluppo:
+
+- `localhost`
+- `127.0.0.1`
+
+L'autocomplete e la validazione città usano Photon con endpoint pubblico di default. Non servono chiavi. Per usare un endpoint Photon diverso:
+
+```bash
+VITE_PHOTON_BASE_URL=https://example.com npm run build
+```
+
 ### Librerie esterne
 
 Le librerie esterne sono definite in `package.json` e installate tramite npm:
@@ -103,6 +116,19 @@ This folder contains the Fyre web client, built with React, TypeScript, and Vite
    ```bash
    npm run build
    ```
+
+### Appwrite and geocoding configuration
+
+The Appwrite project includes web platforms for the hostnames used during development:
+
+- `localhost`
+- `127.0.0.1`
+
+City autocomplete and validation use Photon's public endpoint by default. No key is required. To use a different Photon endpoint:
+
+```bash
+VITE_PHOTON_BASE_URL=https://example.com npm run build
+```
 
 ### External libraries
 

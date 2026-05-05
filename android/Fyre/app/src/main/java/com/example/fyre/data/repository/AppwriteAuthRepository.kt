@@ -1,6 +1,8 @@
 package com.example.fyre.data.repository
 
 import android.content.Context
+import android.location.Address
+import android.location.Geocoder
 import com.example.fyre.data.appwrite.AppwriteApiException
 import com.example.fyre.data.appwrite.AppwriteConfiguration
 import com.example.fyre.data.appwrite.AppwriteConfigurationException
@@ -15,15 +17,18 @@ import com.example.fyre.data.model.UserProfile
 import com.google.gson.JsonNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.util.Locale
 
 class AppwriteAuthRepository(
-    private val gateway: AppwriteGateway
+    private val gateway: AppwriteGateway,
+    private val context: Context? = null
 ) : AuthRepository {
 
     constructor(
         context: Context,
         configuration: AppwriteConfiguration
-    ) : this(AppwriteGateway(context, configuration))
+    ) : this(AppwriteGateway(context, configuration), context.applicationContext)
 
     override suspend fun findUserByEmail(email: String): User? {
         val account = gateway.fetchCurrentAccount(required = false) ?: return null
@@ -99,6 +104,15 @@ class AppwriteAuthRepository(
                 }
                 ?.filter { it.isNotBlank() }
                 .orEmpty()
+            val existingCity = existingProfile?.stringOrNull("city").orEmpty().trim()
+            val existingLatitude = existingProfile?.get("latitude")?.asDoubleOrNull()
+            val existingLongitude = existingProfile?.get("longitude")?.asDoubleOrNull()
+            val resolvedLocation = resolveCityLocation(
+                city = profile.city,
+                existingCity = existingCity,
+                existingLatitude = existingLatitude,
+                existingLongitude = existingLongitude
+            ) ?: throw IllegalStateException("Non riesco a trovare questa città")
 
             val uploadedAvatarFileId = if (!profile.avatarUri.isNullOrBlank() && !isRemoteUri(profile.avatarUri)) {
                 gateway.uploadAvatarFromUri(profile.avatarUri)
@@ -120,7 +134,7 @@ class AppwriteAuthRepository(
                 addProperty("email", normalizedEmail)
                 addProperty("firstName", profile.firstName.trim())
                 addProperty("lastName", profile.lastName.trim())
-                addProperty("city", profile.city.trim())
+                addProperty("city", resolvedLocation.displayName)
                 addProperty("birthDate", gateway.normalizeBirthDate(profile.birthDate))
                 addProperty("bio", profile.bio.trim())
                 addProperty("gender", backendGenderValue(profile.gender.ifBlank { "male" }))
@@ -136,8 +150,8 @@ class AppwriteAuthRepository(
                 } else {
                     addProperty("maxDistanceKm", profile.maxDistanceKm.coerceAtLeast(5))
                 }
-                addProperty("latitude", profile.latitude)
-                addProperty("longitude", profile.longitude)
+                addProperty("latitude", resolvedLocation.latitude)
+                addProperty("longitude", resolvedLocation.longitude)
                 addProperty("smokes", profile.smokes)
                 addProperty("drinks", profile.drinks)
                 addProperty("excludeSmokers", profile.excludeSmokers)
@@ -291,6 +305,56 @@ class AppwriteAuthRepository(
         return value.startsWith("http://") || value.startsWith("https://")
     }
 
+    private suspend fun resolveCityLocation(
+        city: String,
+        existingCity: String,
+        existingLatitude: Double?,
+        existingLongitude: Double?
+    ): ResolvedCityLocation? {
+        val normalizedCity = city.trim()
+        if (normalizedCity.isBlank()) {
+            return null
+        }
+
+        if (existingCity.isNotBlank() &&
+            existingLatitude != null &&
+            existingLongitude != null &&
+            existingCity.equals(normalizedCity, ignoreCase = true)
+        ) {
+            return ResolvedCityLocation(existingCity, existingLatitude, existingLongitude)
+        }
+
+        val appContext = context ?: return null
+        return withContext(Dispatchers.IO) {
+            val geocoder = Geocoder(appContext, Locale.getDefault())
+            try {
+                @Suppress("DEPRECATION")
+                val results = geocoder.getFromLocationName(normalizedCity, 1)
+                val address = results?.firstOrNull() ?: return@withContext null
+                ResolvedCityLocation(
+                    displayName = normalizedCityFromAddress(address, normalizedCity),
+                    latitude = address.latitude,
+                    longitude = address.longitude
+                )
+            } catch (_: IOException) {
+                null
+            }
+        }
+    }
+
+    private fun normalizedCityFromAddress(address: Address, fallback: String): String {
+        val parts = listOf(
+            address.locality,
+            address.subAdminArea,
+            address.adminArea,
+            address.country
+        )
+            .mapNotNull { it?.trim() }
+            .filter { it.isNotEmpty() }
+
+        return parts.firstOrNull() ?: fallback.trim()
+    }
+
     private fun normalizedSocialTag(value: String?): String? {
         val trimmed = value?.trim().orEmpty()
         if (trimmed.isBlank()) return null
@@ -321,3 +385,9 @@ class AppwriteAuthRepository(
         private const val MaxProfilePhotoCount = 6
     }
 }
+
+private data class ResolvedCityLocation(
+    val displayName: String,
+    val latitude: Double,
+    val longitude: Double
+)

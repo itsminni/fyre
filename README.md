@@ -52,6 +52,14 @@ Le funzioni backend si trovano in `functions/` e gestiscono discovery, swipe, ma
 
 Documentazione specifica: `functions/README.md`.
 
+### Configurazione pubblica e platform Appwrite
+I client includono già gli ID progetto Appwrite pubblici usati da questo repository. 
+
+- Web: hostname `localhost` e `127.0.0.1` per lo sviluppo locale,
+- iOS: Apple platform con bundle identifier dell'app Xcode.
+- Android: Android platform con `applicationId` dell'app Gradle.
+
+
 ### Librerie esterne e installazione
 
 Il progetto utilizza librerie esterne diverse in base alla piattaforma:
@@ -118,6 +126,16 @@ Specific documentation: `web/README.md`.
 Backend functions are located in `functions/` and handle discovery, swipes, matches, chat, relationships, and events. Each function is intended to be deployed on Appwrite with the environment variables required by the function source files.
 
 Specific documentation: `functions/README.md`.
+
+### Public configuration and Appwrite platforms
+
+The clients already include the public Appwrite project IDs used by this repository.
+
+- Web: hostnames `localhost` and `127.0.0.1` for local development.
+- iOS: an Apple platform with the Xcode app bundle identifier.
+- Android: an Android platform with the Gradle app `applicationId`.
+
+Web city search uses Photon's public endpoint by default, so it does not require keys or environment variables. The provider can be changed by setting `VITE_PHOTON_BASE_URL` before building.
 
 ### External libraries and installation
 

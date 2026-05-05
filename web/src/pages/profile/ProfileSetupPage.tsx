@@ -1,11 +1,18 @@
-import { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { LanguageSwitch } from '../../components/layout/LanguageSwitch';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { useAppStore } from '../../hooks/useAppStore';
 import { TranslationKey, useI18n } from '../../i18n';
-import { findCityByLabel, searchCities } from '../../services/geocode';
+import {
+  GeocodeResult,
+  findCityByLabel,
+  mergeCityResults,
+  resolveCityInput,
+  searchCities,
+  searchCitiesRemote
+} from '../../services/geocode';
 import {
   GENDER_OPTIONS,
   ORIENTATION_OPTIONS,
@@ -216,9 +223,44 @@ export function ProfileSetupPage(): JSX.Element {
   const [profilePhotoDrag, setProfilePhotoDrag] = useState<ProfilePhotoDragState | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [remoteCitySuggestions, setRemoteCitySuggestions] = useState<GeocodeResult[]>([]);
+  const [selectedCitySuggestion, setSelectedCitySuggestion] = useState<GeocodeResult | null>(null);
+  const [isCityFieldFocused, setIsCityFieldFocused] = useState(false);
 
-  const citySuggestions = useMemo(() => searchCities(city), [city]);
+  const localCitySuggestions = useMemo(() => searchCities(city), [city]);
+  const citySuggestions = useMemo(
+    () => mergeCityResults(localCitySuggestions, remoteCitySuggestions),
+    [localCitySuggestions, remoteCitySuggestions]
+  );
+  const isSelectedCityValue = selectedCitySuggestion?.label === city || selectedCitySuggestion?.city === city;
+  const showCitySuggestions = isCityFieldFocused && city.trim().length > 0 && citySuggestions.length > 0;
   const remainingProfilePhotoSlots = MAX_PROFILE_PHOTOS - profilePhotos.length;
+
+  useEffect(() => {
+    const normalizedCity = city.trim();
+    if (normalizedCity.length < 2 || findCityByLabel(normalizedCity)) {
+      setRemoteCitySuggestions([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      searchCitiesRemote(normalizedCity, controller.signal)
+        .then(setRemoteCitySuggestions)
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            return;
+          }
+
+          setRemoteCitySuggestions([]);
+        });
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [city]);
 
   if (!currentUser) {
     return <Navigate to="/" replace />;
@@ -232,6 +274,17 @@ export function ProfileSetupPage(): JSX.Element {
         ? current.filter((candidate) => candidate !== option)
         : [...current, option]
     );
+  }
+
+  function updateCityInput(value: string): void {
+    setCity(value);
+    setSelectedCitySuggestion(null);
+  }
+
+  function selectCitySuggestion(suggestion: GeocodeResult): void {
+    setCity(suggestion.label);
+    setSelectedCitySuggestion(suggestion);
+    setIsCityFieldFocused(false);
   }
 
   async function onAvatarChange(event: ChangeEvent<HTMLInputElement>) {
@@ -507,18 +560,32 @@ export function ProfileSetupPage(): JSX.Element {
       }
     }
 
-    const resolvedCity = findCityByLabel(city) ?? searchCities(city)[0] ?? null;
+    setIsSaving(true);
+    let resolvedCity: GeocodeResult | null;
+    try {
+      resolvedCity = isSelectedCityValue
+        ? selectedCitySuggestion
+        : await resolveCityInput(city, citySuggestions);
+    } catch {
+      resolvedCity = null;
+    }
+
+    if (!resolvedCity) {
+      setIsSaving(false);
+      setFeedbackMessage(t('profileSetup.error.cityLookupFailed'));
+      return;
+    }
+
     const parsedAgeRangeMin = ageRangeMin.trim().length > 0 ? Number(ageRangeMin) : 18;
     const parsedAgeRangeMax = ageRangeMax.trim().length > 0 ? Number(ageRangeMax) : 99;
     const parsedMaxDistance = maxDistanceKm.trim().length > 0 ? Number(maxDistanceKm) : undefined;
 
-    setIsSaving(true);
     const error = await updateProfile({
       firstName,
       lastName,
-      city: resolvedCity?.city ?? city,
-      cityLat: resolvedCity?.lat,
-      cityLng: resolvedCity?.lng,
+      city: resolvedCity.city,
+      cityLat: resolvedCity.lat,
+      cityLng: resolvedCity.lng,
       birthDate,
       gender,
       orientation,
@@ -670,17 +737,31 @@ export function ProfileSetupPage(): JSX.Element {
 
                 <label>
                   {t('account.city')} *
-                  <input
-                    list="profile-city-suggestions"
-                    value={city}
-                    onChange={(event) => setCity(event.target.value)}
-                    placeholder={t('profileSetup.city.placeholder')}
-                  />
-                  <datalist id="profile-city-suggestions">
-                    {citySuggestions.map((suggestion) => (
-                      <option key={suggestion.label} value={suggestion.label} />
-                    ))}
-                  </datalist>
+                  <div className="city-autocomplete">
+                    <input
+                      value={city}
+                      onBlur={() => window.setTimeout(() => setIsCityFieldFocused(false), 120)}
+                      onChange={(event) => updateCityInput(event.target.value)}
+                      onFocus={() => setIsCityFieldFocused(true)}
+                      placeholder={t('profileSetup.city.placeholder')}
+                      autoComplete="off"
+                    />
+                    {showCitySuggestions && (
+                      <div className="city-autocomplete__list" role="listbox">
+                        {citySuggestions.map((suggestion) => (
+                          <button
+                            key={`${suggestion.label}-${suggestion.lat}-${suggestion.lng}`}
+                            type="button"
+                            role="option"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectCitySuggestion(suggestion)}
+                          >
+                            {suggestion.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </label>
 
                 <label>

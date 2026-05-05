@@ -86,6 +86,7 @@ export type TranslationKey =
   | 'profileSetup.error.cropPhoto'
   | 'profileSetup.error.maxPhotos'
   | 'profileSetup.error.readPhotos'
+  | 'profileSetup.error.cityLookupFailed'
   | 'profileSetup.crop.avatar.title'
   | 'profileSetup.crop.avatar.body'
   | 'profileSetup.crop.avatar.alt'
@@ -341,6 +342,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'profileSetup.error.cropPhoto': 'Impossibile ritagliare la foto.',
     'profileSetup.error.maxPhotos': 'Puoi caricare al massimo 6 foto per lo swipe.',
     'profileSetup.error.readPhotos': 'Impossibile leggere una o più foto.',
+    'profileSetup.error.cityLookupFailed': 'Città non trovata. Inserisci una città reale, ad esempio "Roma" o "Paris, France".',
     'profileSetup.crop.avatar.title': 'Ritaglia avatar',
     'profileSetup.crop.avatar.body': 'Trascina l\'immagine e regola lo zoom.',
     'profileSetup.crop.avatar.alt': 'Anteprima ritaglio avatar',
@@ -595,6 +597,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'profileSetup.error.cropPhoto': 'Unable to crop the photo.',
     'profileSetup.error.maxPhotos': 'You can upload up to 6 swipe photos.',
     'profileSetup.error.readPhotos': 'Unable to read one or more photos.',
+    'profileSetup.error.cityLookupFailed': 'City not found. Enter a real city, for example "Rome" or "Paris, France".',
     'profileSetup.crop.avatar.title': 'Crop avatar',
     'profileSetup.crop.avatar.body': 'Drag the image and adjust zoom.',
     'profileSetup.crop.avatar.alt': 'Avatar crop preview',
