@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "appwrite": "^14.0.0",
@@ -15,11 +19,17 @@
     "react-router-dom": "^6.30.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
     "typescript": "^5.7.2",
-    "vite": "^6.4.2"
+    "typescript-eslint": "^8.59.2",
+    "vite": "^6.4.2",
+    "vitest": "^4.1.5"
   },
   "overrides": {
     "esbuild": "^0.25.0"
