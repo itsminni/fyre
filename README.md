@@ -18,7 +18,6 @@ Le funzionalità principali includono registrazione e login, completamento del p
 - `web/`: client web React + TypeScript.
 - `functions/`: funzioni cloud Appwrite usate dal dominio applicativo.
 - `shared/`: contratti condivisi tra funzioni e client.
-- `docs/`: materiali di supporto, note e prompt di progetto.
 
 ### Quick start generale
 
@@ -73,7 +72,7 @@ Per i dettagli specifici vedere i README delle singole versioni.
 
 ### Visualizzazione admin
 
-Per visualizzare l'evento dalla modalità admin accedere con l'account di prova con mail *admin@example.com* e password *[redacted-password]*
+La modalità admin usa gli account configurati nel backend Appwrite.
 
 ## English
 
@@ -93,7 +92,6 @@ The main features include sign-up and login, profile completion, compatible prof
 - `web/`: React + TypeScript web client.
 - `functions/`: Appwrite cloud functions used by the app domain.
 - `shared/`: shared contracts used by functions and clients.
-- `docs/`: supporting material, notes, and project prompts.
 
 ### General quick start
 
@@ -150,4 +148,4 @@ See each version-specific README for platform details.
 
 ### Admin view
 
-To view the event in admin mode, log in with the test account using the email *admin@example.com* and the password *[redacted-password]*.
+Admin mode uses the accounts configured in the Appwrite backend.

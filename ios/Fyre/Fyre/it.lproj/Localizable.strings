@@ -180,7 +180,7 @@
 "profile.gender.female" = "Donna";
 "profile.gender.nonBinary" = "Non binario";
 "profile.gender.other" = "Altro";
-"profile.gender.changeHint" = "Per cambiare genere, invia una mail a support@example.com.";
+"profile.gender.changeHint" = "Per cambiare genere, invia una mail al supporto.";
 "profile.photo.section" = "Avatar profilo";
 "profile.photo.action" = "Scegli avatar";
 "profile.photo.galleryTitle" = "Foto per lo swipe";
@@ -225,7 +225,7 @@
 "profile.setup.title" = "Completa il profilo";
 "profile.section.security" = "Sicurezza";
 "profile.section.information" = "Informazioni";
-"profile.section.informationHint" = "Solo alcuni dati restano bloccati dopo il setup. Se devi modificarli, invia una mail al supporto a support@example.com.";
+"profile.section.informationHint" = "Solo alcuni dati restano bloccati dopo il setup. Se devi modificarli, contatta il supporto.";
 "profile.section.required" = "Obbligatorio";
 "profile.section.discovery" = "Scoperta";
 "profile.section.discoveryHint" = "Questi campi cambiano chi vedi e quanto i profili risultano rilevanti.";
@@ -235,7 +235,7 @@
 "profile.instagramTag" = "Tag Instagram";
 "profile.spotifyTag" = "Tag Spotify";
 "profile.email" = "Email";
-"profile.security.resetDescription" = "Per resettare la password, invia una mail al supporto a support@example.com includendo l'email del profilo qui sotto.";
+"profile.security.resetDescription" = "Per resettare la password, contatta il supporto includendo l'email del profilo qui sotto.";
 "profile.security.resetAction" = "Richiedi reset password";
 "profile.security.changeEmailAction" = "Richiedi cambio email";
 "profile.security.mailOpened" = "App Mail aperta.";

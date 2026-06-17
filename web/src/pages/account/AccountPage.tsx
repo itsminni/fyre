@@ -105,8 +105,6 @@ interface SwipePhotoCropDragState {
   startOffsetX: number;
 }
 
-// Chat background and bubble palettes intentionally removed for web appearance.
-
 function defaultPreferredGenders(
   preferredGenders: UserGender[] | undefined,
   showMe: UserShowMe | undefined
@@ -308,7 +306,7 @@ export function AccountPage(): JSX.Element {
     setFavoriteMovie(currentUser.favoriteMovie ?? '');
     accountAutosaveReadyRef.current = false;
     lastAccountAutosaveKeyRef.current = '';
-  }, [currentUser]);
+  }, [city, currentUser, isCityFieldFocused]);
 
   const accountAutosaveKey = useMemo(
     () =>
@@ -445,16 +443,17 @@ export function AccountPage(): JSX.Element {
     favoriteMovie,
     favoriteSong,
     city,
-    citySuggestions,
     hobbies,
     instagram,
     instagramTag,
     intent,
+    isSelectedCityValue,
     lookingFor,
     maxDistanceKm,
     orientation,
     passions,
     preferredGenders,
+    selectedCitySuggestion,
     showMe,
     smokes,
     spotifyTag,

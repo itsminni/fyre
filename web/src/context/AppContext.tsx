@@ -1271,6 +1271,9 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       ageRangeMin: number;
       ageRangeMax: number;
       maxDistanceKm?: number;
+      city?: string | null;
+      cityLat?: number;
+      cityLng?: number;
       intent: MatchIntent;
       hobbies: string;
       passions: string;
@@ -1307,7 +1310,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const updatedUser = normalizeUser({
         ...currentUser,
-        ...(input.city !== undefined
+        ...(input.city != null
           ? {
               city: input.city.trim(),
               cityLat: input.cityLat,

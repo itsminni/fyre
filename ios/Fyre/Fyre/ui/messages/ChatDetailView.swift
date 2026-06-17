@@ -3835,7 +3835,6 @@ private struct RemoteChatAttachmentVideoPreview: View {
                     }
             }
 
-            // Play icon overlay
             Circle()
                 .fill(Color.black.opacity(0.36))
                 .frame(width: 48, height: 48)
@@ -3860,7 +3859,6 @@ private struct RemoteChatAttachmentVideoPreview: View {
                 }
 
                 if let data, !data.isEmpty {
-                    // write to temporary file and generate a thumbnail using AVAsset
                     let tmpUrl = try writeTempVideo(data: data, baseName: title)
                     let asset = AVAsset(url: tmpUrl)
                     let generator = AVAssetImageGenerator(asset: asset)

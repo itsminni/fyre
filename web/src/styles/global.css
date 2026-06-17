@@ -2620,8 +2620,6 @@ textarea:focus {
 }
 
 .chat-detail-page {
-  /* Keep send button colors configurable, but remove per-user chat surface customization.
-     Bubble colors below are fixed to a readable palette. */
   --chat-send-1: #ff9a00;
   --chat-send-2: #ff8a1f;
   --chat-send-3: #e14d33;
@@ -2649,7 +2647,6 @@ textarea:focus {
 }
 
 .chat-messages::before {
-  /* remove decorative background on web — keep chat surface simple */
   content: '';
   position: absolute;
   inset: 0;

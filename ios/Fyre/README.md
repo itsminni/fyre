@@ -17,12 +17,6 @@ Questa cartella contiene l'app iOS di Fyre, sviluppata in SwiftUI.
 3. Selezionare un simulatore o un dispositivo.
 4. Avviare l'app con Run.
 
-### Librerie esterne
-
-La versione iOS non dichiara librerie esterne nel `Podfile`. L'app usa SwiftUI, Foundation, UserNotifications e altri framework Apple inclusi in Xcode.
-
-Il file `ios/Fyre/Podfile` è presente come manifest delle dipendenze.
-
 ### Architettura
 
 - `FyreApp.swift`: bootstrap dell'app, tema, notifiche e servizi.
@@ -57,10 +51,6 @@ This folder contains the Fyre iOS app, built with SwiftUI.
 2. Select the `Fyre` scheme.
 3. Select a simulator or device.
 4. Run the app.
-
-### External libraries
-
-The iOS version does not declare external libraries in the `Podfile`. The app uses SwiftUI, Foundation, UserNotifications, and other Apple frameworks included with Xcode.
 
 ### Architecture
 

@@ -29,10 +29,6 @@ Questa cartella contiene le funzioni Appwrite usate dal backend di Fyre. Le funz
 
 4. Distribuire la funzione tramite Appwrite Console o Appwrite CLI.
 
-### Librerie esterne
-
-Le funzioni non dichiarano librerie npm esterne nei rispettivi `package.json`. Usano JavaScript ES Modules, `fetch`, API standard del runtime Node/Appwrite e helper locali presenti nei file sorgente.
-
 ### Test
 
 Alcune funzioni includono file `*.test.mjs`. I test possono essere eseguiti con Node.js dalla rispettiva cartella funzione quando non richiedono servizi esterni.
@@ -65,10 +61,6 @@ This folder contains the Appwrite functions used by the Fyre backend. The functi
 3. Configure the environment variables required by the function, such as endpoint, project id, database id, table ids, bucket ids, and function ids.
 
 4. Deploy the function through the Appwrite Console or Appwrite CLI.
-
-### External libraries
-
-The functions do not declare external npm libraries in their `package.json` files. They use JavaScript ES Modules, `fetch`, standard Node/Appwrite runtime APIs, and local helpers included in the source files.
 
 ### Tests
 

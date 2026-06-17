@@ -7,11 +7,6 @@
 
 import SwiftUI
 
-// Sign-up screen
-// - Collects name, email and password for account creation
-// - Includes a terms toggle and basic client validation
-// - Accessibility identifiers are present for UI tests
-
 struct SignUpView: View {
     @Environment(UserStore.self) private var store
     @State private var email = ""
@@ -25,14 +20,12 @@ struct SignUpView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // Header: sign-up title
                 Text(L10n.tr("auth.signup.title"))
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .padding(.top, 8)
                     .accessibilityAddTraits(.isHeader)
 
                 VStack(spacing: 16) {
-                    // Email input
                     TextField(L10n.tr("field.email"), text: $email)
                         .textContentType(.emailAddress)
                         .keyboardType(.emailAddress)
@@ -41,7 +34,6 @@ struct SignUpView: View {
                         .accessibilityIdentifier("signup.email")
 
                     ZStack(alignment: .trailing) {
-                        // Password input with optional reveal
                         if isSecure {
                             SecureField(L10n.tr("field.password"), text: $password)
                                 .textContentType(.password)
@@ -61,7 +53,6 @@ struct SignUpView: View {
                         .buttonStyle(.plain)
                     }
 
-                    // Terms acceptance toggle and full-screen terms/privacy disclosure
                     HStack(alignment: .center, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(L10n.tr("auth.signup.terms.prefix"))
@@ -87,14 +78,12 @@ struct SignUpView: View {
                             .accessibilityIdentifier("signup.terms")
                     }
 
-                    // Show validation or server-side errors
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
 
-                    // Primary create-account action
                     Button {
                         Task {
                             await submitSignUp()
@@ -117,7 +106,6 @@ struct SignUpView: View {
                     .opacity((isFormValid && !isSubmitting) ? 1 : 0.6)
                     .accessibilityIdentifier("signup.submit")
 
-                    // Link back to login for existing users
                     HStack(spacing: 6) {
                         Text(L10n.tr("auth.haveAccount.prompt"))
                             .foregroundStyle(.secondary)

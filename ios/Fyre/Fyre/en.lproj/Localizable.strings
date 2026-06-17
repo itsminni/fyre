@@ -179,7 +179,7 @@
 "profile.gender.female" = "Woman";
 "profile.gender.nonBinary" = "Non-binary";
 "profile.gender.other" = "Other";
-"profile.gender.changeHint" = "To change gender, send an email to support@example.com.";
+"profile.gender.changeHint" = "To change gender, contact support.";
 "profile.photo.section" = "Profile avatar";
 "profile.photo.action" = "Choose avatar";
 "profile.photo.galleryTitle" = "Swipe photos";
@@ -224,7 +224,7 @@
 "profile.setup.title" = "Complete your profile";
 "profile.section.security" = "Security";
 "profile.section.information" = "Information";
-"profile.section.informationHint" = "Only some details are locked after setup. Contact support at support@example.com if you need changes to non-editable fields.";
+"profile.section.informationHint" = "Only some details are locked after setup. Contact support if you need changes to non-editable fields.";
 "profile.section.required" = "Required";
 "profile.section.discovery" = "Discovery";
 "profile.section.discoveryHint" = "These change who you see and how relevant profiles feel.";
@@ -234,7 +234,7 @@
 "profile.instagramTag" = "Instagram tag";
 "profile.spotifyTag" = "Spotify tag";
 "profile.email" = "Email";
-"profile.security.resetDescription" = "To reset the password, contact support at support@example.com and include the profile email below.";
+"profile.security.resetDescription" = "To reset the password, contact support and include the profile email below.";
 "profile.security.resetAction" = "Request password reset";
 "profile.security.changeEmailAction" = "Request email change";
 "profile.security.mailOpened" = "Mail app opened.";

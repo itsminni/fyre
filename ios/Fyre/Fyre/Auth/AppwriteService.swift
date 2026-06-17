@@ -901,8 +901,7 @@ actor AppwriteService {
 
             guard (200..<300).contains(httpResponse.statusCode) else {
 #if DEBUG
-                let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8>"
-                debugPrint("Direct function invoke failed for \(functionId) @ \(directURL.absoluteString) status=\(httpResponse.statusCode) body=\(rawBody)")
+                debugPrint("Direct function invoke failed for \(functionId) status=\(httpResponse.statusCode) responseBytes=\(data.count)")
 #endif
                 throw makeAPIError(from: data, statusCode: httpResponse.statusCode)
             }
@@ -915,8 +914,7 @@ actor AppwriteService {
             }
 
 #if DEBUG
-            let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8>"
-            debugPrint("Direct function invoke succeeded for \(functionId) @ \(directURL.absoluteString) body=\(rawBody)")
+            debugPrint("Direct function invoke succeeded for \(functionId) responseBytes=\(data.count)")
 #endif
             return try decodeJSONObject(from: data)
         } catch let error as AppwriteServiceError {

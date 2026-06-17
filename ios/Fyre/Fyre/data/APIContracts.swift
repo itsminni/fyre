@@ -7,8 +7,6 @@
 
 import Foundation
 
-// Data transfer objects (DTOs) used by the BackendAPI
-// These types are intentionally simple and `Sendable` to work with async APIs
 enum RelationshipStateDTO: String, Sendable, Codable {
     case none
     case liked

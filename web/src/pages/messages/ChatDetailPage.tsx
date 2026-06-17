@@ -576,10 +576,7 @@ function ChatAttachmentItem({
   );
 }
 
-// Bubble palette logic removed for web — bubbles use fixed palette in CSS now.
-
 function chatSurfaceStyle(settings: ReturnType<typeof useAppStore>['persisted']['settings']): CSSProperties {
-  // Only expose send-button colors to allow minimal customization on web.
   return {
     '--chat-send-1': settings.sendButtonColor1,
     '--chat-send-2': settings.sendButtonColor2,

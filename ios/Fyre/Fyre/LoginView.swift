@@ -7,11 +7,6 @@
 
 import SwiftUI
 
-// Login screen
-// - Presents email/password fields
-// - Uses `UserStore` for authentication logic
-// - Accessibility identifiers are added to support UI tests
-
 struct LoginView: View {
     @Environment(UserStore.self) private var store
     @State private var email = ""
@@ -23,14 +18,12 @@ struct LoginView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // Title: indicates the current auth action
                 Text(L10n.tr("auth.login.title"))
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .padding(.top, 8)
                     .accessibilityAddTraits(.isHeader)
 
                 VStack(spacing: 16) {
-                    // Email input
                     TextField(L10n.tr("field.email"), text: $email)
                         .textContentType(.username)
                         .keyboardType(.emailAddress)
@@ -39,7 +32,6 @@ struct LoginView: View {
                         .accessibilityIdentifier("login.email")
 
                     ZStack(alignment: .trailing) {
-                        // Password input with toggle to reveal/hide
                         if isSecure {
                             SecureField(L10n.tr("field.password"), text: $password)
                                 .textContentType(.password)
@@ -59,14 +51,12 @@ struct LoginView: View {
                         .buttonStyle(.plain)
                     }
 
-                    // Inline error display (shows localized error from UserStore)
                     if let errorMessage {
                         Text(errorMessage)
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
 
-                    // Primary sign-in action
                     Button {
                         Task {
                             await submitLogin()
@@ -90,7 +80,6 @@ struct LoginView: View {
                     .padding(.top, 8)
                     .accessibilityIdentifier("login.submit")
 
-                    // Link to the sign-up flow
                     HStack(spacing: 6) {
                         Text(L10n.tr("auth.noAccount.prompt"))
                             .foregroundStyle(.secondary)

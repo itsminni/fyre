@@ -6,7 +6,7 @@ Questa cartella contiene il client web di Fyre, sviluppato con React, TypeScript
 
 ### Requisiti
 
-- Node.js recente.
+- Node.js 20.19 o più recente.
 - npm.
 
 ### Quick start
@@ -88,7 +88,7 @@ This folder contains the Fyre web client, built with React, TypeScript, and Vite
 
 ### Requirements
 
-- A recent Node.js version.
+- Node.js 20.19 or newer.
 - npm.
 
 ### Quick start

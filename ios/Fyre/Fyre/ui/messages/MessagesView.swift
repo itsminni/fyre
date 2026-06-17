@@ -8,7 +8,6 @@
 import SwiftUI
 import UIKit
 
-// Simple chat models used only for the UI layer in this test
 struct ChatMessage: Identifiable, Hashable, Codable {
     let id: UUID
     let remoteId: String
@@ -191,7 +190,6 @@ struct MessagesView: View {
     @Environment(AppServices.self) private var services
     @Environment(UserStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
-    // Local UI state for the list of threads
     @State private var threads: [ChatThread] = []
     @State private var pendingRelationshipAction: PendingRelationshipAction?
     @State private var reloadToken = UUID()
@@ -212,7 +210,6 @@ struct MessagesView: View {
     var body: some View {
         NavigationStack {
             Group {
-                // Show a empty state while threads are loading
                 if threads.isEmpty {
                     ContentUnavailableView(
                         L10n.tr("messages.empty.title"),

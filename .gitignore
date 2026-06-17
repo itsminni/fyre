@@ -1,8 +1,39 @@
 .DS_Store
 **/.DS_Store
 
+# Private local documents
+docs/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Archives and local data dumps
+*.zip
+*.tar
+*.tar.gz
+*.db
+*.sqlite
+*.sqlite3
+
+# Common generated files
+node_modules/
+dist/
+build/
+.build/
+.kotlin/
+__pycache__/
+
 # Ignore Xcode user workspace state (local)
 ios/Fyre/Fyre.xcodeproj/project.xcworkspace/xcuserdata/
+ios/Fyre/Fyre.xcodeproj/xcuserdata/
+*.xcuserstate
 
 # Web dependencies and build artifacts
 web/node_modules/
