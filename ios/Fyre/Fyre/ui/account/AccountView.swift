@@ -131,7 +131,7 @@ struct AccountView: View {
     @State private var profilePhotoDropIndex: Int?
     @State private var profilePhotoDragTranslation: CGFloat = 0
 
-    private let supportEmail = "support@example.com"
+    private let supportEmail = "support@example.test"
     private let maxProfilePhotoCount = 6
     private let profilePhotoThumbnailWidth: CGFloat = 92
     private let profilePhotoThumbnailHeight: CGFloat = 118

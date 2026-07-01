@@ -151,7 +151,7 @@ function sanitizeUser(value: unknown): User | null {
 
   return normalizeUser({
     email: value.email,
-    password: typeof value.password === 'string' ? value.password : '',
+    password: '',
     appwriteUserId: typeof value.appwriteUserId === 'string' ? value.appwriteUserId : undefined,
     firstName: typeof value.firstName === 'string' ? value.firstName : undefined,
     lastName: typeof value.lastName === 'string' ? value.lastName : undefined,
@@ -577,7 +577,13 @@ export function persistState(value: PersistedAppState): void {
 
   const payload: PersistedStateEnvelope = {
     version: STORAGE_VERSION,
-    state: value
+    state: {
+      ...value,
+      users: value.users.map((user) => {
+        const { password: _password, ...userWithoutPassword } = user;
+        return userWithoutPassword;
+      })
+    }
   };
 
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));

@@ -112,14 +112,14 @@ test("sendmessage recreates a missing thread row from existing participant rows"
   }
 });
 
-async function invokeHandler(body) {
+async function invokeHandler(body, headers = { "x-appwrite-user-id": "user-a" }) {
   let responsePayload = null;
   let responseStatus = null;
 
   await handler({
     req: {
       bodyJson: body,
-      headers: {}
+      headers
     },
     res: {
       json(payload, status = 200) {

@@ -160,6 +160,15 @@ class AppwriteHttpClient(
 
     suspend fun executeFunctionDirectly(functionUrl: String, payload: Map<String, Any?>): JsonObject {
         val directUrl = normalizedFunctionUrl(functionUrl)
+        val currentUserId = fetchCurrentAccountIdForFunction()
+        val payloadUserId = payload["currentUserId"]?.toString()?.trim().orEmpty()
+        if (payloadUserId.isNotBlank() && payloadUserId != currentUserId) {
+            throw AppwriteApiException(
+                statusCode = 403,
+                responseType = "user_mismatch",
+                message = "Authenticated user mismatch"
+            )
+        }
         val jwt = post(
             path = "/account/jwts",
             body = jsonObject("duration" to 900)
@@ -174,11 +183,20 @@ class AppwriteHttpClient(
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
                 .header("x-appwrite-user-jwt", jwt)
+                .header("x-appwrite-user-id", currentUserId)
                 .post(gson.toJson(payload).toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
             executeRequest(request, expectedStatusCodes = emptySet())
         }
+    }
+
+    private suspend fun fetchCurrentAccountIdForFunction(): String {
+        val account = get("/account")
+        return account.stringOrNull("\$id")
+            ?: throw AppwriteDecodingException(
+                IllegalStateException("Missing current account id")
+            )
     }
 
     fun clearSession() {

@@ -738,7 +738,7 @@ export function AccountPage(): JSX.Element {
 
   function openSupportMail(subject: string, body: string): void {
     const params = new URLSearchParams({ subject, body });
-    window.location.href = `mailto:support@example.com?${params.toString()}`;
+    window.location.href = `mailto:support@example.test?${params.toString()}`;
     setSecurityFeedback({ isError: false, message: 'App Mail aperta.' });
   }
 

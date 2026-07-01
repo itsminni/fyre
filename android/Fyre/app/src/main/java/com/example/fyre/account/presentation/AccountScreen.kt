@@ -128,7 +128,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 private const val MaxProfilePhotoCount = 6
-private const val SupportEmail = "support@example.com"
+private const val SupportEmail = "support@example.test"
 
 private enum class ChatColorSlot(val labelRes: Int) {
     Background1(R.string.account_chat_background_color_1),

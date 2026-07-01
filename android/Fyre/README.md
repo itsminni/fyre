@@ -50,8 +50,6 @@ Le librerie esterne sono gestite da Gradle tramite `gradle/libs.versions.toml` e
 - WorkManager per promemoria e notifiche locali programmate.
 - JUnit, AndroidX Test, Espresso e Coroutines Test per i test.
 
-Non serve installarle manualmente: Gradle le scarica automaticamente durante build o test.
-
 ### Struttura principale
 
 - `app/src/main/java/com/example/fyre/ui`: flussi UI principali.
@@ -110,8 +108,6 @@ External libraries are managed by Gradle through `gradle/libs.versions.toml` and
 - Media3 for audio and voice note previews.
 - WorkManager for reminders and scheduled local notifications.
 - JUnit, AndroidX Test, Espresso, and Coroutines Test for testing.
-
-They do not need to be installed manually: Gradle downloads them automatically during build or test tasks.
 
 ### Main Structure
 

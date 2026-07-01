@@ -27,7 +27,7 @@ Le funzionalità principali includono registrazione e login, completamento del p
 2. Selezionare lo schema `Fyre`.
 3. Avviare l'app su simulatore o dispositivo.
 
-Documentazione specifica: `ios/README.md`.
+Documentazione specifica: `ios/Fyre/README.md`.
 
 #### Android
 
@@ -56,7 +56,7 @@ I client includono già gli ID progetto Appwrite pubblici usati da questo reposi
 
 - Web: hostname `localhost` e `127.0.0.1` per lo sviluppo locale,
 - iOS: Apple platform con bundle identifier dell'app Xcode.
-- Android: Android platform con `applicationId` dell'app Gradle.
+- Android: Android platform con application ID `minni.fyre`.
 
 
 ### Librerie esterne e installazione
@@ -101,7 +101,7 @@ The main features include sign-up and login, profile completion, compatible prof
 2. Select the `Fyre` scheme.
 3. Run the app on a simulator or device.
 
-Specific documentation: `ios/README.md`.
+Specific documentation: `ios/Fyre/README.md`.
 
 #### Android
 
@@ -131,7 +131,7 @@ The clients already include the public Appwrite project IDs used by this reposit
 
 - Web: hostnames `localhost` and `127.0.0.1` for local development.
 - iOS: an Apple platform with the Xcode app bundle identifier.
-- Android: an Android platform with the Gradle app `applicationId`.
+- Android: an Android platform with application ID `minni.fyre`.
 
 Web city search uses Photon's public endpoint by default, so it does not require keys or environment variables. The provider can be changed by setting `VITE_PHOTON_BASE_URL` before building.
 

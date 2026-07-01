@@ -33,11 +33,11 @@
     <string name="welcome_cta_login">Sign in</string>
     <string name="welcome_cta_create_account">Create account</string>
     <string name="welcome_terms_link">Read Terms and Privacy</string>
-    <string name="welcome_footer">School project - %1$s App</string>
+    <string name="welcome_footer">%1$s</string>
 
     <!-- Auth Login -->
     <string name="auth_login_subtitle">Sign in to your account</string>
-    <string name="auth_login_email_placeholder">name@example.com</string>
+    <string name="auth_login_email_placeholder">name@example.test</string>
     <string name="auth_login_loading">Signing in...</string>
     <string name="auth_login_register_prompt">No account yet? Register</string>
 
@@ -56,10 +56,10 @@
 
     <!-- Terms & Privacy -->
     <string name="terms_title">Terms and Privacy</string>
-    <string name="terms_intro">Local draft version: by continuing, you confirm that you have read and understood the terms of use and privacy notice.</string>
-    <string name="terms_section_1">1) Allowed use\nThis app is for educational use. Avoid illegal or harmful content.</string>
-    <string name="terms_section_2">2) Processed data\nData stays locally on this device until a backend is integrated.</string>
-    <string name="terms_section_3">3) Responsibility\nCredentials are handled locally in a development environment and do not represent a production service.</string>
+    <string name="terms_intro">By continuing, you confirm that you have read and understood the terms of use and privacy notice.</string>
+    <string name="terms_section_1">1) Allowed use\nUse Fyre respectfully and avoid illegal, abusive, or harmful content.</string>
+    <string name="terms_section_2">2) Processed data\nFyre processes account, profile, event, and messaging data to provide the app features.</string>
+    <string name="terms_section_3">3) Responsibility\nYou are responsible for the information and content you share through the service.</string>
     <string name="terms_section_4">4) Consent\nAccepting Terms and Privacy is required to register.</string>
     <string name="terms_accept_and_continue">Accept and continue</string>
 

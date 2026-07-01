@@ -25,13 +25,9 @@ Questa cartella contiene le funzioni Appwrite usate dal backend di Fyre. Le funz
 
 2. Verificare che il runtime Appwrite usi Node.js con moduli ES.
 
-3. Configurare le variabili d'ambiente richieste dalla funzione, ad esempio endpoint, project id, database id, table id, bucket id e function id.
+3. Configurare le variabili d'ambiente richieste dalla funzione.
 
 4. Distribuire la funzione tramite Appwrite Console o Appwrite CLI.
-
-### Test
-
-Alcune funzioni includono file `*.test.mjs`. I test possono essere eseguiti con Node.js dalla rispettiva cartella funzione quando non richiedono servizi esterni.
 
 ## English
 
@@ -58,10 +54,6 @@ This folder contains the Appwrite functions used by the Fyre backend. The functi
 
 2. Make sure the Appwrite runtime uses Node.js with ES modules.
 
-3. Configure the environment variables required by the function, such as endpoint, project id, database id, table ids, bucket ids, and function ids.
+3. Configure the environment variables required by the function.
 
 4. Deploy the function through the Appwrite Console or Appwrite CLI.
-
-### Tests
-
-Some functions include `*.test.mjs` files. Tests can be run with Node.js from the related function folder when they do not require external services.

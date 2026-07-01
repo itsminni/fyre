@@ -4,7 +4,7 @@ export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
     const body = parseBody(req);
-    const currentUserId = resolveCurrentUserId(req, body);
+    const currentUserId = await resolveCurrentUserId(config, req, body);
     const threadId = asString(body.threadId);
     const action = asAction(body.action);
 
@@ -55,7 +55,7 @@ export default async ({ req, res, error }) => {
     return res.json({ ok: true, relationshipState: action === "archive" ? "archived" : "blocked" }, 200);
   } catch (err) {
     error(String(err?.stack ?? err));
-    return res.json({ message: "Unable to update relationship" }, 500);
+    return res.json({ message: err?.statusCode === 403 ? "Forbidden" : "Unable to update relationship" }, err?.statusCode ?? 500);
   }
 };
 
@@ -64,10 +64,12 @@ function getConfig(req) {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
     projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
     apiKey: resolveApiKey(req),
+    userJwt: optionalHeader(req, "x-appwrite-user-jwt"),
     databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
     threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
     relationshipsTableId: requiredEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
-    matchesTableId: optionalEnv("APPWRITE_MATCHES_TABLE_ID")
+    matchesTableId: optionalEnv("APPWRITE_MATCHES_TABLE_ID"),
+    allowBodyUserIdFallback: optionalEnv("APPWRITE_ALLOW_BODY_USER_ID_FALLBACK") === "true"
   };
 }
 
@@ -108,20 +110,61 @@ function requiredHeader(req, name) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function resolveCurrentUserId(req, body) {
-  const headerValue = req.headers?.["x-appwrite-user-id"]
-    ?? req.headers?.["X-Appwrite-User-Id"]
-    ?? req.headers?.["X-APPWRITE-USER-ID"];
-  if (headerValue) {
-    return Array.isArray(headerValue) ? headerValue[0] : headerValue;
+function optionalHeader(req, name) {
+  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
+  if (!value) {
+    return null;
+  }
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function resolveCurrentUserId(config, req, body) {
+  const headerValue = optionalHeader(req, "x-appwrite-user-id");
+  const bodyValue = asString(body.currentUserId);
+  const jwtUserId = await fetchUserIdFromJwt(config);
+  const authenticatedUserId = jwtUserId ?? asString(headerValue);
+
+  if (jwtUserId && headerValue && asString(headerValue) !== jwtUserId) {
+    throw authError("Authenticated user mismatch");
   }
 
-  const bodyValue = asString(body.currentUserId);
-  if (bodyValue) {
+  if (authenticatedUserId) {
+    if (bodyValue && bodyValue !== authenticatedUserId) {
+      throw authError("Authenticated user mismatch");
+    }
+    return authenticatedUserId;
+  }
+
+  if (bodyValue && config.allowBodyUserIdFallback) {
     return bodyValue;
   }
 
-  throw new Error("Missing current user id");
+  throw authError("Missing authenticated user id");
+}
+
+async function fetchUserIdFromJwt(config) {
+  if (!config.userJwt) {
+    return null;
+  }
+
+  const response = await fetch(`${config.endpoint}/account`, {
+    headers: {
+      "X-Appwrite-Project": config.projectId,
+      "X-Appwrite-JWT": config.userJwt,
+      "X-Appwrite-Response-Format": "1.8.0"
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw authError(payload.message ?? "Invalid user JWT");
+  }
+  return asString(payload.$id);
+}
+
+function authError(message) {
+  const err = new Error(message);
+  err.statusCode = 403;
+  return err;
 }
 
 function resolveApiKey(req) {

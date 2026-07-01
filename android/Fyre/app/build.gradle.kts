@@ -72,7 +72,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.fyre"
+        applicationId = "minni.fyre"
         minSdk = 29
         targetSdk = 36
         versionCode = 1
@@ -228,7 +228,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

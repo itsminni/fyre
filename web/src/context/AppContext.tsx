@@ -207,7 +207,7 @@ function upsertUser(users: User[], user: User): User[] {
   nextUsers[existingIndex] = normalizeUser({
     ...nextUsers[existingIndex],
     ...normalizedUser,
-    password: normalizedUser.password || nextUsers[existingIndex].password
+    password: ''
   });
   return nextUsers;
 }

@@ -235,7 +235,7 @@ struct User: Codable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         email = try c.decode(String.self, forKey: .email)
-        password = try c.decode(String.self, forKey: .password)
+        password = try c.decodeIfPresent(String.self, forKey: .password) ?? ""
         appwriteUserId = try c.decodeIfPresent(String.self, forKey: .appwriteUserId)
         firstName = try c.decodeIfPresent(String.self, forKey: .firstName)
         lastName = try c.decodeIfPresent(String.self, forKey: .lastName)
@@ -267,7 +267,7 @@ struct User: Codable, Sendable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(email, forKey: .email)
-        try c.encode(password, forKey: .password)
+        try c.encode(UserStore.permitsPlaintextLocalPasswords ? password : "", forKey: .password)
         try c.encodeIfPresent(appwriteUserId, forKey: .appwriteUserId)
         try c.encodeIfPresent(firstName, forKey: .firstName)
         try c.encodeIfPresent(lastName, forKey: .lastName)
@@ -1320,6 +1320,10 @@ final class UserStore: @unchecked Sendable {
 
     private static var shouldUseAppwrite: Bool {
         !isRunningTests && !ProcessInfo.processInfo.arguments.contains("-uitest-reset")
+    }
+
+    fileprivate static var permitsPlaintextLocalPasswords: Bool {
+        isRunningTests || ProcessInfo.processInfo.arguments.contains("-uitest-reset")
     }
 
     private static var isRunningTests: Bool {

@@ -33,7 +33,7 @@
     <string name="welcome_cta_login">Accedi</string>
     <string name="welcome_cta_create_account">Crea un account</string>
     <string name="welcome_terms_link">Leggi Termini e Privacy</string>
-    <string name="welcome_footer">Progetto scolastico - %1$s App</string>
+    <string name="welcome_footer">%1$s</string>
 
     <!-- Auth Login -->
     <string name="auth_login_subtitle">Accedi al tuo account</string>
@@ -56,10 +56,10 @@
 
     <!-- Terms & Privacy -->
     <string name="terms_title">Termini e Privacy</string>
-    <string name="terms_intro">Versione bozza locale: continuando confermi di aver letto e compreso condizioni d\'uso e informativa privacy.</string>
-    <string name="terms_section_1">1) Usi consentiti\nL\'app e ad uso didattico. Evita contenuti illeciti o dannosi.</string>
-    <string name="terms_section_2">2) Dati trattati\nI dati restano in locale su questo dispositivo finche non verra integrato un backend.</string>
-    <string name="terms_section_3">3) Responsabilita\nLe credenziali sono gestite localmente in ambiente di sviluppo e non rappresentano un servizio di produzione.</string>
+    <string name="terms_intro">Continuando confermi di aver letto e compreso condizioni d\'uso e informativa privacy.</string>
+    <string name="terms_section_1">1) Usi consentiti\nUsa Fyre con rispetto ed evita contenuti illeciti, abusivi o dannosi.</string>
+    <string name="terms_section_2">2) Dati trattati\nFyre tratta dati account, profilo, eventi e messaggi per fornire le funzioni dell\'app.</string>
+    <string name="terms_section_3">3) Responsabilita\nSei responsabile delle informazioni e dei contenuti che condividi nel servizio.</string>
     <string name="terms_section_4">4) Consenso\nPer registrarti e obbligatorio accettare Termini e Privacy.</string>
     <string name="terms_accept_and_continue">Accetto e continuo</string>
 
