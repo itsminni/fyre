@@ -15,9 +15,6 @@ DerivedData/
 # Swift Package Manager
 .build/
 
-# CocoaPods
-Pods/
-
 # Archives
 *.ipa
 
@@ -31,6 +28,9 @@ Pods/
 *.mobileprovision
 *.cer
 *.p12
+
+# Local Appwrite configuration (copy from Fyre/Config.example.plist)
+Fyre/Config.plist
 
 # fastlane
 fastlane/report.xml

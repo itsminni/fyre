@@ -108,14 +108,14 @@ struct ChatThread: Identifiable, Hashable, Codable {
 @MainActor
 enum RecentChatThreadStore {
     private static var cachedThreads: [String: ChatThread] = [:]
-    private static var activeCacheKey = cacheKey(for: nil)
+    private static var activeScope: String?
 
     static func configure(currentUserId: String?) {
-        let cacheKey = cacheKey(for: currentUserId)
-        guard cacheKey != activeCacheKey || cachedThreads.isEmpty else { return }
+        let scope = scopedUserId(currentUserId)
+        guard scope != activeScope else { return }
 
-        activeCacheKey = cacheKey
-        cachedThreads = loadThreads(forKey: cacheKey)
+        cachedThreads.removeAll()
+        activeScope = scope
     }
 
     static func all() -> [ChatThread] {
@@ -124,7 +124,6 @@ enum RecentChatThreadStore {
 
     static func upsert(_ thread: ChatThread) {
         cachedThreads[thread.remoteId] = mergedThread(incoming: thread, existing: cachedThreads[thread.remoteId])
-        persist()
     }
 
     static func thread(remoteId: String) -> ChatThread? {
@@ -133,7 +132,19 @@ enum RecentChatThreadStore {
 
     static func remove(remoteId: String) {
         cachedThreads.removeValue(forKey: remoteId)
-        persist()
+    }
+
+    static func clear(currentUserId: String?) {
+        let scope = scopedUserId(currentUserId)
+        if activeScope == scope {
+            cachedThreads.removeAll()
+            activeScope = nil
+        }
+    }
+
+    static func clearForLogout(currentUserId _: String?) {
+        cachedThreads.removeAll()
+        activeScope = nil
     }
 
     private static func mergedThread(incoming: ChatThread, existing: ChatThread?) -> ChatThread {
@@ -156,27 +167,9 @@ enum RecentChatThreadStore {
         )
     }
 
-    private static func cacheKey(for currentUserId: String?) -> String {
+    private static func scopedUserId(_ currentUserId: String?) -> String {
         let trimmed = currentUserId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let scopedUserId = trimmed.isEmpty ? "anonymous" : trimmed
-        return "fyre_recent_chat_threads_v1_\(scopedUserId)"
-    }
-
-    private static func loadThreads(forKey key: String) -> [String: ChatThread] {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let threads = try? JSONDecoder().decode([ChatThread].self, from: data) else {
-            return [:]
-        }
-
-        return threads.reduce(into: [:]) { result, thread in
-            result[thread.remoteId] = thread
-        }
-    }
-
-    private static func persist() {
-        let threads = Array(cachedThreads.values)
-        guard let data = try? JSONEncoder().encode(threads) else { return }
-        UserDefaults.standard.set(data, forKey: activeCacheKey)
+        return trimmed.isEmpty ? "anonymous" : trimmed
     }
 }
 
@@ -193,6 +186,7 @@ struct MessagesView: View {
     @State private var threads: [ChatThread] = []
     @State private var pendingRelationshipAction: PendingRelationshipAction?
     @State private var reloadToken = UUID()
+    @State private var threadLoadGeneration: UInt = 0
     @State private var realtimeSubscription: AppwriteRealtimeSubscription?
     @State private var realtimeReloadTask: Task<Void, Never>?
     @State private var selectedThread: ChatThread?
@@ -297,7 +291,14 @@ struct MessagesView: View {
             }
         }
         .task(id: reloadToken) {
-            await loadThreads()
+            while !Task.isCancelled {
+                await loadThreads()
+                do {
+                    try await Task.sleep(nanoseconds: 240_000_000_000)
+                } catch {
+                    return
+                }
+            }
         }
         .onAppear {
             RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
@@ -331,10 +332,16 @@ struct MessagesView: View {
         }
     }
 
+    @MainActor
     private func loadThreads() async {
+        threadLoadGeneration &+= 1
+        let generation = threadLoadGeneration
+        let expectedUserId = store.currentUser?.appwriteUserId
         do {
-            RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
+            RecentChatThreadStore.configure(currentUserId: expectedUserId)
             let dtos = try await services.backend.fetchThreads()
+            guard generation == threadLoadGeneration,
+                  expectedUserId == store.currentUser?.appwriteUserId else { return }
             let existingNames = Dictionary(uniqueKeysWithValues: threads.map { ($0.remoteId, $0.name) })
             let fetchedThreads = dtos.map { dto in
                 let resolvedName: String
@@ -361,11 +368,19 @@ struct MessagesView: View {
                     messages: dto.messages.map(ChatMessage.init(dto:))
                 )
             }
+            let fetchedRemoteIds = Set(fetchedThreads.map(\.remoteId))
+            for cachedThread in RecentChatThreadStore.all()
+            where !fetchedRemoteIds.contains(cachedThread.remoteId)
+                && !hasOptimisticMessage(cachedThread) {
+                RecentChatThreadStore.remove(remoteId: cachedThread.remoteId)
+            }
             fetchedThreads.forEach(RecentChatThreadStore.upsert)
             threads = mergedThreads(fetchedThreads: fetchedThreads)
         } catch {
+            guard generation == threadLoadGeneration,
+                  expectedUserId == store.currentUser?.appwriteUserId else { return }
 #if DEBUG
-            debugPrint("Inbox refresh failed: \(error.localizedDescription)")
+            debugPrint("Inbox refresh failed")
 #endif
             threads = mergedThreads(fetchedThreads: threads)
         }
@@ -403,12 +418,17 @@ struct MessagesView: View {
                 if shouldPreferCachedThread(cachedThread, over: merged[existingIndex]) {
                     merged[existingIndex] = cachedThread
                 }
-            } else if !fetchedRemoteIds.contains(cachedThread.remoteId) {
+            } else if !fetchedRemoteIds.contains(cachedThread.remoteId),
+                      hasOptimisticMessage(cachedThread) {
                 merged.insert(cachedThread, at: 0)
             }
         }
 
         return merged
+    }
+
+    private func hasOptimisticMessage(_ thread: ChatThread) -> Bool {
+        thread.messages.contains { $0.remoteId.hasPrefix("local-") }
     }
 
     private func shouldPreferCachedThread(_ cachedThread: ChatThread, over fetchedThread: ChatThread) -> Bool {
@@ -440,7 +460,7 @@ struct MessagesView: View {
             } catch {
                 await MainActor.run {
 #if DEBUG
-                    debugPrint("Relationship update failed for \(pending.thread.remoteId): \(error.localizedDescription)")
+                    debugPrint("Relationship update failed")
 #endif
                     reloadToken = UUID()
                 }
@@ -464,7 +484,7 @@ struct MessagesView: View {
             } catch {
                 await MainActor.run {
 #if DEBUG
-                    debugPrint("Thread notification update failed for \(thread.remoteId): \(error.localizedDescription)")
+                    debugPrint("Thread notification update failed")
 #endif
                     updateThreadNotificationsLocally(thread, enabled: thread.notificationsEnabled)
                     LocalNotificationCoordinator.shared.setThreadNotifications(
@@ -509,7 +529,7 @@ struct MessagesView: View {
             },
             onError: { error in
 #if DEBUG
-                debugPrint("Inbox realtime error: \(error.localizedDescription)")
+                debugPrint("Inbox realtime error")
 #endif
             }
         )

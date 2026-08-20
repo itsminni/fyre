@@ -11,12 +11,11 @@
 "auth.signup.title" = "Create account";
 "auth.signup.action" = "Sign up";
 "auth.signup.navigationTitle" = "Sign up";
-"auth.signup.terms" = "I accept Terms and Privacy Policy";
-"auth.signup.terms.prefix" = "I accept";
-"auth.signup.terms.link" = "Terms and Privacy Policy";
-"auth.signup.privacy.navigationTitle" = "Terms and Privacy";
-"auth.signup.privacy.title" = "Terms and Privacy Notice";
-"auth.signup.privacy.body" = "We process user-provided data only to enable use of the app services and related features. Data is not shared with anyone else.";
+"auth.signup.demoNotice.prefix" = "I have read the";
+"auth.signup.demoNotice.link" = "demo and data notice";
+"auth.signup.demoNotice.navigationTitle" = "Demo notice";
+"auth.signup.demoNotice.title" = "School project demonstration";
+"auth.signup.demoNotice.body" = "Fyre is a pre-release school project. Use synthetic data only in demonstration environments. The client communicates with Appwrite services configured by the operator. Before any real-world service, the operator must provide complete terms and a privacy notice.";
 "auth.haveAccount.prompt" = "Already have an account?";
 "auth.noAccount.prompt" = "No account yet?";
 "auth.icloudPassword.action" = "Use iCloud password";
@@ -87,6 +86,7 @@
 "chat.attachment.video" = "Video";
 "chat.attachment.audio" = "Voice message";
 "chat.attachment.file" = "File";
+"chat.attachment.unsupportedFormat" = "Unsupported attachment format. Use JPG, JPEG, PNG, WEBP, HEIC, PDF, M4A, MP3, WAV, MP4, or MOV.";
 "common.done" = "Done";
 "common.apply" = "Apply";
 "common.none" = "None";
@@ -112,7 +112,6 @@
 "account.segment.app" = "Settings";
 "account.segment.settings" = "Settings";
 "account.segment.events" = "Events";
-"account.segment.security" = "Security";
 "account.theme" = "Theme";
 "account.theme.system" = "System";
 "account.theme.light" = "Light";
@@ -179,7 +178,6 @@
 "profile.gender.female" = "Woman";
 "profile.gender.nonBinary" = "Non-binary";
 "profile.gender.other" = "Other";
-"profile.gender.changeHint" = "To change gender, contact support.";
 "profile.photo.section" = "Profile avatar";
 "profile.photo.action" = "Choose avatar";
 "profile.photo.galleryTitle" = "Swipe photos";
@@ -222,9 +220,8 @@
 "profile.smokes" = "Do you smoke?";
 "profile.drinks" = "Do you drink alcohol?";
 "profile.setup.title" = "Complete your profile";
-"profile.section.security" = "Security";
 "profile.section.information" = "Information";
-"profile.section.informationHint" = "Only some details are locked after setup. Contact support if you need changes to non-editable fields.";
+"profile.section.informationHint" = "Name, email, and date of birth are read-only after setup. You can update the other profile details here.";
 "profile.section.required" = "Required";
 "profile.section.discovery" = "Discovery";
 "profile.section.discoveryHint" = "These change who you see and how relevant profiles feel.";
@@ -234,11 +231,6 @@
 "profile.instagramTag" = "Instagram tag";
 "profile.spotifyTag" = "Spotify tag";
 "profile.email" = "Email";
-"profile.security.resetDescription" = "To reset the password, contact support and include the profile email below.";
-"profile.security.resetAction" = "Request password reset";
-"profile.security.changeEmailAction" = "Request email change";
-"profile.security.mailOpened" = "Mail app opened.";
-"profile.security.mailFailed" = "Unable to open the Mail app on this device.";
 "profile.complete" = "Complete profile";
 "profile.save" = "Save profile";
 "profile.saved" = "Profile updated.";
@@ -282,20 +274,6 @@
 "events.label.waiting" = "Waiting";
 "events.preview.remaining" = "Remaining spots - M: %d, F: %d";
 "events.preview.deadline" = "Deadline: %@";
-"events.info.club" = "EVENT_VENUE_REDACTED";
-"events.info.address" = "EVENT_ADDRESS_REDACTED";
-"events.info.time" = "Thursday, April 30 - from 21:00 to 03:00";
-"events.info.exclusive" = "Exclusive evening for selected couples and singles in a discreet environment.";
-"events.info.buffet" = "Evening buffet included.";
-"events.info.welcomeDrink" = "Welcome drink included.";
-"events.info.contribution" = "Participation fee: 35€ per person.";
-"events.info.contact" = "Info and reservations: EVENT_CONTACT_REDACTED";
-"events.info.dressCode" = "Dress code: elegant / sensual.";
-"events.rule.maxParticipants" = "24 private rooms, max 48 participants";
-"events.rule.balance" = "Waiting list starts only when the 24 spots for your gender are full";
-"events.rule.cancel48h" = "Cancellation allowed up to 48 hours before";
-"events.rule.lock24h" = "Registrations are final 24 hours before";
-"events.rule.staff" = "Staff on-site: EVENT_STAFF_REDACTED.";
 "events.capacity" = "Capacity: %d/%d";
 "events.maleCount" = "Men: %d";
 "events.femaleCount" = "Women: %d";
@@ -343,10 +321,6 @@
 "events.admin.field.femaleLimit.value" = "Female limit: %d";
 "events.admin.field.registrationClosesAt" = "Registration closes at";
 "events.admin.field.cancellationClosesAt" = "Cancellation closes at";
-"events.admin.access" = "Access";
-"events.admin.access.subtitle" = "Set event-specific admin emails here. Leave this field empty to keep the global whitelist.";
-"events.admin.field.adminEmails" = "Admin emails";
-"events.admin.field.adminUserIds" = "Admin user IDs";
 "events.admin.success.updated" = "Event updated.";
 "events.admin.success.participantAdded" = "Participant added.";
 "events.admin.success.participantRemoved" = "Participant removed.";
@@ -356,5 +330,7 @@
 "events.admin.error.userNotFound" = "No profile was found for that user.";
 "events.admin.participant.promoted" = "Promoted";
 "events.admin.participant.cancelled" = "Cancelled";
+"events.unavailable.title" = "Event unavailable";
+"events.unavailable.description" = "The live event could not be loaded. Try again shortly.";
 
 "common.cancel" = "Cancel";

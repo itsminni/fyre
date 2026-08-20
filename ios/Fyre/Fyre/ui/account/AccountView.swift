@@ -38,7 +38,6 @@ struct AccountView: View {
         case account
         case preferences
         case notifications
-        case security
         case appearance
         case events
 
@@ -49,7 +48,6 @@ struct AccountView: View {
             case .account: return "account.menu.account"
             case .preferences: return "account.section.preferences"
             case .notifications: return "account.notifications"
-            case .security: return "profile.section.security"
             case .appearance: return "account.section.appearance"
             case .events: return "account.section.events"
             }
@@ -60,7 +58,6 @@ struct AccountView: View {
             case .account: return "key.fill"
             case .preferences: return "slider.horizontal.3"
             case .notifications: return "bell.fill"
-            case .security: return "lock.fill"
             case .appearance: return "paintpalette.fill"
             case .events: return "calendar.badge.clock"
             }
@@ -112,7 +109,6 @@ struct AccountView: View {
     @State private var drinks = false
     @State private var profileMessage: String?
     @State private var profileMessageIsError = false
-    @State private var securityMessage: String?
     @State private var pickedPhotoItem: PhotosPickerItem?
     @State private var pickedAdditionalPhotoItems: [PhotosPickerItem] = []
     @State private var pendingAvatarCrop: PendingProfileAvatarCrop?
@@ -131,7 +127,6 @@ struct AccountView: View {
     @State private var profilePhotoDropIndex: Int?
     @State private var profilePhotoDragTranslation: CGFloat = 0
 
-    private let supportEmail = "support@example.test"
     private let maxProfilePhotoCount = 6
     private let profilePhotoThumbnailWidth: CGFloat = 92
     private let profilePhotoThumbnailHeight: CGFloat = 118
@@ -319,20 +314,21 @@ struct AccountView: View {
     }
 
     private var settingsNavigationList: some View {
-        VStack(spacing: 0) {
-            ForEach(Array([
-                SettingsDestination.account,
-                .preferences,
-                .notifications,
-                .security,
-                .appearance
-            ].enumerated()), id: \.element) { index, destination in
+        let destinations: [SettingsDestination] = [
+            .account,
+            .preferences,
+            .notifications,
+            .appearance
+        ]
+
+        return VStack(spacing: 0) {
+            ForEach(Array(destinations.enumerated()), id: \.element) { index, destination in
                 NavigationLink(value: destination) {
                     settingsNavigationRow(destination)
                 }
                 .buttonStyle(.plain)
 
-                if index < 4 {
+                if index < destinations.count - 1 {
                     Divider()
                         .overlay(.white.opacity(0.08))
                         .padding(.leading, 64)
@@ -403,8 +399,6 @@ struct AccountView: View {
                 preferencesSettings
             case .notifications:
                 notificationSettings
-            case .security:
-                securitySettings
             case .appearance:
                 appearanceSettings
             case .events:
@@ -418,7 +412,7 @@ struct AccountView: View {
             VStack(spacing: 18) {
                 AccountCard(
                     title: L10n.tr("profile.section.information"),
-                    subtitleText: informationHintText,
+                    subtitle: L10n.tr("profile.section.informationHint"),
                     icon: "person.text.rectangle.fill"
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
@@ -737,48 +731,6 @@ struct AccountView: View {
         .background(accountBackground.ignoresSafeArea())
     }
 
-    private var securitySettings: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                AccountCard(title: L10n.tr("profile.section.security"), icon: "lock.shield.fill") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(L10n.tr("profile.security.resetDescription"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-
-                        ProfileReadOnlyRow(
-                            title: L10n.tr("profile.email"),
-                            value: store.currentUser?.email ?? "-"
-                        )
-
-                        Button(action: openPasswordResetMail) {
-                            Label(L10n.tr("profile.security.resetAction"), systemImage: "envelope.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(AccountPrimaryButtonStyle())
-
-                        Button(action: openEmailChangeMail) {
-                            Label(L10n.tr("profile.security.changeEmailAction"), systemImage: "at.circle.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(AccountSecondaryButtonStyle())
-
-                        if let securityMessage {
-                            Text(securityMessage)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal)
-            .padding(.top, 2)
-            .padding(.bottom, 28)
-        }
-        .scrollIndicators(.hidden)
-        .background(accountBackground.ignoresSafeArea())
-    }
-
     private var eventsSettings: some View {
         Form {
             Section(L10n.tr("account.section.events")) {
@@ -871,19 +823,6 @@ struct AccountView: View {
     private var cardDivider: some View {
         Divider()
             .overlay(.white.opacity(0.08))
-    }
-
-    private var informationHintText: Text {
-        let localized = L10n.tr("profile.section.informationHint")
-
-        guard let emailRange = localized.range(of: supportEmail) else {
-            return Text(localized)
-        }
-
-        let beforeEmail = String(localized[..<emailRange.lowerBound])
-        let afterEmail = String(localized[emailRange.upperBound...])
-
-        return Text(beforeEmail) + Text(supportEmail).bold() + Text(afterEmail)
     }
 
     @ViewBuilder
@@ -1505,58 +1444,6 @@ struct AccountView: View {
         isLoggingOut = false
     }
 
-    private func openPasswordResetMail() {
-        guard let email = store.currentUser?.email else {
-            securityMessage = L10n.tr("profile.error.noCurrentUser")
-            return
-        }
-
-        var components = URLComponents()
-        components.scheme = "mailto"
-        components.path = supportEmail
-        components.queryItems = [
-            URLQueryItem(name: "subject", value: "Password reset request"),
-            URLQueryItem(name: "body", value: "Profile email: \(email)")
-        ]
-
-        guard let url = components.url else {
-            securityMessage = L10n.tr("profile.security.mailFailed")
-            return
-        }
-
-        openURL(url) { accepted in
-            securityMessage = accepted
-            ? L10n.tr("profile.security.mailOpened")
-            : L10n.tr("profile.security.mailFailed")
-        }
-    }
-
-    private func openEmailChangeMail() {
-        guard let email = store.currentUser?.email else {
-            securityMessage = L10n.tr("profile.error.noCurrentUser")
-            return
-        }
-
-        var components = URLComponents()
-        components.scheme = "mailto"
-        components.path = supportEmail
-        components.queryItems = [
-            URLQueryItem(name: "subject", value: "Email change request"),
-            URLQueryItem(name: "body", value: "Current profile email: \(email)\nNew email: ")
-        ]
-
-        guard let url = components.url else {
-            securityMessage = L10n.tr("profile.security.mailFailed")
-            return
-        }
-
-        openURL(url) { accepted in
-            securityMessage = accepted
-            ? L10n.tr("profile.security.mailOpened")
-            : L10n.tr("profile.security.mailFailed")
-        }
-    }
-
     private func openSystemNotificationSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else {
             return
@@ -1569,7 +1456,6 @@ struct AccountView: View {
 private struct AccountCard<Content: View>: View {
     let title: String
     var subtitle: String? = nil
-    var subtitleText: Text? = nil
     var icon: String
     @ViewBuilder var content: Content
 
@@ -1586,11 +1472,7 @@ private struct AccountCard<Content: View>: View {
                     Text(title)
                         .font(.title3.weight(.semibold))
 
-                    if let subtitleText {
-                        subtitleText
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else if let subtitle {
+                    if let subtitle {
                         Text(subtitle)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -1817,7 +1699,7 @@ private struct ProfileDistanceField: View {
                 }
 
                 guard let parsed = Int(digits) else { return }
-                maxDistanceKm = max(parsed, 5)
+                maxDistanceKm = min(max(parsed, 5), 999)
             }
         )
     }

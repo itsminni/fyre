@@ -1,7 +1,100 @@
 import Foundation
 
+enum ThreadParticipantUpdatePayloadError: Error {
+    case missingThreadId
+    case missingUpdate
+}
+
+enum ThreadParticipantUpdatePayload {
+    static func make(
+        threadId: String,
+        markRead: Bool = false,
+        notificationsEnabled: Bool? = nil,
+        pinned: Bool? = nil
+    ) throws -> [String: Any] {
+        guard !threadId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ThreadParticipantUpdatePayloadError.missingThreadId
+        }
+        guard markRead || notificationsEnabled != nil || pinned != nil else {
+            throw ThreadParticipantUpdatePayloadError.missingUpdate
+        }
+
+        var payload: [String: Any] = [
+            "action": "updateParticipant",
+            "threadId": threadId
+        ]
+        if markRead {
+            payload["markRead"] = true
+        }
+        if let notificationsEnabled {
+            payload["notificationsEnabled"] = notificationsEnabled
+        }
+        if let pinned {
+            payload["pinned"] = pinned
+        }
+        return payload
+    }
+}
+
+struct ChatPeerProjection: Equatable {
+    let userId: String
+    let displayName: String
+    let avatarURL: String?
+    let presenceUpdatedAt: String?
+    let lastSeenAt: String?
+
+    nonisolated init(
+        userId: String,
+        displayName: String,
+        avatarURL: String?,
+        presenceUpdatedAt: String?,
+        lastSeenAt: String?
+    ) {
+        self.userId = userId
+        self.displayName = displayName
+        self.avatarURL = avatarURL
+        self.presenceUpdatedAt = presenceUpdatedAt
+        self.lastSeenAt = lastSeenAt
+    }
+}
+
+enum ChatPeerProjectionContract {
+    nonisolated static func parse(
+        response: [String: Any],
+        expectedThreadId: String,
+        expectedUserId: String
+    ) -> ChatPeerProjection? {
+        guard projectedString(forKey: "threadId", in: response) == expectedThreadId,
+              let peer = response["peer"] as? [String: Any],
+              projectedString(forKey: "userId", in: peer) == expectedUserId,
+              let displayName = projectedString(forKey: "displayName", in: peer) else {
+            return nil
+        }
+
+        return ChatPeerProjection(
+            userId: expectedUserId,
+            displayName: displayName,
+            avatarURL: projectedString(forKey: "avatarUrl", in: peer)
+                .flatMap(TokenizedRemoteURLContract.url(from:))
+                .map(\.absoluteString),
+            presenceUpdatedAt: projectedString(forKey: "presenceUpdatedAt", in: peer),
+            lastSeenAt: projectedString(forKey: "lastSeenAt", in: peer)
+        )
+    }
+
+    nonisolated private static func projectedString(forKey key: String, in dictionary: [String: Any]) -> String? {
+        guard let value = dictionary[key] as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+}
+
 extension AppwriteService {
     func createOrGetThread(otherUserId: String) async throws -> String {
+        guard !configuration.createOrGetThreadFunctionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID")
+        }
         let response = try await executeUserFunction(
             functionId: configuration.createOrGetThreadFunctionId,
             body: ["otherUserId": otherUserId]
@@ -16,12 +109,7 @@ extension AppwriteService {
 
     func createOrGetThreadDTO(otherUserId: String) async throws -> ThreadDTO {
         let threadId = try await createOrGetThread(otherUserId: otherUserId)
-        return try await fetchThreadAfterWrite(
-            threadId: threadId,
-            otherUserId: otherUserId,
-            otherUserName: nil,
-            fallbackRelationshipState: .matched
-        )
+        return try await fetchThreadAfterWrite(threadId: threadId)
     }
 
     func fetchThreadDTO(threadId: String) async throws -> ThreadDTO? {
@@ -65,6 +153,9 @@ extension AppwriteService {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || attachment != nil else {
             throw AppwriteServiceError.api(statusCode: 400, message: "chat.error.sendFailed", type: "validation")
+        }
+        guard !configuration.sendMessageFunctionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_SEND_MESSAGE_FUNCTION_ID")
         }
 
         let attemptedAt = Date()
@@ -163,51 +254,28 @@ extension AppwriteService {
         )
     }
 
-    func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
+    func submitSwipe(otherUserId: String, otherUserName _: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
         guard let functionId = configuration.recordSwipeFunctionId else {
             throw AppwriteServiceError.missingConfiguration("APPWRITE_RECORD_SWIPE_FUNCTION_ID")
         }
 
-        var payload: [String: Any] = [
+        let payload: [String: Any] = [
             "otherUserId": otherUserId,
             "decision": decision.rawValue
         ]
-        if let otherUserName, !otherUserName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            payload["otherUserName"] = otherUserName
-        }
 
         let response = try await executeUserFunction(
             functionId: functionId,
             body: payload
         )
 
-        let isMatch = boolValue(forKey: "matched", in: response) ?? false
-        guard isMatch else {
-            guard decision == .liked else { return nil }
-            let responseRelationshipState = stringValue(forKey: "relationshipState", in: response)
-                .flatMap(RelationshipStateDTO.init(rawValue:))
-            guard response.isEmpty || responseRelationshipState == .matched else {
-                return nil
-            }
-            return try await fetchMatchedThreadAfterSwipe(
-                otherUserId: otherUserId,
-                otherUserName: otherUserName
-            )
-        }
+        guard boolValue(forKey: "matched", in: response) == true else { return nil }
 
         guard let threadId = stringValue(forKey: "threadId", in: response) else {
-            return try await fetchMatchedThreadAfterSwipe(
-                otherUserId: otherUserId,
-                otherUserName: otherUserName
-            )
+            throw AppwriteServiceError.invalidResponse
         }
 
-        return try await fetchThreadAfterWrite(
-            threadId: threadId,
-            otherUserId: otherUserId,
-            otherUserName: otherUserName,
-            fallbackRelationshipState: .matched
-        )
+        return try await fetchThreadAfterWrite(threadId: threadId)
     }
 
     func updateRelationship(threadId: String, action: RelationshipActionDTO) async throws {
@@ -225,125 +293,62 @@ extension AppwriteService {
     }
 
     func markCurrentUserPresence(isOnline: Bool) async {
-        guard let accountId = try? await fetchCurrentAccountId(required: false),
-              let profileRow = try? await fetchProfileRow(id: accountId),
-              let profileRowId = stringValue(forKey: "$id", in: profileRow) ?? stringValue(forKey: "userId", in: profileRow)
-        else {
+        guard (try? await fetchCurrentAccountId(required: false)) != nil else {
             return
         }
 
-        let now = ISO8601DateFormatter().string(from: Date())
-        var payload: [String: Any] = [
-            "presenceUpdatedAt": now
-        ]
-        if !isOnline {
-            payload["lastSeenAt"] = now
-        }
-
-        _ = try? await sendRequest(
-            method: "PATCH",
-            pathComponents: [
-                "tablesdb",
-                configuration.databaseId,
-                "tables",
-                configuration.profilesTableId,
-                "rows",
-                profileRowId
-            ],
-            jsonBody: ["data": payload]
+        _ = try? await executeUserFunction(
+            functionId: configuration.manageProfileFunctionId,
+            body: ManageProfilePayload.presence(isOnline: isOnline),
+            includeCurrentUserId: false
         )
     }
 
     func markThreadRead(threadId: String) async {
-        guard let currentAccountId = try? await fetchCurrentAccountId(required: false) else {
+        guard (try? await fetchCurrentAccountId(required: false)) != nil else {
             return
         }
 
         do {
-            let participantRows = try await listRows(
-                tableId: configuration.threadParticipantsTableId,
-                queries: [
-                    AppwriteQuery.equal("threadId", values: [threadId]),
-                    AppwriteQuery.equal("userId", values: [currentAccountId])
-                ]
+            let response = try await executeUserFunction(
+                functionId: configuration.sendMessageFunctionId,
+                body: ThreadParticipantUpdatePayload.make(
+                    threadId: threadId,
+                    markRead: true
+                ),
+                includeCurrentUserId: false
             )
-
-            guard let participantRow = participantRows.first,
-                  let participantRowId = stringValue(forKey: "$id", in: participantRow) else {
-                return
-            }
-
-            let now = ISO8601DateFormatter().string(from: Date())
-            _ = try await sendRequest(
-                method: "PATCH",
-                pathComponents: [
-                    "tablesdb",
-                    configuration.databaseId,
-                    "tables",
-                    configuration.threadParticipantsTableId,
-                    "rows",
-                    participantRowId
-                ],
-                jsonBody: [
-                        "data": [
-                            "threadId": threadId,
-                            "userId": currentAccountId,
-                            "role": stringValue(forKey: "role", in: participantRow) ?? "participant",
-                            "lastReadAt": now,
-                            "muted": boolValue(forKey: "muted", in: participantRow) ?? false,
-                            "pinned": boolValue(forKey: "pinned", in: participantRow) ?? false,
-                            "notificationsEnabled": boolValue(forKey: "notificationsEnabled", in: participantRow) ?? true
-                    ]
-                ]
-            )
+            try validateParticipantUpdateResponse(response, expectedThreadId: threadId)
         } catch {
 #if DEBUG
-            debugPrint("markThreadRead failed for \(threadId): \(error.localizedDescription)")
+            debugPrint("markThreadRead failed")
 #endif
         }
     }
 
     func updateThreadNotifications(threadId: String, enabled: Bool) async throws {
-        guard let currentAccountId = try await fetchCurrentAccountId(required: true) else {
+        guard try await fetchCurrentAccountId(required: true) != nil else {
             throw AppwriteServiceError.invalidResponse
         }
-        let participantRows = try await listRows(
-            tableId: configuration.threadParticipantsTableId,
-            queries: [
-                AppwriteQuery.equal("threadId", values: [threadId]),
-                AppwriteQuery.equal("userId", values: [currentAccountId])
-            ]
+        let response = try await executeUserFunction(
+            functionId: configuration.sendMessageFunctionId,
+            body: ThreadParticipantUpdatePayload.make(
+                threadId: threadId,
+                notificationsEnabled: enabled
+            ),
+            includeCurrentUserId: false
         )
+        try validateParticipantUpdateResponse(response, expectedThreadId: threadId)
+    }
 
-        guard let participantRow = participantRows.first,
-              let participantRowId = stringValue(forKey: "$id", in: participantRow) else {
+    private func validateParticipantUpdateResponse(
+        _ response: [String: Any],
+        expectedThreadId: String
+    ) throws {
+        guard boolValue(forKey: "ok", in: response) == true,
+              stringValue(forKey: "threadId", in: response) == expectedThreadId else {
             throw AppwriteServiceError.invalidResponse
         }
-
-        var payload: [String: Any] = [
-            "threadId": threadId,
-            "userId": currentAccountId,
-            "role": stringValue(forKey: "role", in: participantRow) ?? "participant",
-            "muted": !enabled,
-            "pinned": boolValue(forKey: "pinned", in: participantRow) ?? false,
-            "notificationsEnabled": enabled
-        ]
-        if let lastReadAt = dateValue(forKey: "lastReadAt", in: participantRow) {
-            payload["lastReadAt"] = ISO8601DateFormatter().string(from: lastReadAt)
-        }
-
-        _ = try await sendRequest(
-            method: "PATCH",
-            pathComponents: [
-                "tablesdb",
-                configuration.databaseId,
-                "tables",
-                configuration.threadParticipantsTableId,
-                "rows",
-                participantRowId
-            ],
-            jsonBody: ["data": payload]
-        )
     }
 
     func fetchAttachmentData(fileId: String) async throws -> Data? {
@@ -379,8 +384,6 @@ extension AppwriteService {
             return nil
         }
 
-        let threadRow = try await fetchRowIfAccessible(tableId: configuration.threadsTableId, rowId: threadId)
-
         let participantRows = try await listRows(
             tableId: configuration.threadParticipantsTableId,
             queries: [
@@ -392,15 +395,10 @@ extension AppwriteService {
         guard participantUserIds.contains(resolvedCurrentAccountId) else {
             return nil
         }
-        let otherUserId = participantUserIds.first(where: { $0 != resolvedCurrentAccountId })
-        let relationshipState = try await fetchRelationshipState(
-            currentAccountId: resolvedCurrentAccountId,
-            otherUserId: otherUserId
-        )
-
-        guard await relationshipState.isVisibleInInbox else {
+        guard let otherUserId = participantUserIds.first(where: { $0 != resolvedCurrentAccountId }) else {
             return nil
         }
+        let peer = try await fetchPeerProjection(threadId: threadId, otherUserId: otherUserId)
         let currentParticipantRow = participantRows
             .first(where: { stringValue(forKey: "userId", in: $0) == resolvedCurrentAccountId })
         let currentUserReadAt = currentParticipantRow
@@ -410,7 +408,6 @@ extension AppwriteService {
             .first(where: { stringValue(forKey: "userId", in: $0) == otherUserId })
             .flatMap { dateValue(forKey: "lastReadAt", in: $0) }
 
-        let profileRow = try await fetchProfileRow(id: otherUserId ?? "")
         let messageRows = try await listRows(
             tableId: configuration.messagesTableId,
             queries: [
@@ -428,14 +425,8 @@ extension AppwriteService {
             makeMessageDTO(from: row, currentAccountId: resolvedCurrentAccountId, replyLookup: replyLookup)
         }
 
-        let threadName = ThreadNaming.displayName(
-            firstName: stringValue(forKey: "firstName", in: profileRow),
-            lastName: stringValue(forKey: "lastName", in: profileRow),
-            email: stringValue(forKey: "email", in: profileRow),
-            fallback: stringValue(forKey: "subject", in: threadRow)
-        )
-        let presenceUpdatedAt = dateValue(forKey: "presenceUpdatedAt", in: profileRow)
-        let lastSeenAt = dateValue(forKey: "lastSeenAt", in: profileRow)
+        let presenceUpdatedAt = chatPeerDate(peer.presenceUpdatedAt)
+        let lastSeenAt = chatPeerDate(peer.lastSeenAt)
         let isOnline = presenceUpdatedAt.map { Date().timeIntervalSince($0) <= 70 } ?? false
         let sortedMessages = messages.sorted { lhs, rhs in
             lhs.sentAt < rhs.sentAt
@@ -444,77 +435,22 @@ extension AppwriteService {
         return ThreadDTO(
             id: stableUUID(from: threadId),
             remoteId: threadId,
-            name: threadName,
-            avatar: threadAvatarURLString(from: profileRow),
+            name: peer.displayName,
+            avatar: peer.avatarURL ?? "",
             isOnline: isOnline,
             lastSeenAt: lastSeenAt,
             currentUserReadAt: currentUserReadAt,
             otherParticipantReadAt: otherParticipantReadAt,
             participantUserIds: participantUserIds,
             notificationsEnabled: notificationsEnabled,
-            relationshipState: relationshipState,
+            relationshipState: .matched,
             messages: sortedMessages
         )
     }
 }
 
 private extension AppwriteService {
-    func fetchMatchedThreadAfterSwipe(otherUserId: String, otherUserName: String?) async throws -> ThreadDTO? {
-        var lastError: Error?
-
-        for attempt in 0..<5 {
-            do {
-                if try await hasMatchedRelationshipWithCurrentUser(otherUserId: otherUserId) {
-                    let threadId = try await createOrGetThread(otherUserId: otherUserId)
-                    return try await fetchThreadAfterWrite(
-                        threadId: threadId,
-                        otherUserId: otherUserId,
-                        otherUserName: otherUserName,
-                        fallbackRelationshipState: .matched
-                    )
-                }
-            } catch {
-                lastError = error
-            }
-
-            if attempt < 4 {
-                try await Task.sleep(nanoseconds: 250_000_000)
-            }
-        }
-
-#if DEBUG
-        if let lastError {
-            debugPrint("Swipe match fallback failed: \(lastError.localizedDescription)")
-        }
-#endif
-        return nil
-    }
-
-    func hasMatchedRelationshipWithCurrentUser(otherUserId: String) async throws -> Bool {
-        guard let currentAccountId = try await fetchCurrentAccountId(required: false) else {
-            return false
-        }
-
-        let relationshipState = try await fetchRelationshipState(
-            currentAccountId: currentAccountId,
-            otherUserId: otherUserId
-        )
-        if relationshipState == .matched {
-            return true
-        }
-
-        return try await hasLegacyMatch(
-            currentAccountId: currentAccountId,
-            otherUserId: otherUserId
-        )
-    }
-
-    func fetchThreadAfterWrite(
-        threadId: String,
-        otherUserId: String,
-        otherUserName: String?,
-        fallbackRelationshipState: RelationshipStateDTO
-    ) async throws -> ThreadDTO {
+    func fetchThreadAfterWrite(threadId: String) async throws -> ThreadDTO {
         var lastError: Error?
 
         for attempt in 0..<6 {
@@ -532,32 +468,6 @@ private extension AppwriteService {
             }
         }
 
-        if let currentAccountId = try await fetchCurrentAccountId(required: false) {
-            let profileRow = try? await fetchProfileRow(id: otherUserId)
-            let presenceUpdatedAt = dateValue(forKey: "presenceUpdatedAt", in: profileRow)
-            let fallbackName = ThreadNaming.displayName(
-                firstName: stringValue(forKey: "firstName", in: profileRow),
-                lastName: stringValue(forKey: "lastName", in: profileRow),
-                email: stringValue(forKey: "email", in: profileRow),
-                fallback: otherUserName
-            )
-
-            return ThreadDTO(
-                id: stableUUID(from: threadId),
-                remoteId: threadId,
-                name: fallbackName,
-                avatar: threadAvatarURLString(from: profileRow),
-                isOnline: presenceUpdatedAt.map { Date().timeIntervalSince($0) <= 70 } ?? false,
-                lastSeenAt: dateValue(forKey: "lastSeenAt", in: profileRow),
-                currentUserReadAt: nil,
-                otherParticipantReadAt: nil,
-                participantUserIds: [currentAccountId, otherUserId],
-                notificationsEnabled: true,
-                relationshipState: fallbackRelationshipState,
-                messages: []
-            )
-        }
-
         if let lastError {
             throw lastError
         }
@@ -565,103 +475,29 @@ private extension AppwriteService {
         throw AppwriteServiceError.invalidResponse
     }
 
-    func fetchRelationshipState(currentAccountId: String, otherUserId: String?) async throws -> RelationshipStateDTO {
-        guard let otherUserId, !otherUserId.isEmpty else {
-            return .none
-        }
-
-        guard let relationshipRow = try await fetchRelationshipRow(
-            currentAccountId: currentAccountId,
-            otherUserId: otherUserId
+    func fetchPeerProjection(threadId: String, otherUserId: String) async throws -> ChatPeerProjection {
+        let response = try await executeUserFunction(
+            functionId: configuration.createOrGetThreadFunctionId,
+            body: [
+                "action": "peerProjection",
+                "otherUserId": otherUserId
+            ],
+            includeCurrentUserId: false
+        )
+        guard let projection = ChatPeerProjectionContract.parse(
+            response: response,
+            expectedThreadId: threadId,
+            expectedUserId: otherUserId
         ) else {
-            if try await hasLegacyMatch(currentAccountId: currentAccountId, otherUserId: otherUserId) {
-                return .matched
-            }
-            return configuration.relationshipsTableId == nil ? .matched : .none
+            throw AppwriteServiceError.invalidResponse
         }
-
-        let isCurrentUserA = stringValue(forKey: "userAId", in: relationshipRow) == currentAccountId
-        let currentState = stringValue(
-            forKey: isCurrentUserA ? "userAState" : "userBState",
-            in: relationshipRow
-        )
-        let otherState = stringValue(
-            forKey: isCurrentUserA ? "userBState" : "userAState",
-            in: relationshipRow
-        )
-
-        if currentState == RelationshipStateDTO.blocked.rawValue || otherState == RelationshipStateDTO.blocked.rawValue {
-            return .blocked
-        }
-
-        if currentState == RelationshipStateDTO.archived.rawValue {
-            return .archived
-        }
-
-        if dateValue(forKey: "matchedAt", in: relationshipRow) != nil
-            || currentState == RelationshipStateDTO.matched.rawValue
-            || otherState == RelationshipStateDTO.matched.rawValue {
-            return .matched
-        }
-
-        if currentState == RelationshipStateDTO.liked.rawValue {
-            return .liked
-        }
-
-        return .none
+        return projection
     }
 
-    func fetchRelationshipRow(currentAccountId: String, otherUserId: String) async throws -> [String: Any]? {
-        guard let relationshipsTableId = configuration.relationshipsTableId else {
-            return nil
-        }
-
-        let pairKey = [currentAccountId, otherUserId]
-            .sorted()
-            .joined(separator: ":")
-
-        let rows = try await listRows(
-            tableId: relationshipsTableId,
-            queries: [
-                AppwriteQuery.equal("pairKey", values: [pairKey]),
-                AppwriteQuery.limit(1)
-            ]
-        )
-
-        return rows.first
-    }
-
-    func hasLegacyMatch(currentAccountId: String, otherUserId: String) async throws -> Bool {
-        guard let matchesTableId = configuration.matchesTableId else {
-            return false
-        }
-
-        let pairKey = [currentAccountId, otherUserId]
-            .sorted()
-            .joined(separator: ":")
-
-        let rows = try await listRows(
-            tableId: matchesTableId,
-            queries: [
-                AppwriteQuery.equal("matchKey", values: [pairKey]),
-                AppwriteQuery.limit(1)
-            ]
-        )
-
-        return !rows.isEmpty
-    }
-
-    func threadAvatarURLString(from profileRow: [String: Any]?) -> String {
-        if let fileId = threadAvatarFileId(from: profileRow),
-           let storageURL = threadAvatarStorageURL(fileId: fileId) {
-            return storageURL.absoluteString
-        }
-
-        if let directURL = threadDirectAvatarURL(from: profileRow) {
-            return directURL.absoluteString
-        }
-
-        return ""
+    func chatPeerDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        return Self.dateFormatter.date(from: value)
+            ?? Self.fallbackDateFormatter.date(from: value)
     }
 
     func threadNotificationsEnabled(from participantRow: [String: Any]) -> Bool {
@@ -674,103 +510,6 @@ private extension AppwriteService {
         }
 
         return true
-    }
-
-    private func threadAvatarFileId(from profileRow: [String: Any]?) -> String? {
-        let fileIdKeys = [
-            "avatarFileId",
-            "profileImageFileId",
-            "profilePhotoFileId",
-            "imageFileId"
-        ]
-
-        for key in fileIdKeys {
-            if let fileId = stringValue(forKey: key, in: profileRow) {
-                return fileId
-            }
-        }
-
-        return chatStringArrayValue(forKey: "photoFileIds", in: profileRow).first
-    }
-
-    private func threadAvatarStorageURL(fileId: String) -> URL? {
-        guard !fileId.isEmpty else { return nil }
-
-        var url = configuration.endpointURL
-        url.appendPathComponent("storage")
-        url.appendPathComponent("buckets")
-        url.appendPathComponent(configuration.avatarsBucketId)
-        url.appendPathComponent("files")
-        url.appendPathComponent(fileId)
-        url.appendPathComponent("view")
-
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "project", value: configuration.projectId)
-        ]
-        return components?.url
-    }
-
-    private func threadDirectAvatarURL(from profileRow: [String: Any]?) -> URL? {
-        let urlKeys = [
-            "avatar",
-            "avatarUrl",
-            "profileImageUrl",
-            "profilePhotoUrl",
-            "imageUrl"
-        ]
-
-        for key in urlKeys {
-            if let value = stringValue(forKey: key, in: profileRow),
-               let parsed = URL(string: value),
-               let scheme = parsed.scheme?.lowercased(),
-               scheme == "http" || scheme == "https" {
-                return parsed
-            }
-        }
-
-        let photoURLKeys = ["photos", "profilePhotos"]
-        return photoURLKeys
-            .lazy
-            .flatMap { self.chatStringArrayValue(forKey: $0, in: profileRow) }
-            .lazy
-            .compactMap { URL(string: $0) }
-            .first
-    }
-
-    private func chatStringArrayValue(forKey key: String, in dictionary: [String: Any]?) -> [String] {
-        if let values = dictionary?[key] as? [String] {
-            return values
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }
-
-        if let values = dictionary?[key] as? [Any] {
-            return values
-                .compactMap { $0 as? String }
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }
-
-        if let rawValue = dictionary?[key] as? String {
-            let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return [] }
-
-            if trimmed.hasPrefix("["),
-               let data = trimmed.data(using: .utf8),
-               let decodedArray = try? JSONDecoder().decode([String].self, from: data) {
-                return decodedArray
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-            }
-
-            return trimmed
-                .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == "|" })
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }
-
-        return []
     }
 
     func recoverRecentlySentMessage(threadId: String, text: String, replyToMessageId: String?, attachmentFileId: String?, notBefore: Date) async throws -> MessageDTO? {
@@ -842,7 +581,10 @@ private extension AppwriteService {
             throw AppwriteServiceError.missingConfiguration("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID")
         }
 
-        let currentUserId = try await fetchCurrentAccountId(required: true) ?? ""
+        guard let currentUserId = try await fetchCurrentAccountId(required: true),
+              !currentUserId.isEmpty else {
+            throw AppwriteServiceError.missingAccountId
+        }
         let fileId = makeRandomIdentifier()
         _ = participantUserIds
         // Client-side uploads can only grant permissions the current user is allowed to assign.

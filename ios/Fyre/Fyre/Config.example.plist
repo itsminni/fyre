@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>APPWRITE_PROJECT_ID</key>
+	<string>&lt;APPWRITE_PROJECT_ID&gt;</string>
+	<key>APPWRITE_PUBLIC_ENDPOINT</key>
+	<string>&lt;APPWRITE_PUBLIC_ENDPOINT&gt;</string>
+	<key>APPWRITE_DATABASE_ID</key>
+	<string>&lt;APPWRITE_DATABASE_ID&gt;</string>
+	<key>APPWRITE_PROFILES_TABLE_ID</key>
+	<string>&lt;APPWRITE_PROFILES_TABLE_ID&gt;</string>
+	<key>APPWRITE_AVATARS_BUCKET_ID</key>
+	<string>&lt;APPWRITE_AVATARS_BUCKET_ID&gt;</string>
+	<key>APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID</key>
+	<string></string>
+	<key>APPWRITE_EVENTS_TABLE_ID</key>
+	<string>&lt;APPWRITE_EVENTS_TABLE_ID&gt;</string>
+	<key>APPWRITE_EVENT_REGISTRATIONS_TABLE_ID</key>
+	<string>&lt;APPWRITE_EVENT_REGISTRATIONS_TABLE_ID&gt;</string>
+	<key>APPWRITE_THREADS_TABLE_ID</key>
+	<string>&lt;APPWRITE_THREADS_TABLE_ID&gt;</string>
+	<key>APPWRITE_THREAD_PARTICIPANTS_TABLE_ID</key>
+	<string>&lt;APPWRITE_THREAD_PARTICIPANTS_TABLE_ID&gt;</string>
+	<key>APPWRITE_MESSAGES_TABLE_ID</key>
+	<string>&lt;APPWRITE_MESSAGES_TABLE_ID&gt;</string>
+	<key>APPWRITE_SWIPES_TABLE_ID</key>
+	<string>&lt;APPWRITE_SWIPES_TABLE_ID&gt;</string>
+	<key>APPWRITE_MATCHES_TABLE_ID</key>
+	<string>&lt;APPWRITE_MATCHES_TABLE_ID&gt;</string>
+	<key>APPWRITE_RELATIONSHIPS_TABLE_ID</key>
+	<string>&lt;APPWRITE_RELATIONSHIPS_TABLE_ID&gt;</string>
+	<key>APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID</key>
+	<string>&lt;APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID&gt;</string>
+	<key>APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID</key>
+	<string>&lt;APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID&gt;</string>
+	<key>APPWRITE_MANAGE_PROFILE_FUNCTION_ID</key>
+	<string>&lt;APPWRITE_MANAGE_PROFILE_FUNCTION_ID&gt;</string>
+	<key>APPWRITE_EVENT_ADMIN_FUNCTION_ID</key>
+	<string></string>
+	<key>APPWRITE_EVENT_ADMIN_FUNCTION_DOMAIN</key>
+	<string></string>
+	<key>APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID</key>
+	<string>&lt;APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID&gt;</string>
+	<key>APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_DOMAIN</key>
+	<string></string>
+	<key>APPWRITE_SEND_MESSAGE_FUNCTION_ID</key>
+	<string>&lt;APPWRITE_SEND_MESSAGE_FUNCTION_ID&gt;</string>
+	<key>APPWRITE_SEND_MESSAGE_FUNCTION_DOMAIN</key>
+	<string></string>
+	<key>APPWRITE_RECORD_SWIPE_FUNCTION_ID</key>
+	<string>&lt;APPWRITE_RECORD_SWIPE_FUNCTION_ID&gt;</string>
+	<key>APPWRITE_RECORD_SWIPE_FUNCTION_DOMAIN</key>
+	<string></string>
+	<key>APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID</key>
+	<string>&lt;APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID&gt;</string>
+	<key>APPWRITE_DISCOVER_PROFILES_FUNCTION_ID</key>
+	<string>&lt;APPWRITE_DISCOVER_PROFILES_FUNCTION_ID&gt;</string>
+	<key>APPWRITE_DISCOVER_PROFILES_FUNCTION_DOMAIN</key>
+	<string></string>
+</dict>
+</plist>

@@ -27,28 +27,38 @@ struct EventsView: View {
 
     var body: some View {
         let snapshot = store.mainEventSnapshot
+        let previewDeadlineText = snapshot.registrationClosesAt.map { deadline in
+            String(
+                format: L10n.tr("events.preview.deadline"),
+                Self.previewDeadlineFormatter.string(from: deadline)
+            )
+        }
 
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    NavigationLink {
-                        EventDetailView()
-                    } label: {
-                        EventPreviewCard(
-                            snapshot: snapshot,
-                            dateText: Self.previewDateFormatter.string(from: snapshot.date),
-                            deadlineText: String(
-                                format: L10n.tr("events.preview.deadline"),
-                                Self.previewDeadlineFormatter.string(
-                                    from: snapshot.effectiveRegistrationClosesAt
-                                )
-                            ),
-                            venueText: L10n.tr("events.info.club"),
-                            registrationText: registrationBadgeText
+                    if store.hasLiveMainEvent {
+                        NavigationLink {
+                            EventDetailView()
+                        } label: {
+                            EventPreviewCard(
+                                snapshot: snapshot,
+                                dateText: Self.previewDateFormatter.string(from: snapshot.date),
+                                deadlineText: previewDeadlineText,
+                                venueText: snapshot.place,
+                                registrationText: registrationBadgeText
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        ContentUnavailableView(
+                            L10n.tr("events.unavailable.title"),
+                            systemImage: "calendar.badge.exclamationmark",
+                            description: Text(L10n.tr("events.unavailable.description"))
                         )
+                        .frame(maxWidth: .infinity, minHeight: 320)
                     }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
@@ -56,6 +66,9 @@ struct EventsView: View {
                 .padding(.bottom, 28)
             }
             .scrollIndicators(.hidden)
+            .refreshable {
+                await store.refreshRemoteMainEventState()
+            }
             .background(EventScreenBackground().ignoresSafeArea())
             .navigationTitle(L10n.tr("tab.events"))
         }
@@ -92,7 +105,6 @@ struct EventDetailView: View {
     @State private var adminCancellationClosesAt = Date().addingTimeInterval(48 * 60 * 60)
     @State private var adminUsesRegistrationClose = false
     @State private var adminUsesCancellationClose = false
-    @State private var adminScopedEmails = ""
     @State private var adminLookup = ""
     @State private var adminAddStatus: EventHistoryStatus = .confirmed
 
@@ -113,16 +125,33 @@ struct EventDetailView: View {
         return formatter
     }()
 
+    @ViewBuilder
     var body: some View {
+        if store.hasLiveMainEvent {
+            liveEventBody
+        } else {
+            ContentUnavailableView(
+                L10n.tr("events.unavailable.title"),
+                systemImage: "calendar.badge.exclamationmark",
+                description: Text(L10n.tr("events.unavailable.description"))
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(EventScreenBackground().ignoresSafeArea())
+            .navigationTitle(L10n.tr("events.detail.title"))
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var liveEventBody: some View {
         let snapshot = store.mainEventSnapshot
         let adminState = store.mainEventAdminState
 
-        ScrollView {
+        return ScrollView {
             VStack(spacing: 20) {
                 EventPosterHero(
                     snapshot: snapshot,
                     dateText: Self.detailDateFormatter.string(from: snapshot.date),
-                    venueText: L10n.tr("events.info.club"),
+                    venueText: snapshot.place,
                     registrationText: registrationBadgeText
                 )
 
@@ -132,42 +161,27 @@ struct EventDetailView: View {
                             .font(.title2.weight(.bold))
                             .fixedSize(horizontal: false, vertical: true)
 
-                        Text(L10n.tr("events.info.exclusive"))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        if let description = snapshot.eventDescription {
+                            Text(description)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
 
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .top, spacing: 10) {
-                                EventFeatureBadge(text: L10n.tr("events.info.buffet"), icon: "fork.knife")
-                                EventFeatureBadge(text: L10n.tr("events.info.welcomeDrink"), icon: "sparkles")
-                            }
+                if let place = snapshot.place {
+                    EventSurface(title: L10n.tr("events.section.info"), icon: "mappin.and.ellipse") {
+                        EventInfoLine(icon: "building.2.fill", text: place)
+                    }
+                }
 
-                            VStack(alignment: .leading, spacing: 10) {
-                                EventFeatureBadge(text: L10n.tr("events.info.buffet"), icon: "fork.knife")
-                                EventFeatureBadge(text: L10n.tr("events.info.welcomeDrink"), icon: "sparkles")
+                if !snapshot.rules.isEmpty {
+                    EventSurface(title: L10n.tr("events.section.rules"), icon: "checklist") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(snapshot.rules, id: \.self) { rule in
+                                EventInfoLine(icon: "checkmark.circle.fill", text: rule)
                             }
                         }
-
-                        EventInfoLine(icon: "tshirt.fill", text: L10n.tr("events.info.dressCode"))
-                    }
-                }
-
-                EventSurface(title: L10n.tr("events.section.info"), icon: "mappin.and.ellipse") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        EventInfoLine(icon: "building.2.fill", text: L10n.tr("events.info.club"))
-                        EventInfoLine(icon: "location.fill", text: L10n.tr("events.info.address"))
-                        EventInfoLine(icon: "eurosign.circle.fill", text: L10n.tr("events.info.contribution"))
-                        EventInfoLine(icon: "phone.fill", text: L10n.tr("events.info.contact"))
-                        EventInfoLine(icon: "person.2.fill", text: L10n.tr("events.rule.staff"))
-                    }
-                }
-
-                EventSurface(title: L10n.tr("events.section.rules"), icon: "checklist") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        EventInfoLine(icon: "door.left.hand.open", text: L10n.tr("events.rule.maxParticipants"))
-                        EventInfoLine(icon: "equal.circle.fill", text: L10n.tr("events.rule.balance"))
-                        EventInfoLine(icon: "calendar.badge.minus", text: L10n.tr("events.rule.cancel48h"))
-                        EventInfoLine(icon: "lock.circle.fill", text: L10n.tr("events.rule.lock24h"))
                     }
                 }
 
@@ -218,29 +232,35 @@ struct EventDetailView: View {
                             )
                         }
 
-                        TimelineView(.periodic(from: .now, by: 60)) { context in
-                            VStack(alignment: .leading, spacing: 8) {
-                                EventInfoLine(
-                                    icon: "clock.arrow.2.circlepath",
-                                    text: String(
-                                        format: L10n.tr("events.countdown.cancel"),
-                                        countdownText(
-                                            until: snapshot.effectiveCancellationClosesAt,
-                                            now: context.date
+                        if snapshot.cancellationClosesAt != nil || snapshot.registrationClosesAt != nil {
+                            TimelineView(.periodic(from: .now, by: 60)) { context in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if let cancellationClosesAt = snapshot.cancellationClosesAt {
+                                        EventInfoLine(
+                                            icon: "clock.arrow.2.circlepath",
+                                            text: String(
+                                                format: L10n.tr("events.countdown.cancel"),
+                                                countdownText(
+                                                    until: cancellationClosesAt,
+                                                    now: context.date
+                                                )
+                                            )
                                         )
-                                    )
-                                )
+                                    }
 
-                                EventInfoLine(
-                                    icon: "lock.fill",
-                                    text: String(
-                                        format: L10n.tr("events.countdown.lock"),
-                                        countdownText(
-                                            until: snapshot.effectiveRegistrationClosesAt,
-                                            now: context.date
+                                    if let registrationClosesAt = snapshot.registrationClosesAt {
+                                        EventInfoLine(
+                                            icon: "lock.fill",
+                                            text: String(
+                                                format: L10n.tr("events.countdown.lock"),
+                                                countdownText(
+                                                    until: registrationClosesAt,
+                                                    now: context.date
+                                                )
+                                            )
                                         )
-                                    )
-                                )
+                                    }
+                                }
                             }
                         }
                     }
@@ -305,22 +325,6 @@ struct EventDetailView: View {
                                     )
                                     .labelsHidden()
                                 }
-
-                                Text(L10n.tr("events.admin.access"))
-                                    .font(.headline)
-                                    .padding(.top, 8)
-
-                                Text(L10n.tr("events.admin.access.subtitle"))
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-
-                                adminInputField(
-                                    L10n.tr("events.admin.field.adminEmails"),
-                                    text: $adminScopedEmails,
-                                    capitalization: .never,
-                                    disableAutocorrection: true,
-                                    axis: .vertical
-                                )
 
                                 Button {
                                     saveAdminChanges()
@@ -482,7 +486,6 @@ struct EventDetailView: View {
         adminRegistrationClosesAt = adminState.registrationClosesAt ?? adminState.startsAt.addingTimeInterval(-(24 * 60 * 60))
         adminUsesCancellationClose = adminState.cancellationClosesAt != nil
         adminCancellationClosesAt = adminState.cancellationClosesAt ?? adminState.startsAt.addingTimeInterval(-(48 * 60 * 60))
-        adminScopedEmails = adminState.adminEmails
     }
 
     private func saveAdminChanges() {
@@ -496,9 +499,7 @@ struct EventDetailView: View {
             maleLimit: max(0, adminMaleLimit),
             femaleLimit: max(0, adminFemaleLimit),
             registrationClosesAt: adminUsesRegistrationClose ? adminRegistrationClosesAt : nil,
-            cancellationClosesAt: adminUsesCancellationClose ? adminCancellationClosesAt : nil,
-            adminUserIds: "",
-            adminEmails: adminScopedEmails.trimmingCharacters(in: .whitespacesAndNewlines)
+            cancellationClosesAt: adminUsesCancellationClose ? adminCancellationClosesAt : nil
         )
 
         Task {
@@ -619,8 +620,7 @@ struct EventDetailView: View {
             String(adminState.maleLimit),
             String(adminState.femaleLimit),
             adminState.registrationClosesAt.map { String($0.timeIntervalSince1970) } ?? "nil",
-            adminState.cancellationClosesAt.map { String($0.timeIntervalSince1970) } ?? "nil",
-            adminState.adminEmails
+            adminState.cancellationClosesAt.map { String($0.timeIntervalSince1970) } ?? "nil"
         ].joined(separator: "|")
     }
 
@@ -645,8 +645,8 @@ private struct EventPreviewCard: View {
     @Environment(\.colorScheme) private var colorScheme
     let snapshot: MainEventSnapshot
     let dateText: String
-    let deadlineText: String
-    let venueText: String
+    let deadlineText: String?
+    let venueText: String?
     let registrationText: String?
 
     var body: some View {
@@ -680,8 +680,12 @@ private struct EventPreviewCard: View {
             }
 
             VStack(alignment: .leading, spacing: 16) {
-                EventInfoLine(icon: "building.2.fill", text: venueText)
-                EventDeadlineBanner(text: deadlineText)
+                if let venueText {
+                    EventInfoLine(icon: "building.2.fill", text: venueText)
+                }
+                if let deadlineText {
+                    EventDeadlineBanner(text: deadlineText)
+                }
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 86), spacing: 12)],
@@ -702,9 +706,6 @@ private struct EventPreviewCard: View {
                     )
                 }
 
-                Text(L10n.tr("events.info.exclusive"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
@@ -727,7 +728,7 @@ private struct EventPosterHero: View {
     @Environment(\.colorScheme) private var colorScheme
     let snapshot: MainEventSnapshot
     let dateText: String
-    let venueText: String
+    let venueText: String?
     let registrationText: String?
 
     var body: some View {
@@ -745,7 +746,9 @@ private struct EventPosterHero: View {
                         .background(.orange.opacity(0.92), in: Capsule())
                 }
 
-                EventPosterOverlayBadge(text: venueText, icon: "building.2.fill")
+                if let venueText {
+                    EventPosterOverlayBadge(text: venueText, icon: "building.2.fill")
+                }
 
                 Text(snapshot.title)
                     .font(.system(.largeTitle, design: .rounded).weight(.bold))

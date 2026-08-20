@@ -3,7 +3,7 @@
 //  Fyre
 //
 //  Created by Gabriele Mininni on 03/03/26.
-//  Local user store backed by UserDefaults.
+//  Local user store with Keychain-backed session state and memory-only mock credentials.
 //
 
 import CoreLocation
@@ -84,7 +84,6 @@ enum UserIntent: String, Codable, CaseIterable, Sendable, Identifiable {
 
 struct User: Codable, Sendable {
     var email: String
-    var password: String
     var appwriteUserId: String?
     var firstName: String?
     var lastName: String?
@@ -138,7 +137,7 @@ struct User: Codable, Sendable {
 
     nonisolated var normalizedMaxDistanceKm: Int? {
         guard let maxDistanceKm else { return nil }
-        return max(maxDistanceKm, 5)
+        return min(max(maxDistanceKm, 5), 999)
     }
 
     nonisolated var normalizedBio: String {
@@ -178,15 +177,13 @@ struct User: Codable, Sendable {
         guard let birthDate, UserStore.age(from: birthDate) >= 18 else { return false }
         guard gender != nil else { return false }
         guard orientation != nil else { return false }
-        guard latitude != nil, longitude != nil else { return false }
         guard !normalizedBio.isEmpty else { return false }
-        guard !resolvedPreferredGenders.isEmpty else { return false }
+        guard let preferredGenders, !preferredGenders.isEmpty else { return false }
         return true
     }
 
-    nonisolated init(email: String, password: String) {
+    nonisolated init(email: String) {
         self.email = email
-        self.password = password
     }
 
     nonisolated static func normalizedSocialTag(_ value: String?) -> String? {
@@ -205,7 +202,6 @@ struct User: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case email
-        case password
         case appwriteUserId
         case firstName
         case lastName
@@ -235,7 +231,6 @@ struct User: Codable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         email = try c.decode(String.self, forKey: .email)
-        password = try c.decodeIfPresent(String.self, forKey: .password) ?? ""
         appwriteUserId = try c.decodeIfPresent(String.self, forKey: .appwriteUserId)
         firstName = try c.decodeIfPresent(String.self, forKey: .firstName)
         lastName = try c.decodeIfPresent(String.self, forKey: .lastName)
@@ -267,7 +262,6 @@ struct User: Codable, Sendable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(email, forKey: .email)
-        try c.encode(UserStore.permitsPlaintextLocalPasswords ? password : "", forKey: .password)
         try c.encodeIfPresent(appwriteUserId, forKey: .appwriteUserId)
         try c.encodeIfPresent(firstName, forKey: .firstName)
         try c.encodeIfPresent(lastName, forKey: .lastName)
@@ -298,6 +292,9 @@ struct User: Codable, Sendable {
 struct MainEventSnapshot: Sendable {
     let date: Date
     let title: String
+    let place: String?
+    let eventDescription: String?
+    let rules: [String]
     let maxParticipants: Int
     let maleLimit: Int
     let femaleLimit: Int
@@ -310,8 +307,6 @@ struct MainEventSnapshot: Sendable {
     var totalCount: Int { maleCount + femaleCount }
     var remainingMaleSlots: Int { max(0, maleLimit - maleCount) }
     var remainingFemaleSlots: Int { max(0, femaleLimit - femaleCount) }
-    var effectiveRegistrationClosesAt: Date { registrationClosesAt ?? date.addingTimeInterval(-(24 * 60 * 60)) }
-    var effectiveCancellationClosesAt: Date { cancellationClosesAt ?? date.addingTimeInterval(-(48 * 60 * 60)) }
 }
 
 enum EventHistoryStatus: String, Codable, Sendable {
@@ -347,9 +342,12 @@ struct EventHistoryItem: Identifiable, Sendable {
 @Observable
 final class UserStore: @unchecked Sendable {
     private enum PersistenceKey {
-        static let users = "fyre_users"
-        static let currentUser = "fyre_current_user"
         static let mainEventState = "fyre_main_event_state"
+    }
+
+    private enum SecurePersistenceKey {
+        static let currentUser = "profile.current-user.v1"
+        static let logoutPending = "auth.logout-pending.v1"
     }
 
     private struct EventParticipant: Codable, Sendable {
@@ -387,6 +385,13 @@ final class UserStore: @unchecked Sendable {
         }
     }
 
+    /// Authentication fixture used only by XCTest and `-uitest-reset`.
+    /// It is intentionally not Codable and is never handed to a persistence API.
+    private struct EphemeralLocalAccount: Sendable {
+        var user: User
+        let password: String
+    }
+
     static let shared = UserStore()
 
     var currentUser: User? {
@@ -395,11 +400,14 @@ final class UserStore: @unchecked Sendable {
         }
     }
 
+    private(set) var isSessionBootstrapComplete = false
+
     var isLoggedIn: Bool { currentUser != nil }
     var isProfileComplete: Bool { currentUser?.isProfileComplete ?? false }
 
     var isCurrentUserRegisteredForMainEvent: Bool {
-        if Self.shouldUseAppwrite, let status = remoteMainEventState?.currentStatus {
+        if Self.shouldUseAppwrite {
+            guard let status = remoteMainEventState?.currentStatus else { return false }
             return status == .confirmed || status == .promoted
         }
 
@@ -408,8 +416,8 @@ final class UserStore: @unchecked Sendable {
     }
 
     var isCurrentUserWaitingForMainEvent: Bool {
-        if Self.shouldUseAppwrite, let status = remoteMainEventState?.currentStatus {
-            return status == .waitlisted
+        if Self.shouldUseAppwrite {
+            return remoteMainEventState?.currentStatus == .waitlisted
         }
 
         guard let email = currentUser?.email else { return false }
@@ -421,8 +429,8 @@ final class UserStore: @unchecked Sendable {
     }
 
     var currentUserUpcomingEventHistory: [EventHistoryItem] {
-        if Self.shouldUseAppwrite, let remoteHistory = remoteMainEventState?.history {
-            return remoteHistory
+        if Self.shouldUseAppwrite {
+            return remoteMainEventState?.history ?? []
         }
 
         guard let email = currentUser?.email else { return [] }
@@ -442,8 +450,26 @@ final class UserStore: @unchecked Sendable {
     }
 
     var mainEventSnapshot: MainEventSnapshot {
-        if Self.shouldUseAppwrite, let remoteSnapshot = remoteMainEventState?.snapshot {
-            return remoteSnapshot
+        if Self.shouldUseAppwrite {
+            if let remoteSnapshot = remoteMainEventState?.snapshot {
+                return remoteSnapshot
+            }
+
+            return MainEventSnapshot(
+                date: mainEventDate,
+                title: mainEventTitle,
+                place: nil,
+                eventDescription: nil,
+                rules: [],
+                maxParticipants: maxParticipants,
+                maleLimit: maxParticipants / 2,
+                femaleLimit: maxParticipants / 2,
+                maleCount: 0,
+                femaleCount: 0,
+                waitingListCount: 0,
+                registrationClosesAt: nil,
+                cancellationClosesAt: nil
+            )
         }
 
         let male = mainEventState.participants.filter { $0.gender == .male }.count
@@ -451,19 +477,26 @@ final class UserStore: @unchecked Sendable {
         return MainEventSnapshot(
             date: mainEventDate,
             title: mainEventTitle,
+            place: nil,
+            eventDescription: nil,
+            rules: [],
             maxParticipants: maxParticipants,
             maleLimit: maxParticipants / 2,
             femaleLimit: maxParticipants / 2,
             maleCount: male,
             femaleCount: female,
             waitingListCount: mainEventState.waitingList.count,
-            registrationClosesAt: nil,
-            cancellationClosesAt: nil
+            registrationClosesAt: mainEventDate.addingTimeInterval(-(24 * 60 * 60)),
+            cancellationClosesAt: mainEventDate.addingTimeInterval(-(48 * 60 * 60))
         )
     }
 
     var mainEventAdminState: EventAdminState? {
         Self.shouldUseAppwrite ? remoteMainEventState?.adminState : nil
+    }
+
+    var hasLiveMainEvent: Bool {
+        !Self.shouldUseAppwrite || remoteMainEventState != nil
     }
 
     var isCurrentUserEventAdmin: Bool {
@@ -474,13 +507,14 @@ final class UserStore: @unchecked Sendable {
     private let mainEventTitle = "Fyre Event"
     private let appwriteService: AppwriteService?
     private let appwriteInitializationError: String?
-    private let mainEventDate = Calendar.current.date(from: DateComponents(
-        year: 2026,
-        month: 4,
-        day: 30,
-        hour: 21,
-        minute: 0
-    )) ?? Date().addingTimeInterval(60 * 60 * 24 * 10)
+    @ObservationIgnored private var sessionBootstrapTask: Task<Void, Never>?
+    @ObservationIgnored private var authenticationOperationInFlight = false
+    @ObservationIgnored private var authenticationWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var sessionEpoch: UInt = 0
+    @ObservationIgnored private var eventRefreshGeneration: UInt = 0
+    @ObservationIgnored private var logoutPendingInMemory = false
+    @ObservationIgnored private var ephemeralLocalAccounts: [String: EphemeralLocalAccount] = [:]
+    private let mainEventDate = Date().addingTimeInterval(60 * 60 * 24 * 10)
 
     private var mainEventState: MainEventState {
         didSet {
@@ -495,22 +529,94 @@ final class UserStore: @unchecked Sendable {
         mainEventState = UserStore.loadMainEventState()
         remoteMainEventState = nil
         if Self.shouldUseAppwrite {
+            UserDefaults.standard.removeObject(forKey: PersistenceKey.mainEventState)
             do {
                 // Once Appwrite is configured, auth/profile/event state should come from the backend.
                 let configuration = try AppwriteConfiguration.load()
                 appwriteService = AppwriteService(configuration: configuration)
                 appwriteInitializationError = nil
-                UserDefaults.standard.removeObject(forKey: PersistenceKey.users)
                 mainEventState = MainEventState()
                 UserStore.saveCurrentUser(currentUser)
             } catch {
                 appwriteService = nil
                 appwriteInitializationError = error.localizedDescription
-                debugLog("Appwrite initialization failed: \(error.localizedDescription)")
+                debugLog("Appwrite initialization failed")
             }
         } else {
             appwriteService = nil
             appwriteInitializationError = nil
+        }
+    }
+
+    @MainActor
+    private func acquireAuthenticationOperation() async {
+        if !authenticationOperationInFlight {
+            authenticationOperationInFlight = true
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            authenticationWaiters.append(continuation)
+        }
+    }
+
+    @MainActor
+    private func releaseAuthenticationOperation() {
+        if authenticationWaiters.isEmpty {
+            authenticationOperationInFlight = false
+            return
+        }
+        authenticationWaiters.removeFirst().resume()
+    }
+
+    @MainActor
+    @discardableResult
+    private func advanceSessionEpoch() -> UInt {
+        sessionEpoch &+= 1
+        eventRefreshGeneration &+= 1
+        return sessionEpoch
+    }
+
+    private func sessionIdentity(for user: User?) -> String? {
+        guard let user else { return nil }
+        let accountId = user.appwriteUserId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return accountId.isEmpty ? normalizeEmail(user.email) : accountId
+    }
+
+    @MainActor
+    private func isCurrentSession(epoch: UInt, identity: String?) -> Bool {
+        sessionEpoch == epoch && sessionIdentity(for: currentUser) == identity
+    }
+
+    private func hasPendingLogout() -> Bool {
+        if logoutPendingInMemory {
+            return true
+        }
+        do {
+            return try SecurePersistenceStore.data(forKey: SecurePersistenceKey.logoutPending) != nil
+        } catch {
+            return true
+        }
+    }
+
+    private func setLogoutPending(_ isPending: Bool) {
+        logoutPendingInMemory = isPending
+        if isPending {
+            try? SecurePersistenceStore.setData(Data([1]), forKey: SecurePersistenceKey.logoutPending)
+        } else {
+            try? SecurePersistenceStore.removeData(forKey: SecurePersistenceKey.logoutPending)
+        }
+    }
+
+    @MainActor
+    private func finishPendingLogout(using service: AppwriteService) async -> Bool {
+        guard hasPendingLogout() else { return true }
+        do {
+            try await service.logOut()
+            setLogoutPending(false)
+            return true
+        } catch {
+            return false
         }
     }
 
@@ -533,8 +639,19 @@ final class UserStore: @unchecked Sendable {
                 return authConfigurationErrorMessage()
             }
 
+            await acquireAuthenticationOperation()
+            defer { releaseAuthenticationOperation() }
+            guard await finishPendingLogout(using: appwriteService) else {
+                return L10n.tr("error.auth.requestFailed")
+            }
+            let operationEpoch = advanceSessionEpoch()
+            remoteMainEventState = nil
+
             do {
                 let user = try await appwriteService.signUp(email: normalizedEmail, password: password)
+                guard sessionEpoch == operationEpoch else {
+                    return L10n.tr("error.auth.requestFailed")
+                }
                 currentUser = user
                 await refreshRemoteMainEventState()
                 return nil
@@ -542,15 +659,16 @@ final class UserStore: @unchecked Sendable {
                 return authErrorMessage(for: error, isSignUp: true)
             }
         } else {
-            var users = UserStore.loadUsers()
-
-            if users.contains(where: { $0.email == normalizedEmail }) {
+            if ephemeralLocalAccounts[normalizedEmail] != nil {
                 return L10n.tr("error.signup.emailInUse")
             }
 
-            let user = User(email: normalizedEmail, password: password)
-            users.append(user)
-            UserStore.saveUsers(users)
+            let user = User(email: normalizedEmail)
+            ephemeralLocalAccounts[normalizedEmail] = EphemeralLocalAccount(
+                user: user,
+                password: password
+            )
+            advanceSessionEpoch()
             currentUser = user
             return nil
         }
@@ -569,8 +687,19 @@ final class UserStore: @unchecked Sendable {
                 return authConfigurationErrorMessage()
             }
 
+            await acquireAuthenticationOperation()
+            defer { releaseAuthenticationOperation() }
+            guard await finishPendingLogout(using: appwriteService) else {
+                return L10n.tr("error.auth.requestFailed")
+            }
+            let operationEpoch = advanceSessionEpoch()
+            remoteMainEventState = nil
+
             do {
                 let user = try await appwriteService.logIn(email: normalizedEmail, password: password)
+                guard sessionEpoch == operationEpoch else {
+                    return L10n.tr("error.auth.requestFailed")
+                }
                 currentUser = user
                 await refreshRemoteMainEventState()
                 return nil
@@ -578,42 +707,55 @@ final class UserStore: @unchecked Sendable {
                 return authErrorMessage(for: error, isSignUp: false)
             }
         } else {
-            let users = UserStore.loadUsers()
-
-            guard let user = users.first(where: { $0.email == normalizedEmail }) else {
+            guard let account = ephemeralLocalAccounts[normalizedEmail] else {
                 return L10n.tr("error.login.userNotFound")
             }
-            guard user.password == password else {
+            guard account.password == password else {
                 return L10n.tr("error.login.invalidPassword")
             }
 
-            currentUser = user
+            advanceSessionEpoch()
+            currentUser = account.user
             return nil
         }
     }
 
     @MainActor
     func logOut() async {
-        if let appwriteService {
-            do {
-                try await appwriteService.logOut()
-            } catch {
-                // Clear local state even when the remote session deletion fails.
-            }
-        }
+        let currentAccountId = currentUser?.appwriteUserId
+        advanceSessionEpoch()
+        RecentChatThreadStore.clearForLogout(currentUserId: currentAccountId)
+        MatchSeenStore.clearForLogout(currentUserId: currentAccountId)
         currentUser = nil
         remoteMainEventState = nil
+
+        guard Self.shouldUseAppwrite else { return }
+        setLogoutPending(true)
+        guard let appwriteService else { return }
+        await acquireAuthenticationOperation()
+        defer { releaseAuthenticationOperation() }
+
+        do {
+            try await appwriteService.logOut()
+            setLogoutPending(false)
+        } catch {
+            // The Keychain tombstone forces another remote deletion before any
+            // later session restore or login can authenticate the app again.
+        }
     }
 
     @MainActor
     func setProfileGender(_ gender: UserGender) async -> String? {
         guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
+        let operationEpoch = sessionEpoch
+        let operationIdentity = sessionIdentity(for: user)
 
         let shouldRemoveMainEventRegistration = willCurrentUserLoseMainEventRegistrations(changingGenderTo: gender)
         user.gender = gender
 
         if Self.shouldUseAppwrite {
-            // Compatibility helper kept for tests and legacy call sites while profile edits now flow through updateProfile.
+            // Tests may still exercise this focused helper; production profile edits
+            // otherwise flow through updateProfile.
             currentUser = user
 
             if user.isProfileComplete {
@@ -623,6 +765,9 @@ final class UserStore: @unchecked Sendable {
 
                 do {
                     let updatedUser = try await appwriteService.updateProfile(for: user)
+                    guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                        return L10n.tr("profile.error.noCurrentUser")
+                    }
                     currentUser = updatedUser
                     if let removalError = await enforceMainEventEligibilityAfterProfileChange(
                         shouldRemoveMainEventRegistration,
@@ -632,17 +777,19 @@ final class UserStore: @unchecked Sendable {
                         return removalError
                     }
                 } catch {
+                    guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                        return L10n.tr("profile.error.noCurrentUser")
+                    }
                     return profileErrorMessage(for: error)
                 }
             }
         } else {
-            var users = UserStore.loadUsers()
-            guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+            guard var account = ephemeralLocalAccounts[user.email] else {
                 return L10n.tr("profile.error.noCurrentUser")
             }
 
-            users[userIndex] = user
-            UserStore.saveUsers(users)
+            account.user = user
+            ephemeralLocalAccounts[user.email] = account
             currentUser = user
         }
 
@@ -676,6 +823,8 @@ final class UserStore: @unchecked Sendable {
         drinks: Bool
     ) async -> String? {
         guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
+        let operationEpoch = sessionEpoch
+        let operationIdentity = sessionIdentity(for: user)
         let first = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let last = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -686,7 +835,7 @@ final class UserStore: @unchecked Sendable {
         let normalizedPreferredGenders = UserGender.allCases.filter { preferredGenders.contains($0) }
         let normalizedMinAge = min(max(minPreferredAge, 18), 98)
         let normalizedMaxAge = max(min(maxPreferredAge, 99), max(normalizedMinAge + 1, 19))
-        let normalizedMaxDistanceKm = maxDistanceKm.map { max($0, 5) }
+        let normalizedMaxDistanceKm = maxDistanceKm.map { min(max($0, 5), 999) }
         guard !first.isEmpty else { return L10n.tr("profile.error.emptyFirstName") }
         guard !normalizedCity.isEmpty else { return L10n.tr("profile.error.emptyCity") }
         guard let birthDate, Self.age(from: birthDate) >= 18 else { return L10n.tr("profile.error.invalidAge") }
@@ -708,6 +857,9 @@ final class UserStore: @unchecked Sendable {
                 resolvedLocation = try await Self.resolvedCity(for: normalizedCity)
             } catch {
                 return L10n.tr("profile.error.cityLookupFailed")
+            }
+            guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                return L10n.tr("profile.error.noCurrentUser")
             }
         }
         let nextGender = gender ?? user.gender
@@ -745,6 +897,9 @@ final class UserStore: @unchecked Sendable {
 
             do {
                 let updatedUser = try await appwriteService.updateProfile(for: user)
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return L10n.tr("profile.error.noCurrentUser")
+                }
                 currentUser = updatedUser
                 if let removalError = await enforceMainEventEligibilityAfterProfileChange(
                     shouldRemoveMainEventRegistration,
@@ -754,16 +909,18 @@ final class UserStore: @unchecked Sendable {
                     return removalError
                 }
             } catch {
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return L10n.tr("profile.error.noCurrentUser")
+                }
                 return profileErrorMessage(for: error)
             }
         } else {
-            var users = UserStore.loadUsers()
-            guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+            guard var account = ephemeralLocalAccounts[user.email] else {
                 return L10n.tr("profile.error.noCurrentUser")
             }
 
-            users[userIndex] = user
-            UserStore.saveUsers(users)
+            account.user = user
+            ephemeralLocalAccounts[user.email] = account
             currentUser = user
         }
 
@@ -777,6 +934,8 @@ final class UserStore: @unchecked Sendable {
     @MainActor
     func updateProfileImage(_ imageData: Data?) async -> String? {
         guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
+        let operationEpoch = sessionEpoch
+        let operationIdentity = sessionIdentity(for: user)
         let sanitizedImage = imageData.flatMap { $0.isEmpty ? nil : $0 }
 
         if Self.shouldUseAppwrite {
@@ -795,22 +954,27 @@ final class UserStore: @unchecked Sendable {
 
             do {
                 let updatedUser = try await appwriteService.updateProfileImage(sanitizedImage, for: user)
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return L10n.tr("profile.error.noCurrentUser")
+                }
                 currentUser = updatedUser
                 return nil
             } catch {
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return L10n.tr("profile.error.noCurrentUser")
+                }
                 return profileErrorMessage(for: error)
             }
         }
 
-        var users = UserStore.loadUsers()
-        guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+        guard var account = ephemeralLocalAccounts[user.email] else {
             return L10n.tr("profile.error.noCurrentUser")
         }
 
         user.profileImageData = sanitizedImage
         user.avatarFileId = nil
-        users[userIndex] = user
-        UserStore.saveUsers(users)
+        account.user = user
+        ephemeralLocalAccounts[user.email] = account
         currentUser = user
         return nil
     }
@@ -818,6 +982,8 @@ final class UserStore: @unchecked Sendable {
     @MainActor
     func updateProfileImages(_ imageDataItems: [Data]) async -> String? {
         guard var user = currentUser else { return L10n.tr("profile.error.noCurrentUser") }
+        let operationEpoch = sessionEpoch
+        let operationIdentity = sessionIdentity(for: user)
         let sanitizedImages = imageDataItems
             .filter { !$0.isEmpty }
             .prefix(6)
@@ -839,22 +1005,27 @@ final class UserStore: @unchecked Sendable {
 
             do {
                 let updatedUser = try await appwriteService.updateProfileImages(sanitizedImages, for: user)
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return L10n.tr("profile.error.noCurrentUser")
+                }
                 currentUser = updatedUser
                 return nil
             } catch {
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return L10n.tr("profile.error.noCurrentUser")
+                }
                 return profileErrorMessage(for: error)
             }
         }
 
-        var users = UserStore.loadUsers()
-        guard let userIndex = users.firstIndex(where: { $0.email == user.email }) else {
+        guard var account = ephemeralLocalAccounts[user.email] else {
             return L10n.tr("profile.error.noCurrentUser")
         }
 
         user.profilePhotoDataItems = sanitizedImages
         user.photoFileIds = []
-        users[userIndex] = user
-        UserStore.saveUsers(users)
+        account.user = user
+        ephemeralLocalAccounts[user.email] = account
         currentUser = user
         return nil
     }
@@ -878,15 +1049,25 @@ final class UserStore: @unchecked Sendable {
         user: User,
         appwriteService: AppwriteService
     ) async -> String? {
+        let operationEpoch = sessionEpoch
+        let operationIdentity = sessionIdentity(for: user)
         if shouldRemoveRegistration {
+            guard let eventId = remoteMainEventState?.eventId else {
+                return eventRequestErrorMessage()
+            }
             do {
                 try await appwriteService.cancelMainEventRegistration(
                     for: user,
-                    eventId: remoteMainEventState?.eventId,
-                    force: true
+                    eventId: eventId
                 )
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return L10n.tr("profile.error.noCurrentUser")
+                }
             } catch {
-                debugLog("Forced cancellation after profile change failed: \(error.localizedDescription)")
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return L10n.tr("profile.error.noCurrentUser")
+                }
+                debugLog("Cancellation after profile change failed")
             }
         }
 
@@ -903,15 +1084,27 @@ final class UserStore: @unchecked Sendable {
     func refreshRemoteMainEventState() async {
         guard Self.shouldUseAppwrite else { return }
         guard let appwriteService else {
+            eventRefreshGeneration &+= 1
             remoteMainEventState = nil
             return
         }
 
+        eventRefreshGeneration &+= 1
+        let refreshGeneration = eventRefreshGeneration
+        let refreshEpoch = sessionEpoch
+        let refreshIdentity = sessionIdentity(for: currentUser)
+
         do {
-            remoteMainEventState = try await appwriteService.fetchMainEventState(for: currentUser)
+            let state = try await appwriteService.fetchMainEventState(for: currentUser)
+            guard refreshGeneration == eventRefreshGeneration,
+                  isCurrentSession(epoch: refreshEpoch, identity: refreshIdentity) else { return }
+            remoteMainEventState = state
         } catch {
+            guard refreshGeneration == eventRefreshGeneration,
+                  isCurrentSession(epoch: refreshEpoch, identity: refreshIdentity) else { return }
+            remoteMainEventState = nil
             if !isCancelledNetworkError(error) {
-                debugLog("Remote event refresh failed: \(String(describing: error))")
+                debugLog("Remote event refresh failed")
             }
         }
     }
@@ -924,19 +1117,28 @@ final class UserStore: @unchecked Sendable {
             guard let gender = user.gender else { return L10n.tr("events.error.genderRequired") }
             guard gender == .male || gender == .female else { return L10n.tr("events.error.genderUnsupported") }
             guard user.orientation == .straight else { return L10n.tr("events.error.orientationUnsupported") }
+            guard let eventId = remoteMainEventState?.eventId else { return eventRequestErrorMessage() }
             let hadRegistrationBeforeRequest = hasCurrentUserMainEventRegistration
+            let operationEpoch = sessionEpoch
+            let operationIdentity = sessionIdentity(for: user)
 
             do {
                 // Capacity, waitlist, and gender-balance rules live in the server-side function now.
                 let status = try await appwriteService.registerForMainEvent(
                     for: user,
-                    eventId: remoteMainEventState?.eventId
+                    eventId: eventId
                 )
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return eventRequestErrorMessage()
+                }
                 await refreshRemoteMainEventStateWithRetry()
 
                 let resolvedStatus = remoteMainEventState?.currentStatus ?? status
                 return resolvedStatus == .waitlisted ? L10n.tr("events.success.waitlisted") : nil
             } catch {
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return eventRequestErrorMessage()
+                }
                 // Functions can time out on cold start even when the mutation eventually succeeds.
                 await refreshRemoteMainEventStateWithRetry()
 
@@ -957,16 +1159,25 @@ final class UserStore: @unchecked Sendable {
         if Self.shouldUseAppwrite {
             guard let user = currentUser else { return L10n.tr("events.error.loginRequired") }
             guard let appwriteService else { return eventRequestErrorMessage() }
+            guard let eventId = remoteMainEventState?.eventId else { return eventRequestErrorMessage() }
             let hadRegistrationBeforeRequest = hasCurrentUserMainEventRegistration
+            let operationEpoch = sessionEpoch
+            let operationIdentity = sessionIdentity(for: user)
 
             do {
                 try await appwriteService.cancelMainEventRegistration(
                     for: user,
-                    eventId: remoteMainEventState?.eventId
+                    eventId: eventId
                 )
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return eventRequestErrorMessage()
+                }
                 await refreshRemoteMainEventStateWithRetry()
                 return nil
             } catch {
+                guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                    return eventRequestErrorMessage()
+                }
                 // Treat late function responses as success when backend state confirms cancellation.
                 await refreshRemoteMainEventStateWithRetry()
 
@@ -988,21 +1199,29 @@ final class UserStore: @unchecked Sendable {
         guard let appwriteService, let eventId = remoteMainEventState?.eventId else {
             return eventRequestErrorMessage()
         }
+        let operationEpoch = sessionEpoch
+        let operationIdentity = sessionIdentity(for: currentUser)
 
         do {
             let adminState = try await appwriteService.updateMainEventAsAdmin(eventId: eventId, draft: draft)
+            guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                return eventRequestErrorMessage()
+            }
             if let remoteState = remoteMainEventState {
                 remoteMainEventState = MainEventRemoteState(
                     eventId: remoteState.eventId,
                     snapshot: MainEventSnapshot(
                         date: adminState.startsAt,
                         title: adminState.title,
+                        place: remoteState.snapshot.place,
+                        eventDescription: remoteState.snapshot.eventDescription,
+                        rules: remoteState.snapshot.rules,
                         maxParticipants: adminState.maxParticipants,
                         maleLimit: adminState.maleLimit,
                         femaleLimit: adminState.femaleLimit,
-                        maleCount: adminState.participants.filter { $0.status == .confirmed || $0.status == .promoted }.filter { $0.gender == .male }.count,
-                        femaleCount: adminState.participants.filter { $0.status == .confirmed || $0.status == .promoted }.filter { $0.gender == .female }.count,
-                        waitingListCount: adminState.participants.filter { $0.status == .waitlisted }.count,
+                        maleCount: remoteState.snapshot.maleCount,
+                        femaleCount: remoteState.snapshot.femaleCount,
+                        waitingListCount: remoteState.snapshot.waitingListCount,
                         registrationClosesAt: adminState.registrationClosesAt,
                         cancellationClosesAt: adminState.cancellationClosesAt
                     ),
@@ -1014,6 +1233,9 @@ final class UserStore: @unchecked Sendable {
             await refreshRemoteMainEventStateWithRetry()
             return nil
         } catch {
+            guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                return eventRequestErrorMessage()
+            }
             return eventErrorMessage(for: error)
         }
     }
@@ -1024,12 +1246,20 @@ final class UserStore: @unchecked Sendable {
         guard let appwriteService, let eventId = remoteMainEventState?.eventId else {
             return eventRequestErrorMessage()
         }
+        let operationEpoch = sessionEpoch
+        let operationIdentity = sessionIdentity(for: currentUser)
 
         do {
             _ = try await appwriteService.addEventParticipantAsAdmin(eventId: eventId, lookup: lookup, status: status)
+            guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                return eventRequestErrorMessage()
+            }
             await refreshRemoteMainEventStateWithRetry()
             return nil
         } catch {
+            guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                return eventRequestErrorMessage()
+            }
             return eventErrorMessage(for: error)
         }
     }
@@ -1040,22 +1270,37 @@ final class UserStore: @unchecked Sendable {
         guard let appwriteService, let eventId = remoteMainEventState?.eventId else {
             return eventRequestErrorMessage()
         }
+        let operationEpoch = sessionEpoch
+        let operationIdentity = sessionIdentity(for: currentUser)
 
         do {
             _ = try await appwriteService.removeEventParticipantAsAdmin(eventId: eventId, registrationId: registrationId)
+            guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                return eventRequestErrorMessage()
+            }
             await refreshRemoteMainEventStateWithRetry()
             return nil
         } catch {
+            guard isCurrentSession(epoch: operationEpoch, identity: operationIdentity) else {
+                return eventRequestErrorMessage()
+            }
             return eventErrorMessage(for: error)
         }
     }
 
     @MainActor
     private func refreshRemoteMainEventStateWithRetry() async {
+        let refreshEpoch = sessionEpoch
+        let refreshIdentity = sessionIdentity(for: currentUser)
         await refreshRemoteMainEventState()
 
         // Appwrite table updates may become visible a moment after function completion.
-        try? await Task.sleep(nanoseconds: 350_000_000)
+        do {
+            try await Task.sleep(nanoseconds: 350_000_000)
+        } catch {
+            return
+        }
+        guard isCurrentSession(epoch: refreshEpoch, identity: refreshIdentity) else { return }
         await refreshRemoteMainEventState()
     }
 
@@ -1134,6 +1379,12 @@ final class UserStore: @unchecked Sendable {
 
     @MainActor
     private static func resolvedCity(for city: String) async throws -> (displayName: String, latitude: Double, longitude: Double) {
+#if DEBUG
+        if isRunningTests {
+            return (city, 0, 0)
+        }
+#endif
+
         let placemarks = try await CLGeocoder().geocodeAddressString(city)
         guard let placemark = placemarks.first,
               let coordinate = placemark.location?.coordinate else {
@@ -1178,46 +1429,105 @@ final class UserStore: @unchecked Sendable {
 
     @MainActor
     func restoreRemoteSessionIfNeeded() async {
+        if isSessionBootstrapComplete {
+            return
+        }
+
+        if let sessionBootstrapTask {
+            await sessionBootstrapTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performRemoteSessionRestore()
+            self.isSessionBootstrapComplete = true
+            self.sessionBootstrapTask = nil
+        }
+        sessionBootstrapTask = task
+        await task.value
+    }
+
+    @MainActor
+    private func performRemoteSessionRestore() async {
         guard Self.shouldUseAppwrite else { return }
         guard let appwriteService else {
             currentUser = nil
             remoteMainEventState = nil
-            if let appwriteInitializationError {
-                debugLog("Appwrite initialization failed: \(appwriteInitializationError)")
+            if appwriteInitializationError != nil {
+                debugLog("Appwrite initialization failed")
             }
             return
         }
 
+        await acquireAuthenticationOperation()
+        defer { releaseAuthenticationOperation() }
+        advanceSessionEpoch()
+        currentUser = nil
+        remoteMainEventState = nil
+
+        if hasPendingLogout() {
+            _ = await finishPendingLogout(using: appwriteService)
+            return
+        }
+
+        let restoreEpoch = sessionEpoch
         do {
-            currentUser = try await appwriteService.restoreCurrentUser()
+            let restoredUser = try await appwriteService.restoreCurrentUser()
+            guard sessionEpoch == restoreEpoch else { return }
+            currentUser = restoredUser
             await refreshRemoteMainEventState()
         } catch let error as AppwriteServiceError where error.isUnauthorized {
             currentUser = nil
             remoteMainEventState = nil
         } catch {
-            // Keep the last persisted user visible if the network is temporarily unavailable.
+            // Authentication is not established until /account succeeds. A
+            // cached profile must never bootstrap an offline authenticated UI.
+            currentUser = nil
+            remoteMainEventState = nil
         }
     }
 
-    private static func loadUsers() -> [User] {
-        loadPersistedValue([User].self, forKey: PersistenceKey.users) ?? []
-    }
+    static func loadCurrentUser() -> User? {
+        do {
+            if let secureData = try SecurePersistenceStore.data(forKey: SecurePersistenceKey.currentUser) {
+                do {
+                    let user = try JSONDecoder().decode(User.self, from: secureData)
+                    guard isValidEmail(user.email) else {
+                        throw DecodingError.dataCorrupted(
+                            .init(codingPath: [], debugDescription: "Invalid current-user email")
+                        )
+                    }
+                    return user
+                } catch {
+                    try? SecurePersistenceStore.removeData(forKey: SecurePersistenceKey.currentUser)
+                    return nil
+                }
+            }
+        } catch {
+            return nil
+        }
 
-    private static func saveUsers(_ users: [User]) {
-        savePersistedValue(users, forKey: PersistenceKey.users)
-    }
-
-    private static func loadCurrentUser() -> User? {
-        loadPersistedValue(User.self, forKey: PersistenceKey.currentUser)
+        return nil
     }
 
     private static func saveCurrentUser(_ user: User?) {
         guard let user else {
-            UserDefaults.standard.removeObject(forKey: PersistenceKey.currentUser)
+            try? SecurePersistenceStore.removeData(forKey: SecurePersistenceKey.currentUser)
             return
         }
 
-        savePersistedValue(user, forKey: PersistenceKey.currentUser)
+        do {
+            try SecurePersistenceStore.setData(
+                try JSONEncoder().encode(user),
+                forKey: SecurePersistenceKey.currentUser
+            )
+        } catch {
+            try? SecurePersistenceStore.removeData(forKey: SecurePersistenceKey.currentUser)
+#if DEBUG
+            debugPrint("Failed to persist the current user securely")
+#endif
+        }
     }
 
     private static func loadMainEventState() -> MainEventState {
@@ -1239,7 +1549,7 @@ final class UserStore: @unchecked Sendable {
             // Corrupt cached state should not brick the app on launch; drop it and rebuild from network/defaults.
             UserDefaults.standard.removeObject(forKey: key)
 #if DEBUG
-            debugPrint("Dropped invalid persisted value for key '\(key)': \(error)")
+            debugPrint("Dropped invalid persisted value")
 #endif
             return nil
         }
@@ -1252,7 +1562,7 @@ final class UserStore: @unchecked Sendable {
         } catch {
             // Persistence failures are recoverable; keep the in-memory state and avoid crashing user sessions.
 #if DEBUG
-            debugPrint("Failed to encode persisted value for key '\(key)': \(error)")
+            debugPrint("Failed to encode persisted value")
 #endif
         }
     }
@@ -1262,6 +1572,7 @@ final class UserStore: @unchecked Sendable {
         defaults.dictionaryRepresentation().keys
             .filter { $0.hasPrefix("fyre_") }
             .forEach { defaults.removeObject(forKey: $0) }
+        try? SecurePersistenceStore.removeAllData()
         UserStore.shared.resetForTests()
     }
 
@@ -1313,17 +1624,26 @@ final class UserStore: @unchecked Sendable {
     }
 
     func resetForTests() {
+        sessionBootstrapTask?.cancel()
+        sessionBootstrapTask = nil
+        isSessionBootstrapComplete = false
+        advanceSessionEpoch()
+        logoutPendingInMemory = false
+        ephemeralLocalAccounts.removeAll(keepingCapacity: false)
         currentUser = nil
         mainEventState = MainEventState()
         remoteMainEventState = nil
     }
 
     private static var shouldUseAppwrite: Bool {
-        !isRunningTests && !ProcessInfo.processInfo.arguments.contains("-uitest-reset")
-    }
-
-    fileprivate static var permitsPlaintextLocalPasswords: Bool {
-        isRunningTests || ProcessInfo.processInfo.arguments.contains("-uitest-reset")
+        if isRunningTests {
+            return false
+        }
+#if DEBUG
+        return !ProcessInfo.processInfo.arguments.contains("-uitest-reset")
+#else
+        return true
+#endif
     }
 
     private static var isRunningTests: Bool {
@@ -1364,8 +1684,8 @@ final class UserStore: @unchecked Sendable {
 
     @MainActor
     private func authConfigurationErrorMessage() -> String {
-        if let appwriteInitializationError {
-            debugLog("Appwrite configuration error: \(appwriteInitializationError)")
+        if appwriteInitializationError != nil {
+            debugLog("Appwrite configuration error")
         }
         return L10n.tr("error.auth.requestFailed")
     }
@@ -1375,19 +1695,15 @@ final class UserStore: @unchecked Sendable {
         switch error {
         case let serviceError as AppwriteServiceError:
             if serviceError.isUnauthorized {
+                advanceSessionEpoch()
                 currentUser = nil
+                remoteMainEventState = nil
                 return L10n.tr("profile.error.noCurrentUser")
             }
-            if case let .api(_, message, _) = serviceError,
-               let message,
-               !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                debugLog("Appwrite profile save failed: \(message)")
-            } else {
-                debugLog("Appwrite profile save failed: \(serviceError)")
-            }
+            debugLog("Appwrite profile save failed")
             return L10n.tr("profile.error.saveFailed")
         default:
-            debugLog("Profile save failed: \(error.localizedDescription)")
+            debugLog("Profile save failed")
             return L10n.tr("profile.error.saveFailed")
         }
     }
@@ -1397,6 +1713,7 @@ final class UserStore: @unchecked Sendable {
         switch error {
         case let serviceError as AppwriteServiceError:
             if serviceError.isUnauthorized {
+                advanceSessionEpoch()
                 currentUser = nil
                 remoteMainEventState = nil
                 return L10n.tr("events.error.loginRequired")
@@ -1407,14 +1724,14 @@ final class UserStore: @unchecked Sendable {
                 if message.hasPrefix("events.") {
                     return L10n.tr(message)
                 }
-                debugLog("Appwrite event request failed: \(message)")
+                debugLog("Appwrite event request failed")
             } else {
-                debugLog("Appwrite event request failed: \(serviceError)")
+                debugLog("Appwrite event request failed")
             }
 
             return eventRequestErrorMessage()
         default:
-            debugLog("Event request failed: \(error.localizedDescription)")
+            debugLog("Event request failed")
             return eventRequestErrorMessage()
         }
     }

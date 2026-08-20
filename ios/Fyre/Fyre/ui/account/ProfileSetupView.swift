@@ -649,7 +649,7 @@ struct ProfileSetupView: View {
                 }
 
                 guard let parsed = Int(digits) else { return }
-                maxDistanceKm = max(parsed, 5)
+                maxDistanceKm = min(max(parsed, 5), 999)
             }
         )
     }

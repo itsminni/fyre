@@ -13,13 +13,20 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if router.root == .main {
+            switch router.root {
+            case .loading:
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemBackground).ignoresSafeArea())
+                    .accessibilityIdentifier("session.bootstrap.loading")
+            case .main:
                 if store.isProfileComplete {
                     MainTabView()
                 } else {
                     ProfileSetupView()
                 }
-            } else {
+            case .auth:
                 NavigationStack {
                     VStack(spacing: 24) {
                         Spacer()
@@ -72,15 +79,13 @@ struct ContentView: View {
                 }
             }
         }
-        .onAppear {
-            router.sync(isLoggedIn: store.isLoggedIn)
-        }
         .onChange(of: store.isLoggedIn) { _, isLoggedIn in
+            guard store.isSessionBootstrapComplete else { return }
             router.sync(isLoggedIn: isLoggedIn)
         }
         .task {
-            // Restore any existing Appwrite session before deciding which root flow should be visible.
             await store.restoreRemoteSessionIfNeeded()
+            router.completeBootstrap(isLoggedIn: store.isLoggedIn)
         }
     }
 }

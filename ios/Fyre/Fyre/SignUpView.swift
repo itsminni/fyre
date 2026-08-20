@@ -12,8 +12,8 @@ struct SignUpView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var isSecure = true
-    @State private var agree = false
-    @State private var isTermsPrivacyPresented = false
+    @State private var hasReadDemoNotice = false
+    @State private var isDemoNoticePresented = false
     @State private var isSubmitting = false
     @State private var errorMessage: String?
 
@@ -55,27 +55,28 @@ struct SignUpView: View {
 
                     HStack(alignment: .center, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.tr("auth.signup.terms.prefix"))
+                            Text(L10n.tr("auth.signup.demoNotice.prefix"))
                                 .font(.footnote)
 
                             Button {
-                                isTermsPrivacyPresented = true
+                                isDemoNoticePresented = true
                             } label: {
-                                Text(L10n.tr("auth.signup.terms.link"))
+                                Text(L10n.tr("auth.signup.demoNotice.link"))
                                     .font(.footnote.weight(.semibold))
                                     .underline()
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(.blue)
-                            .accessibilityIdentifier("signup.terms.link")
+                            .accessibilityIdentifier("signup.demoNotice.link")
                         }
 
                         Spacer(minLength: 12)
 
-                        Toggle("", isOn: $agree)
+                        Toggle("", isOn: $hasReadDemoNotice)
                             .labelsHidden()
                             .toggleStyle(.switch)
-                            .accessibilityIdentifier("signup.terms")
+                            .accessibilityLabel(L10n.tr("auth.signup.demoNotice.link"))
+                            .accessibilityIdentifier("signup.demoNotice")
                     }
 
                     if let errorMessage {
@@ -125,15 +126,15 @@ struct SignUpView: View {
         .background(Color(.systemBackground))
         .navigationTitle(L10n.tr("auth.signup.navigationTitle"))
         .navigationBarTitleDisplayMode(.inline)
-        .fullScreenCover(isPresented: $isTermsPrivacyPresented) {
-            TermsPrivacyView()
+        .fullScreenCover(isPresented: $isDemoNoticePresented) {
+            DemoNoticeView()
         }
     }
 
     private var isFormValid: Bool {
         UserStore.isValidEmail(email) &&
         password.count >= 8 &&
-        agree
+        hasReadDemoNotice
     }
 
     @MainActor
@@ -141,31 +142,30 @@ struct SignUpView: View {
         guard !isSubmitting else { return }
         isSubmitting = true
         errorMessage = nil
-        // UserStore owns the real Appwrite/signup flow and the local fallback used by tests.
         let result = await store.signUp(email: email, password: password)
         errorMessage = result
         isSubmitting = false
     }
 }
 
-private struct TermsPrivacyView: View {
+private struct DemoNoticeView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(L10n.tr("auth.signup.privacy.title"))
+                    Text(L10n.tr("auth.signup.demoNotice.title"))
                         .font(.title2.weight(.bold))
 
-                    Text(L10n.tr("auth.signup.privacy.body"))
+                    Text(L10n.tr("auth.signup.demoNotice.body"))
                         .font(.body)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
             }
             .background(Color(.systemBackground))
-            .navigationTitle(L10n.tr("auth.signup.privacy.navigationTitle"))
+            .navigationTitle(L10n.tr("auth.signup.demoNotice.navigationTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

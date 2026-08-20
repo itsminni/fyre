@@ -146,6 +146,17 @@ private enum AttachmentPickerMode {
     }
 }
 
+private enum ChatAttachmentValidationError: LocalizedError {
+    case unsupportedFormat
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedFormat:
+            return L10n.tr("chat.attachment.unsupportedFormat")
+        }
+    }
+}
+
 private struct ComposerLayoutMetrics {
     let progress: CGFloat
 
@@ -236,7 +247,7 @@ struct ChatDetailView: View {
     @State private var isSending = false
     @State private var realtimeSubscription: AppwriteRealtimeSubscription?
     @State private var realtimeReloadTask: Task<Void, Never>?
-    @State private var fallbackReloadTask: Task<Void, Never>?
+    @State private var reconciliationPollingTask: Task<Void, Never>?
     @State private var animatingMessageIDs: Set<UUID> = []
     @State private var activeReplySwipeMessageID: UUID?
     @State private var activeReplySwipeOffset: CGFloat = 0
@@ -367,7 +378,7 @@ struct ChatDetailView: View {
         .task {
             await reloadThread()
             startRealtime()
-            startFallbackReloadLoop()
+            startReconciliationPolling()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             updateKeyboardOverlap(from: notification)
@@ -394,18 +405,21 @@ struct ChatDetailView: View {
         }
         .onDisappear {
             stopRealtime()
-            stopFallbackReloadLoop()
+            stopReconciliationPolling()
             audioPlayback.stop()
             voiceRecorder.cancel()
         }
         .fileImporter(
             isPresented: $isAttachmentFileImporterPresented,
-            allowedContentTypes: [.image, .movie, .audio, .pdf, .data]
+            allowedContentTypes: PendingChatAttachment.importerContentTypes
         ) { result in
             handleAttachmentFileSelection(result)
         }
         .sheet(item: $attachmentPreview) { preview in
             ChatAttachmentPreviewSheet(preview: preview)
+                .onDisappear {
+                    preview.removeOwnedTemporaryFile()
+                }
         }
         .sheet(item: $messageReadInfoMessage) { message in
             MessageReadInfoSheet(
@@ -2735,7 +2749,7 @@ struct ChatDetailView: View {
             await services.backend.markThreadRead(threadId: thread.remoteId)
         } catch {
 #if DEBUG
-            debugPrint("Chat refresh failed for \(thread.remoteId): \(error.localizedDescription)")
+            debugPrint("Chat refresh failed")
 #endif
         }
     }
@@ -2813,7 +2827,7 @@ struct ChatDetailView: View {
             },
             onError: { error in
 #if DEBUG
-                debugPrint("Chat realtime error for \(thread.remoteId): \(error.localizedDescription)")
+                debugPrint("Chat realtime error")
 #endif
             }
         )
@@ -2826,21 +2840,21 @@ struct ChatDetailView: View {
         realtimeSubscription = nil
     }
 
-    private func startFallbackReloadLoop() {
-        guard fallbackReloadTask == nil else { return }
+    private func startReconciliationPolling() {
+        guard reconciliationPollingTask == nil else { return }
 
-        fallbackReloadTask = Task {
+        reconciliationPollingTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
                 guard !Task.isCancelled else { return }
                 await reloadThread()
             }
         }
     }
 
-    private func stopFallbackReloadLoop() {
-        fallbackReloadTask?.cancel()
-        fallbackReloadTask = nil
+    private func stopReconciliationPolling() {
+        reconciliationPollingTask?.cancel()
+        reconciliationPollingTask = nil
     }
 
     private func scheduleRealtimeReload() {
@@ -3136,12 +3150,16 @@ struct ChatDetailView: View {
 
     private func loadPendingAttachment(from item: PhotosPickerItem) async {
         do {
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let contentType = item.supportedContentTypes.first else {
-                throw ChatBackgroundAssetStoreError.invalidImage
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                throw ChatAttachmentValidationError.unsupportedFormat
+            }
+            guard let contentType = item.supportedContentTypes.first(where: {
+                PendingChatAttachment.supports(contentType: $0)
+            }) else {
+                throw ChatAttachmentValidationError.unsupportedFormat
             }
 
-            let resolved = PendingChatAttachment.from(
+            let resolved = try PendingChatAttachment.from(
                 data: data,
                 fileName: item.itemIdentifier ?? "attachment",
                 contentType: contentType
@@ -3173,7 +3191,7 @@ struct ChatDetailView: View {
 
             let data = try Data(contentsOf: url)
             let contentType = UTType(filenameExtension: url.pathExtension) ?? .data
-            pendingAttachment = PendingChatAttachment.from(
+            pendingAttachment = try PendingChatAttachment.from(
                 data: data,
                 fileName: url.lastPathComponent,
                 contentType: contentType
@@ -3197,16 +3215,21 @@ struct ChatDetailView: View {
         }
 
         guard let data = normalized.jpegData(compressionQuality: 0.96) else {
-            sendErrorMessage = ChatBackgroundAssetStoreError.invalidImage.localizedDescription
+            sendErrorMessage = ChatAttachmentValidationError.unsupportedFormat.localizedDescription
             return
         }
 
         let fileName = "camera-\(UUID().uuidString).jpg"
-        pendingAttachment = PendingChatAttachment.from(
-            data: data,
-            fileName: fileName,
-            contentType: .jpeg
-        )
+        do {
+            pendingAttachment = try PendingChatAttachment.from(
+                data: data,
+                fileName: fileName,
+                contentType: .jpeg
+            )
+        } catch {
+            sendErrorMessage = error.localizedDescription
+            return
+        }
         sendErrorMessage = nil
     }
 
@@ -3288,7 +3311,7 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
         } catch {
             playbackErrorMessage = L10n.tr("chat.voice.playbackFailed")
 #if DEBUG
-            debugPrint("Pending audio playback failed: \(error.localizedDescription)")
+            debugPrint("Pending audio playback failed")
 #endif
         }
     }
@@ -3325,7 +3348,7 @@ private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVA
             loadingKey = nil
             playbackErrorMessage = L10n.tr("chat.voice.playbackFailed")
 #if DEBUG
-            debugPrint("Remote audio playback failed for \(attachment.fileId): \(error.localizedDescription)")
+            debugPrint("Remote audio playback failed")
 #endif
         }
     }
@@ -3448,27 +3471,36 @@ private final class ChatVoiceRecorder: NSObject, ObservableObject, AVAudioRecord
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
         ]
 
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
-        try session.setActive(true)
+        do {
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
+            try session.setActive(true)
 
-        let recorder = try AVAudioRecorder(url: url, settings: settings)
-        recorder.delegate = self
-        recorder.isMeteringEnabled = false
+            let recorder = try AVAudioRecorder(url: url, settings: settings)
+            recorder.delegate = self
+            recorder.isMeteringEnabled = false
 
-        guard recorder.record() else {
-            throw ChatVoiceRecordingError.startFailed
+            guard recorder.record() else {
+                throw ChatVoiceRecordingError.startFailed
+            }
+
+            self.recorder = recorder
+            recordingURL = url
+            elapsedDuration = 0
+            isRecording = true
+            startTimer()
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            try? deactivateSession()
+            throw error
         }
-
-        self.recorder = recorder
-        recordingURL = url
-        elapsedDuration = 0
-        isRecording = true
-        startTimer()
     }
 
     func stop() throws -> PendingChatAttachment {
         guard let recorder, let recordingURL else {
             throw ChatVoiceRecordingError.noRecording
+        }
+        defer {
+            try? FileManager.default.removeItem(at: recordingURL)
         }
 
         let duration = max(1, Int(recorder.currentTime.rounded()))
@@ -3493,6 +3525,7 @@ private final class ChatVoiceRecorder: NSObject, ObservableObject, AVAudioRecord
     }
 
     func cancel() {
+        let ownedRecordingURL = recordingURL
         recorder?.stop()
         recorder = nil
         recordingURL = nil
@@ -3500,6 +3533,9 @@ private final class ChatVoiceRecorder: NSObject, ObservableObject, AVAudioRecord
         elapsedDuration = 0
         stopTimer()
         try? deactivateSession()
+        if let ownedRecordingURL {
+            try? FileManager.default.removeItem(at: ownedRecordingURL)
+        }
     }
 
     private func requestPermission(session: AVAudioSession) async -> Bool {
@@ -3557,6 +3593,19 @@ private enum ChatVoiceRecordingError: LocalizedError {
 }
 
 private struct PendingChatAttachment {
+    static let importerContentTypes: [UTType] = [
+        .jpeg,
+        .png,
+        .webP,
+        .heic,
+        .pdf,
+        .mpeg4Audio,
+        .mp3,
+        .wav,
+        .mpeg4Movie,
+        .quickTimeMovie
+    ]
+
     let data: Data
     let fileName: String
     let mimeType: String
@@ -3583,7 +3632,7 @@ private struct PendingChatAttachment {
     static func voiceMessage(data: Data, fileName: String, mimeType: String = "audio/mp4", duration: Int) -> PendingChatAttachment {
         PendingChatAttachment(
             data: data,
-            fileName: normalizedFileName(from: fileName, contentType: .mpeg4Audio),
+            fileName: normalizedFileName(from: fileName, fileExtension: "m4a"),
             mimeType: mimeType,
             type: .audio,
             size: data.count,
@@ -3594,14 +3643,22 @@ private struct PendingChatAttachment {
         )
     }
 
-    static func from(data: Data, fileName: String, contentType: UTType) -> PendingChatAttachment {
-        let mimeType = contentType.preferredMIMEType ?? "application/octet-stream"
-        let resolvedFileName = normalizedFileName(from: fileName, contentType: contentType)
+    static func supports(contentType: UTType) -> Bool {
+        contentType.conforms(to: .image)
+            || contentType.conforms(to: .quickTimeMovie)
+            || contentType.conforms(to: .mpeg4Movie)
+            || contentType.conforms(to: .mpeg4Audio)
+            || contentType.conforms(to: .mp3)
+            || contentType.conforms(to: .wav)
+            || contentType.conforms(to: .pdf)
+    }
+
+    static func from(data: Data, fileName: String, contentType: UTType) throws -> PendingChatAttachment {
         let size = data.count
 
         if contentType.conforms(to: .image), let image = UIImage(data: data) {
             let jpegData = image.jpegData(compressionQuality: 0.96) ?? data
-            let jpegFileName = normalizedFileName(from: fileName, contentType: .jpeg)
+            let jpegFileName = normalizedFileName(from: fileName, fileExtension: "jpg")
             return PendingChatAttachment(
                 data: jpegData,
                 fileName: jpegFileName,
@@ -3615,11 +3672,11 @@ private struct PendingChatAttachment {
             )
         }
 
-        if contentType.conforms(to: .movie) || mimeType.hasPrefix("video/") {
+        if contentType.conforms(to: .quickTimeMovie) {
             return PendingChatAttachment(
                 data: data,
-                fileName: resolvedFileName,
-                mimeType: mimeType,
+                fileName: normalizedFileName(from: fileName, fileExtension: "mov"),
+                mimeType: "video/quicktime",
                 type: .video,
                 size: size,
                 width: nil,
@@ -3629,11 +3686,26 @@ private struct PendingChatAttachment {
             )
         }
 
-        if contentType.conforms(to: .audio) || mimeType.hasPrefix("audio/") {
+        if contentType.conforms(to: .mpeg4Movie) {
             return PendingChatAttachment(
                 data: data,
-                fileName: resolvedFileName,
-                mimeType: mimeType,
+                fileName: normalizedFileName(from: fileName, fileExtension: "mp4"),
+                mimeType: "video/mp4",
+                type: .video,
+                size: size,
+                width: nil,
+                height: nil,
+                duration: nil,
+                previewImage: nil
+            )
+        }
+
+        let audioFormat: (fileExtension: String, mimeType: String)? = whenAudioFormat(contentType)
+        if let audioFormat {
+            return PendingChatAttachment(
+                data: data,
+                fileName: normalizedFileName(from: fileName, fileExtension: audioFormat.fileExtension),
+                mimeType: audioFormat.mimeType,
                 type: .audio,
                 size: size,
                 width: nil,
@@ -3643,34 +3715,43 @@ private struct PendingChatAttachment {
             )
         }
 
-        return PendingChatAttachment(
-            data: data,
-            fileName: resolvedFileName,
-            mimeType: mimeType,
-            type: .file,
-            size: size,
-            width: nil,
-            height: nil,
-            duration: nil,
-            previewImage: nil
-        )
+        if contentType.conforms(to: .pdf) {
+            return PendingChatAttachment(
+                data: data,
+                fileName: normalizedFileName(from: fileName, fileExtension: "pdf"),
+                mimeType: "application/pdf",
+                type: .file,
+                size: size,
+                width: nil,
+                height: nil,
+                duration: nil,
+                previewImage: nil
+            )
+        }
+
+        throw ChatAttachmentValidationError.unsupportedFormat
     }
 
-    private static func normalizedFileName(from rawFileName: String, contentType: UTType) -> String {
+    private static func whenAudioFormat(_ contentType: UTType) -> (fileExtension: String, mimeType: String)? {
+        if contentType.conforms(to: .mpeg4Audio) {
+            return ("m4a", "audio/mp4")
+        }
+        if contentType.conforms(to: .mp3) {
+            return ("mp3", "audio/mpeg")
+        }
+        if contentType.conforms(to: .wav) {
+            return ("wav", "audio/wav")
+        }
+        return nil
+    }
+
+    private static func normalizedFileName(from rawFileName: String, fileExtension: String) -> String {
         let trimmed = rawFileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let preferredExt = contentType.preferredFilenameExtension?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let invalidCharacters = CharacterSet(charactersIn: "/:\\")
         let candidate = trimmed.components(separatedBy: invalidCharacters).last ?? ""
         let baseName = (candidate as NSString).deletingPathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
-        let existingExt = (candidate as NSString).pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedBaseName = baseName.isEmpty ? "attachment-\(UUID().uuidString)" : baseName
-        let resolvedExt = existingExt.isEmpty ? preferredExt : existingExt
-
-        guard !resolvedExt.isEmpty else {
-            return resolvedBaseName
-        }
-
-        return "\(resolvedBaseName).\(resolvedExt)"
+        return "\(resolvedBaseName).\(fileExtension)"
     }
 
     private static func audioDuration(from data: Data) -> Int? {
@@ -3782,7 +3863,7 @@ private struct RemoteChatAttachmentImage: View {
                 }
             } catch {
 #if DEBUG
-                debugPrint("Attachment image load failed for \(fileId): \(error.localizedDescription)")
+                debugPrint("Attachment image load failed")
 #endif
             }
         }
@@ -3860,6 +3941,9 @@ private struct RemoteChatAttachmentVideoPreview: View {
 
                 if let data, !data.isEmpty {
                     let tmpUrl = try writeTempVideo(data: data, baseName: title)
+                    defer {
+                        try? FileManager.default.removeItem(at: tmpUrl)
+                    }
                     let asset = AVAsset(url: tmpUrl)
                     let generator = AVAssetImageGenerator(asset: asset)
                     generator.appliesPreferredTrackTransform = true
@@ -3871,7 +3955,7 @@ private struct RemoteChatAttachmentVideoPreview: View {
                 }
             } catch {
 #if DEBUG
-                debugPrint("Video thumbnail generation failed for \(fileId): \(error.localizedDescription)")
+                debugPrint("Video thumbnail generation failed")
 #endif
             }
             isLoading = false
@@ -3894,6 +3978,22 @@ private func isLocalAttachmentFileId(_ fileId: String) -> Bool {
     fileId.hasPrefix("local-")
 }
 
+private final class OwnedChatPreviewFile: @unchecked Sendable {
+    let url: URL
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    deinit {
+        remove()
+    }
+}
+
 private struct ChatAttachmentPreview: Identifiable {
     enum Kind {
         case image
@@ -3904,8 +4004,16 @@ private struct ChatAttachmentPreview: Identifiable {
     let id = UUID()
     let kind: Kind
     let image: UIImage?
-    let fileURL: URL?
+    private let ownedTemporaryFile: OwnedChatPreviewFile?
     let title: String
+
+    var fileURL: URL? {
+        ownedTemporaryFile?.url
+    }
+
+    func removeOwnedTemporaryFile() {
+        ownedTemporaryFile?.remove()
+    }
 
     static func make(attachment: MessageAttachmentDTO, kind: Kind, data: Data) throws -> ChatAttachmentPreview {
         switch kind {
@@ -3916,7 +4024,7 @@ private struct ChatAttachmentPreview: Identifiable {
             return ChatAttachmentPreview(
                 kind: .image,
                 image: image,
-                fileURL: nil,
+                ownedTemporaryFile: nil,
                 title: defaultTitle(for: .image)
             )
 
@@ -3929,7 +4037,7 @@ private struct ChatAttachmentPreview: Identifiable {
             return ChatAttachmentPreview(
                 kind: kind,
                 image: nil,
-                fileURL: url,
+                ownedTemporaryFile: OwnedChatPreviewFile(url: url),
                 title: attachment.name ?? defaultTitle(for: kind)
             )
         }

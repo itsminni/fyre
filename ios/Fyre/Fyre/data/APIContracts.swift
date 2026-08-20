@@ -26,10 +26,7 @@ struct DiscoverProfileDTO: Identifiable, Sendable {
     let bio: String
     let city: String?
     let gender: String?
-    let orientation: String?
     let intent: String?
-    let smokes: Bool?
-    let drinks: Bool?
     let instagramTag: String?
     let spotifyTag: String?
     let relationshipState: RelationshipStateDTO
@@ -103,31 +100,20 @@ enum RelationshipActionDTO: String, Sendable {
     case block
 }
 
-// Generic API error cases for the mock/real implementations
 enum APIError: Error, Sendable {
-    case notImplemented
-    case network
-    case decoding
     case configuration(String)
 }
 
 extension APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
-        case .notImplemented:
-            return "Backend API not implemented."
-        case .network:
-            return "Network request failed."
-        case .decoding:
-            return "Failed to decode backend payload."
         case let .configuration(message):
             return message
         }
     }
 }
 
-// Protocol that the app uses to fetch backend data. Implementations
-// can be swapped (mock for testing, real network client for production).
+// Protocol used by the live Appwrite adapter and by focused test doubles.
 protocol BackendAPI: Sendable {
     func fetchDiscoverProfiles() async throws -> [DiscoverProfileDTO]
     func fetchThreads() async throws -> [ThreadDTO]

@@ -27,7 +27,7 @@ final class AppServices {
             self.backend = AppwriteBackendAPI(configuration: configuration)
         } catch {
 #if DEBUG
-            debugPrint("AppServices initialization failed: \(error.localizedDescription)")
+            debugPrint("AppServices initialization failed")
 #endif
             self.backend = UnavailableBackendAPI(reason: error.localizedDescription)
         }

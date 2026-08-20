@@ -16,6 +16,7 @@ struct AppwriteConfiguration: Sendable {
     let relationshipsTableId: String?
     let registerForEventFunctionId: String
     let cancelEventRegistrationFunctionId: String
+    let manageProfileFunctionId: String
     let eventAdminFunctionId: String?
     let createOrGetThreadFunctionId: String
     let sendMessageFunctionId: String
@@ -41,6 +42,10 @@ struct AppwriteConfiguration: Sendable {
             throw AppwriteConfigurationError.invalidFormat
         }
 
+        return try load(dictionary: dictionary)
+    }
+
+    static func load(dictionary: [String: Any]) throws -> AppwriteConfiguration {
         let projectId = try stringValue(forKey: "APPWRITE_PROJECT_ID", in: dictionary)
         let publicEndpoint = try stringValue(forKey: "APPWRITE_PUBLIC_ENDPOINT", in: dictionary)
         let databaseId = try stringValue(forKey: "APPWRITE_DATABASE_ID", in: dictionary)
@@ -52,28 +57,28 @@ struct AppwriteConfiguration: Sendable {
         let threadsTableId = try stringValue(forKey: "APPWRITE_THREADS_TABLE_ID", in: dictionary)
         let threadParticipantsTableId = try stringValue(forKey: "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID", in: dictionary)
         let messagesTableId = try stringValue(forKey: "APPWRITE_MESSAGES_TABLE_ID", in: dictionary)
-        let swipesTableId = optionalStringValue(forKey: "APPWRITE_SWIPES_TABLE_ID", in: dictionary)
-        let matchesTableId = optionalStringValue(forKey: "APPWRITE_MATCHES_TABLE_ID", in: dictionary)
-        let relationshipsTableId = optionalStringValue(forKey: "APPWRITE_RELATIONSHIPS_TABLE_ID", in: dictionary)
+        let swipesTableId = try stringValue(forKey: "APPWRITE_SWIPES_TABLE_ID", in: dictionary)
+        let matchesTableId = try stringValue(forKey: "APPWRITE_MATCHES_TABLE_ID", in: dictionary)
+        let relationshipsTableId = try stringValue(forKey: "APPWRITE_RELATIONSHIPS_TABLE_ID", in: dictionary)
         let registerForEventFunctionId = try stringValue(forKey: "APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID", in: dictionary)
         let cancelEventRegistrationFunctionId = try stringValue(forKey: "APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID", in: dictionary)
+        let manageProfileFunctionId = try stringValue(forKey: "APPWRITE_MANAGE_PROFILE_FUNCTION_ID", in: dictionary)
         let eventAdminFunctionId = optionalStringValue(forKey: "APPWRITE_EVENT_ADMIN_FUNCTION_ID", in: dictionary)
         let createOrGetThreadFunctionId = try stringValue(forKey: "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID", in: dictionary)
         let sendMessageFunctionId = try stringValue(forKey: "APPWRITE_SEND_MESSAGE_FUNCTION_ID", in: dictionary)
-        let recordSwipeFunctionId = optionalStringValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_ID", in: dictionary)
-        let manageRelationshipFunctionId = optionalStringValue(forKey: "APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID", in: dictionary)
-        let discoverProfilesFunctionId = optionalStringValue(forKey: "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID", in: dictionary)
+        let recordSwipeFunctionId = try stringValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_ID", in: dictionary)
+        let manageRelationshipFunctionId = try stringValue(forKey: "APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID", in: dictionary)
+        let discoverProfilesFunctionId = try stringValue(forKey: "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID", in: dictionary)
         let createOrGetThreadFunctionDomain = try optionalURLValue(forKey: "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_DOMAIN", in: dictionary)
         let sendMessageFunctionDomain = try optionalURLValue(forKey: "APPWRITE_SEND_MESSAGE_FUNCTION_DOMAIN", in: dictionary)
         let recordSwipeFunctionDomain = try optionalURLValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_DOMAIN", in: dictionary)
         let discoverProfilesFunctionDomain = try optionalURLValue(forKey: "APPWRITE_DISCOVER_PROFILES_FUNCTION_DOMAIN", in: dictionary)
         let eventAdminFunctionDomain = try optionalURLValue(forKey: "APPWRITE_EVENT_ADMIN_FUNCTION_DOMAIN", in: dictionary)
 
-        guard let endpointURL = URL(string: publicEndpoint) else {
+        guard let endpointURL = secureURL(from: publicEndpoint, allowMissingScheme: false) else {
             throw AppwriteConfigurationError.invalidEndpoint(publicEndpoint)
         }
 
-        // Swipe and discover function IDs stay optional so the existing auth/profile setup keeps working.
         return AppwriteConfiguration(
             projectId: projectId,
             databaseId: databaseId,
@@ -90,6 +95,7 @@ struct AppwriteConfiguration: Sendable {
             relationshipsTableId: relationshipsTableId,
             registerForEventFunctionId: registerForEventFunctionId,
             cancelEventRegistrationFunctionId: cancelEventRegistrationFunctionId,
+            manageProfileFunctionId: manageProfileFunctionId,
             eventAdminFunctionId: eventAdminFunctionId,
             createOrGetThreadFunctionId: createOrGetThreadFunctionId,
             sendMessageFunctionId: sendMessageFunctionId,
@@ -111,7 +117,7 @@ struct AppwriteConfiguration: Sendable {
         }
 
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else {
+        guard !value.isEmpty, !isPlaceholder(value) else {
             throw AppwriteConfigurationError.missingValue(key)
         }
 
@@ -124,7 +130,7 @@ struct AppwriteConfiguration: Sendable {
         }
 
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
+        return value.isEmpty || isPlaceholder(value) ? nil : value
     }
 
     private static func optionalURLValue(forKey key: String, in dictionary: [String: Any]) throws -> URL? {
@@ -132,12 +138,52 @@ struct AppwriteConfiguration: Sendable {
             return nil
         }
 
-        let normalizedValue = value.contains("://") ? value : "https://\(value)"
-        guard let url = URL(string: normalizedValue) else {
-            throw AppwriteConfigurationError.invalidEndpoint(normalizedValue)
+        guard let url = secureURL(from: value, allowMissingScheme: true) else {
+            throw AppwriteConfigurationError.invalidEndpoint(value)
         }
 
         return url
+    }
+
+    private static func secureURL(from value: String, allowMissingScheme: Bool) -> URL? {
+        let normalizedValue = allowMissingScheme && !value.contains("://") ? "https://\(value)" : value
+        guard let components = URLComponents(string: normalizedValue),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host,
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              scheme == "https" || (scheme == "http" && isLoopbackHost(host)),
+              let url = components.url else {
+            return nil
+        }
+        return url
+    }
+
+    private static func isLoopbackHost(_ host: String) -> Bool {
+        let normalized = host.lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if normalized == "localhost" || normalized == "::1" {
+            return true
+        }
+
+        let octets = normalized.split(separator: ".", omittingEmptySubsequences: false)
+        return octets.count == 4
+            && octets.first == "127"
+            && octets.allSatisfy { octet in
+                guard !octet.isEmpty, octet.count <= 3, octet.allSatisfy(\.isNumber),
+                      let value = Int(octet) else { return false }
+                return value <= 255
+            }
+    }
+
+    private static func isPlaceholder(_ value: String) -> Bool {
+        let uppercased = value.uppercased()
+        return (value.hasPrefix("<") && value.hasSuffix(">"))
+            || uppercased.hasPrefix("YOUR_")
+            || uppercased.hasPrefix("REPLACE_")
     }
 }
 
@@ -156,7 +202,7 @@ enum AppwriteConfigurationError: LocalizedError {
         case let .missingValue(key):
             return "Missing value for \(key) in Config.plist."
         case let .invalidEndpoint(endpoint):
-            return "APPWRITE_PUBLIC_ENDPOINT is not a valid URL: \(endpoint)"
+            return "Appwrite URLs must use HTTPS; HTTP is allowed only for localhost or a loopback IP: \(endpoint)"
         }
     }
 }

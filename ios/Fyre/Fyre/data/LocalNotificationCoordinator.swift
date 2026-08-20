@@ -5,6 +5,7 @@
 //  Created by Gabriele Mininni on 04/04/26.
 //
 
+import CryptoKit
 import Foundation
 import UserNotifications
 
@@ -16,8 +17,6 @@ final class LocalNotificationCoordinator: NSObject {
         static let messageNotificationsEnabled = "settings_notifications_messages"
         static let eventReminderNotificationsEnabled = "settings_notifications_event_reminders"
         static let permissionRequested = "notifications_permission_requested"
-        static let seenMatchIdsPrefix = "notifications_seen_match_ids"
-        static let seenMessageIdsPrefix = "notifications_seen_message_ids"
     }
 
     private enum IdentifierPrefix {
@@ -33,7 +32,12 @@ final class LocalNotificationCoordinator: NSObject {
     private var realtimeSubscription: AppwriteRealtimeSubscription?
     private var currentUserId: String?
     private var notificationEnabledThreadIds = Set<String>()
+    private var seenMatchIdentifiers: [String] = []
+    private var seenMessageIdentifiers: [String] = []
     private var appwriteService: AppwriteService?
+    private var refreshGeneration: UInt = 0
+    private var refreshOperationInFlight = false
+    private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
 
     private override init() {
         super.init()
@@ -41,25 +45,74 @@ final class LocalNotificationCoordinator: NSObject {
     }
 
     func refresh(currentUserId: String?, upcomingEvents: [EventHistoryItem]) async {
+        refreshGeneration &+= 1
+        let generation = refreshGeneration
+        await acquireRefreshOperation()
+        defer { releaseRefreshOperation() }
+        guard generation == refreshGeneration else { return }
+
+        await performRefresh(
+            currentUserId: currentUserId,
+            upcomingEvents: upcomingEvents,
+            generation: generation
+        )
+    }
+
+    private func performRefresh(
+        currentUserId: String?,
+        upcomingEvents: [EventHistoryItem],
+        generation: UInt
+    ) async {
         notificationCenter.delegate = self
 
         if self.currentUserId != currentUserId {
             stopRealtime()
-            notificationEnabledThreadIds.removeAll()
             self.currentUserId = currentUserId
+            notificationEnabledThreadIds.removeAll()
+            seenMatchIdentifiers.removeAll()
+            seenMessageIdentifiers.removeAll()
+            await clearRealtimeNotifications()
+            guard generation == refreshGeneration,
+                  self.currentUserId == currentUserId else { return }
         }
 
         if notificationsEnabled {
             await requestAuthorizationIfNeeded()
+            guard generation == refreshGeneration,
+                  self.currentUserId == currentUserId else { return }
         }
 
         if let currentUserId, realtimeNotificationsEnabled {
-            await ensureRealtimeStarted(for: currentUserId)
+            await ensureRealtimeStarted(for: currentUserId, generation: generation)
+            guard generation == refreshGeneration,
+                  self.currentUserId == currentUserId else { return }
         } else {
             stopRealtime()
         }
 
-        await syncEventReminders(upcomingEvents)
+        await syncEventReminders(
+            upcomingEvents,
+            expectedUserId: currentUserId,
+            generation: generation
+        )
+    }
+
+    private func acquireRefreshOperation() async {
+        if !refreshOperationInFlight {
+            refreshOperationInFlight = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            refreshWaiters.append(continuation)
+        }
+    }
+
+    private func releaseRefreshOperation() {
+        if refreshWaiters.isEmpty {
+            refreshOperationInFlight = false
+        } else {
+            refreshWaiters.removeFirst().resume()
+        }
     }
 
     func setThreadNotifications(threadId: String, enabled: Bool) {
@@ -90,9 +143,11 @@ final class LocalNotificationCoordinator: NSObject {
         matchNotificationsEnabled || messageNotificationsEnabled
     }
 
-    private func ensureRealtimeStarted(for currentUserId: String) async {
+    private func ensureRealtimeStarted(for currentUserId: String, generation: UInt) async {
         if realtimeSubscription == nil {
-            await refreshKnownThreadIds()
+            await refreshKnownThreadIds(expectedUserId: currentUserId, generation: generation)
+            guard generation == refreshGeneration,
+                  self.currentUserId == currentUserId else { return }
 
             realtimeSubscription = AppwriteRealtimeService.makeNotificationSubscription(
                 onEvent: { [weak self] event in
@@ -106,7 +161,7 @@ final class LocalNotificationCoordinator: NSObject {
         }
 
         if messageNotificationsEnabled && notificationEnabledThreadIds.isEmpty {
-            await refreshKnownThreadIds()
+            await refreshKnownThreadIds(expectedUserId: currentUserId, generation: generation)
         }
     }
 
@@ -116,6 +171,7 @@ final class LocalNotificationCoordinator: NSObject {
     }
 
     private func handleRealtimeEvent(_ event: AppwriteRealtimeEvent, currentUserId: String) async {
+        guard self.currentUserId == currentUserId else { return }
         if isThreadParticipantEvent(event) {
             await handleThreadParticipantEvent(event, currentUserId: currentUserId)
             return
@@ -152,8 +208,7 @@ final class LocalNotificationCoordinator: NSObject {
             if event.isCreate, notificationsEnabled, !wasKnown {
                 await scheduleMatchNotification(
                     rawIdentifier: threadId,
-                    threadId: threadId,
-                    currentUserId: currentUserId
+                    threadId: threadId
                 )
             }
         }
@@ -171,14 +226,14 @@ final class LocalNotificationCoordinator: NSObject {
 
         await scheduleMatchNotification(
             rawIdentifier: rawIdentifier,
-            threadId: event.stringValue(forKey: "threadId"),
-            currentUserId: currentUserId
+            threadId: event.stringValue(forKey: "threadId")
         )
     }
 
-    private func scheduleMatchNotification(rawIdentifier: String, threadId: String?, currentUserId: String) async {
+    private func scheduleMatchNotification(rawIdentifier: String, threadId: String?) async {
+        let expectedUserId = currentUserId
         guard matchNotificationsEnabled,
-              markSeenRealtimeIdentifier(rawIdentifier, kind: .match, userId: currentUserId) else { return }
+              markSeenRealtimeIdentifier(rawIdentifier, kind: .match) else { return }
 
         var body = L10n.tr("notifications.match.body.generic")
         if let threadId,
@@ -186,35 +241,39 @@ final class LocalNotificationCoordinator: NSObject {
            !threadName.isEmpty {
             body = String(format: L10n.tr("notifications.match.body.named"), threadName)
         }
+        guard currentUserId == expectedUserId else { return }
 
         await scheduleImmediateNotification(
-            identifier: IdentifierPrefix.match + rawIdentifier,
+            identifier: opaqueIdentifier(prefix: IdentifierPrefix.match, rawValue: rawIdentifier),
             title: L10n.tr("notifications.match.title"),
             body: body
         )
     }
 
     private func handleMessageEvent(_ event: AppwriteRealtimeEvent, currentUserId: String) async {
-        guard messageNotificationsEnabled else { return }
+        guard self.currentUserId == currentUserId,
+              messageNotificationsEnabled else { return }
 
         let senderUserId = event.stringValue(forKey: "senderUserId")
         guard senderUserId != nil, senderUserId != currentUserId else { return }
         guard let threadId = event.stringValue(forKey: "threadId") else { return }
 
         if !notificationEnabledThreadIds.contains(threadId) {
-            await refreshKnownThreadIds()
+            await refreshKnownThreadIds(expectedUserId: currentUserId, generation: refreshGeneration)
         }
 
-        guard notificationEnabledThreadIds.contains(threadId) else { return }
+        guard self.currentUserId == currentUserId,
+              notificationEnabledThreadIds.contains(threadId) else { return }
 
         let rawIdentifier = event.stringValue(forKey: "$id")
             ?? event.stringValue(forKey: "messageId")
             ?? "\(threadId):\(event.dateValue(forKey: "createdAt")?.timeIntervalSince1970 ?? Date().timeIntervalSince1970)"
-        guard markSeenRealtimeIdentifier(rawIdentifier, kind: .message, userId: currentUserId) else {
+        guard markSeenRealtimeIdentifier(rawIdentifier, kind: .message) else {
             return
         }
 
         let threadName = await resolvedThreadName(threadId: threadId) ?? L10n.tr("messages.navigationTitle")
+        guard self.currentUserId == currentUserId else { return }
         let messageText = event.stringValue(forKey: "text") ?? ""
         let body: String
         if messageText.isEmpty {
@@ -224,23 +283,29 @@ final class LocalNotificationCoordinator: NSObject {
         }
 
         await scheduleImmediateNotification(
-            identifier: IdentifierPrefix.message + rawIdentifier,
+            identifier: opaqueIdentifier(prefix: IdentifierPrefix.message, rawValue: rawIdentifier),
             title: L10n.tr("notifications.message.title"),
             body: body
         )
     }
 
-    private func refreshKnownThreadIds() async {
+    private func refreshKnownThreadIds(expectedUserId: String, generation: UInt) async {
         guard let service = ensureAppwriteService() else {
-            notificationEnabledThreadIds = []
+            if generation == refreshGeneration, currentUserId == expectedUserId {
+                notificationEnabledThreadIds = []
+            }
             return
         }
 
         do {
             let threads = try await service.fetchThreads()
+            guard generation == refreshGeneration,
+                  currentUserId == expectedUserId else { return }
             notificationEnabledThreadIds = Set(threads.filter(\.notificationsEnabled).map(\.remoteId))
         } catch {
-            notificationEnabledThreadIds = []
+            if generation == refreshGeneration, currentUserId == expectedUserId {
+                notificationEnabledThreadIds = []
+            }
         }
     }
 
@@ -268,33 +333,46 @@ final class LocalNotificationCoordinator: NSObject {
         return service
     }
 
-    private func syncEventReminders(_ events: [EventHistoryItem]) async {
+    private func syncEventReminders(
+        _ events: [EventHistoryItem],
+        expectedUserId: String?,
+        generation: UInt
+    ) async {
         await clearEventReminderNotifications()
 
-        guard eventReminderNotificationsEnabled else { return }
+        guard generation == refreshGeneration,
+              currentUserId == expectedUserId,
+              eventReminderNotificationsEnabled else { return }
 
         let eligibleStatuses: Set<EventHistoryStatus> = [.confirmed, .promoted]
         let now = Date()
         for item in events where eligibleStatuses.contains(item.status) {
-            let reminderDate = item.eventDate.addingTimeInterval(-24 * 60 * 60)
-            let interval = reminderDate.timeIntervalSince(now)
-            guard interval > 60 else { continue }
+            for reminder in [(suffix: "24h", leadTime: 24 * 60 * 60), (suffix: "1h", leadTime: 60 * 60)] {
+                guard generation == refreshGeneration,
+                      currentUserId == expectedUserId else { return }
+                let reminderDate = item.eventDate.addingTimeInterval(-TimeInterval(reminder.leadTime))
+                let interval = reminderDate.timeIntervalSince(now)
+                guard interval > 60 else { continue }
 
-            let content = UNMutableNotificationContent()
-            content.title = L10n.tr("notifications.eventReminder.title")
-            content.body = String(
-                format: L10n.tr("notifications.eventReminder.body"),
-                item.eventTitle,
-                Self.eventDateFormatter.string(from: item.eventDate)
-            )
-            content.sound = .default
+                let content = UNMutableNotificationContent()
+                content.title = L10n.tr("notifications.eventReminder.title")
+                content.body = String(
+                    format: L10n.tr("notifications.eventReminder.body"),
+                    item.eventTitle,
+                    Self.eventDateFormatter.string(from: item.eventDate)
+                )
+                content.sound = .default
 
-            let request = UNNotificationRequest(
-                identifier: IdentifierPrefix.eventReminder + item.id.uuidString,
-                content: content,
-                trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
-            )
-            try? await addNotificationRequest(request)
+                let request = UNNotificationRequest(
+                    identifier: opaqueIdentifier(
+                        prefix: IdentifierPrefix.eventReminder,
+                        rawValue: "\(item.id.uuidString):\(reminder.suffix)"
+                    ),
+                    content: content,
+                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+                )
+                try? await addNotificationRequest(request)
+            }
         }
     }
 
@@ -331,6 +409,23 @@ final class LocalNotificationCoordinator: NSObject {
         }
     }
 
+    private func clearRealtimeNotifications() async {
+        let realtimePrefixes = [IdentifierPrefix.match, IdentifierPrefix.message]
+        let pending = await pendingRequests()
+            .filter { request in realtimePrefixes.contains { request.identifier.hasPrefix($0) } }
+            .map(\.identifier)
+        if !pending.isEmpty {
+            notificationCenter.removePendingNotificationRequests(withIdentifiers: pending)
+        }
+
+        let delivered = await deliveredNotifications()
+            .filter { notification in realtimePrefixes.contains { notification.request.identifier.hasPrefix($0) } }
+            .map { $0.request.identifier }
+        if !delivered.isEmpty {
+            notificationCenter.removeDeliveredNotifications(withIdentifiers: delivered)
+        }
+    }
+
     private func requestAuthorizationIfNeeded() async {
         let settings = await notificationSettings()
         switch settings.authorizationStatus {
@@ -352,9 +447,14 @@ final class LocalNotificationCoordinator: NSObject {
         case message
     }
 
-    private func markSeenRealtimeIdentifier(_ identifier: String, kind: RealtimeEventKind, userId: String) -> Bool {
-        let key = scopedDefaultsKey(for: kind, userId: userId)
-        var identifiers = defaults.stringArray(forKey: key) ?? []
+    private func markSeenRealtimeIdentifier(_ identifier: String, kind: RealtimeEventKind) -> Bool {
+        var identifiers: [String]
+        switch kind {
+        case .match:
+            identifiers = seenMatchIdentifiers
+        case .message:
+            identifiers = seenMessageIdentifiers
+        }
         if identifiers.contains(identifier) {
             return false
         }
@@ -363,17 +463,18 @@ final class LocalNotificationCoordinator: NSObject {
         if identifiers.count > 80 {
             identifiers.removeFirst(identifiers.count - 80)
         }
-        defaults.set(identifiers, forKey: key)
+        switch kind {
+        case .match:
+            seenMatchIdentifiers = identifiers
+        case .message:
+            seenMessageIdentifiers = identifiers
+        }
         return true
     }
 
-    private func scopedDefaultsKey(for kind: RealtimeEventKind, userId: String) -> String {
-        switch kind {
-        case .match:
-            return "\(DefaultsKey.seenMatchIdsPrefix).\(userId)"
-        case .message:
-            return "\(DefaultsKey.seenMessageIdsPrefix).\(userId)"
-        }
+    private func opaqueIdentifier(prefix: String, rawValue: String) -> String {
+        let digest = SHA256.hash(data: Data(rawValue.utf8))
+        return prefix + digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private func isMatchEvent(_ event: AppwriteRealtimeEvent) -> Bool {

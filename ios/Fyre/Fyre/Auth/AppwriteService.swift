@@ -15,6 +15,32 @@ struct MainEventRemoteState: Sendable {
     let adminState: EventAdminState?
 }
 
+struct EventServerCounters: Equatable, Sendable {
+    let maleCount: Int
+    let femaleCount: Int
+    let waitingListCount: Int
+
+    nonisolated init(eventRow: [String: Any]) {
+        maleCount = Self.nonNegativeInteger(eventRow["maleCount"])
+        femaleCount = Self.nonNegativeInteger(eventRow["femaleCount"])
+        waitingListCount = Self.nonNegativeInteger(eventRow["waitingListCount"])
+    }
+
+    nonisolated private static func nonNegativeInteger(_ value: Any?) -> Int {
+        let resolved: Int
+        if let value = value as? Int {
+            resolved = value
+        } else if let value = value as? NSNumber {
+            resolved = value.intValue
+        } else if let value = value as? String, let parsed = Int(value) {
+            resolved = parsed
+        } else {
+            resolved = 0
+        }
+        return max(0, resolved)
+    }
+}
+
 struct EventAdminParticipant: Identifiable, Sendable {
     let id: String
     let userId: String
@@ -34,8 +60,6 @@ struct EventAdminState: Sendable {
     let femaleLimit: Int
     let registrationClosesAt: Date?
     let cancellationClosesAt: Date?
-    let adminUserIds: String
-    let adminEmails: String
     let participants: [EventAdminParticipant]
 }
 
@@ -47,8 +71,6 @@ struct EventAdminDraft: Sendable {
     var femaleLimit: Int
     var registrationClosesAt: Date?
     var cancellationClosesAt: Date?
-    var adminUserIds: String
-    var adminEmails: String
 
     init(
         title: String,
@@ -57,9 +79,7 @@ struct EventAdminDraft: Sendable {
         maleLimit: Int,
         femaleLimit: Int,
         registrationClosesAt: Date?,
-        cancellationClosesAt: Date?,
-        adminUserIds: String,
-        adminEmails: String
+        cancellationClosesAt: Date?
     ) {
         self.title = title
         self.startsAt = startsAt
@@ -68,8 +88,6 @@ struct EventAdminDraft: Sendable {
         self.femaleLimit = femaleLimit
         self.registrationClosesAt = registrationClosesAt
         self.cancellationClosesAt = cancellationClosesAt
-        self.adminUserIds = adminUserIds
-        self.adminEmails = adminEmails
     }
 
     init(state: EventAdminState) {
@@ -80,8 +98,257 @@ struct EventAdminDraft: Sendable {
         femaleLimit = state.femaleLimit
         registrationClosesAt = state.registrationClosesAt
         cancellationClosesAt = state.cancellationClosesAt
-        adminUserIds = state.adminUserIds
-        adminEmails = state.adminEmails
+    }
+}
+
+enum EventAdminBootstrapAuthorization {
+    nonisolated static func isAuthorized(_ payload: [String: Any]) -> Bool {
+        payload["isAdmin"] as? Bool == true
+    }
+}
+
+struct EventAdminParticipantPageAccumulator: Sendable {
+    nonisolated static let pageSize = 100
+    nonisolated static let maximumParticipants = 1_000
+    nonisolated static let maximumPages = maximumParticipants / pageSize
+
+    private(set) var participantCount = 0
+    private(set) var pageCount = 0
+    private var seenCursors = Set<String>()
+
+    nonisolated init() {}
+
+    nonisolated mutating func append(_ payload: [String: Any]) throws -> String? {
+        guard let participants = payload["participants"] as? [[String: Any]],
+              participants.count <= Self.pageSize,
+              participantCount <= Self.maximumParticipants - participants.count else {
+            throw AppwriteServiceError.invalidResponse
+        }
+
+        pageCount += 1
+        guard pageCount <= Self.maximumPages else {
+            throw AppwriteServiceError.invalidResponse
+        }
+        participantCount += participants.count
+
+        guard let rawPage = payload["participantPage"] else {
+            return nil
+        }
+        guard let page = rawPage as? [String: Any] else {
+            throw AppwriteServiceError.invalidResponse
+        }
+
+        if let rawTotal = page["total"] {
+            guard let total = Self.integer(rawTotal),
+                  total >= 0,
+                  total <= Self.maximumParticipants else {
+                throw AppwriteServiceError.invalidResponse
+            }
+        }
+
+        guard let rawCursor = page["nextCursor"], !(rawCursor is NSNull) else {
+            return nil
+        }
+        guard let cursor = rawCursor as? String else {
+            throw AppwriteServiceError.invalidResponse
+        }
+        let normalizedCursor = cursor.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedCursor.isEmpty,
+              participantCount < Self.maximumParticipants,
+              pageCount < Self.maximumPages,
+              seenCursors.insert(normalizedCursor).inserted else {
+            throw AppwriteServiceError.invalidResponse
+        }
+        return normalizedCursor
+    }
+
+    nonisolated private static func integer(_ value: Any?) -> Int? {
+        if let value = value as? Int {
+            return value
+        }
+        if let value = value as? NSNumber {
+            return value.intValue
+        }
+        if let value = value as? String {
+            return Int(value)
+        }
+        return nil
+    }
+}
+
+enum ManageProfilePayload {
+    nonisolated static func upsert(_ fields: [String: Any]) -> [String: Any] {
+        var payload = fields
+        payload.removeValue(forKey: "userId")
+        payload.removeValue(forKey: "email")
+        payload.removeValue(forKey: "profileReady")
+        return payload
+    }
+
+    nonisolated static func presence(isOnline: Bool) -> [String: Any] {
+        [
+            "action": "presence",
+            "online": isOnline
+        ]
+    }
+}
+
+enum DiscoverPhotoProjectionContract {
+    nonisolated static func urls(from projection: [String: Any]) -> [URL] {
+        let photos = stringArray(projection["photos"])
+            .compactMap(TokenizedRemoteURLContract.url(from:))
+        if !photos.isEmpty {
+            return photos
+        }
+
+        guard let imageURL = (projection["imageUrl"] as? String)
+            .flatMap(TokenizedRemoteURLContract.url(from:)) else {
+            return []
+        }
+        return [imageURL]
+    }
+
+    nonisolated private static func stringArray(_ value: Any?) -> [String] {
+        if let values = value as? [String] {
+            return values
+        }
+        return (value as? [Any])?.compactMap { $0 as? String } ?? []
+    }
+
+}
+
+struct DiscoveryWindowPaginationState {
+    let maximumWindows: Int
+    private(set) var requestedWindowCount = 0
+    private(set) var profileCursor: String?
+    private var usedCursors = Set<String>()
+
+    nonisolated init(maximumWindows: Int = 4) {
+        self.maximumWindows = max(0, maximumWindows)
+    }
+
+    nonisolated var canRequest: Bool {
+        requestedWindowCount < maximumWindows
+    }
+
+    nonisolated mutating func beginRequest() -> String? {
+        precondition(canRequest)
+        requestedWindowCount += 1
+        return profileCursor
+    }
+
+    nonisolated mutating func advanceAfterEmptyPage(nextCursor: String?) -> Bool {
+        guard let normalizedCursor = nextCursor?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !normalizedCursor.isEmpty,
+            usedCursors.insert(normalizedCursor).inserted else {
+            return false
+        }
+
+        profileCursor = normalizedCursor
+        return canRequest
+    }
+}
+
+enum TokenizedRemoteURLContract {
+    nonisolated static func url(from value: String) -> URL? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host,
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.fragment == nil,
+              scheme == "https" || (scheme == "http" && isLoopbackHost(host)),
+              components.queryItems?.contains(where: {
+                  $0.name == "token" && !($0.value ?? "").isEmpty
+              }) == true else {
+            return nil
+        }
+        return components.url
+    }
+
+    nonisolated private static func isLoopbackHost(_ host: String) -> Bool {
+        let normalized = host.lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if normalized == "localhost" || normalized == "::1" {
+            return true
+        }
+
+        let octets = normalized.split(separator: ".", omittingEmptySubsequences: false)
+        return octets.count == 4
+            && octets.first == "127"
+            && octets.allSatisfy { octet in
+                guard !octet.isEmpty, octet.count <= 3, octet.allSatisfy(\.isNumber),
+                      let value = Int(octet) else { return false }
+                return value <= 255
+            }
+    }
+}
+
+struct AppwritePaginationState: Sendable {
+    nonisolated static let pageSize = 100
+
+    let maximumRows: Int?
+    private(set) var loadedCount = 0
+    private(set) var offset = 0
+    private(set) var cursorAfter: String?
+    private(set) var isComplete: Bool
+
+    nonisolated init(maximumRows: Int? = nil) {
+        self.maximumRows = maximumRows.map { Swift.max(0, $0) }
+        isComplete = maximumRows.map { $0 <= 0 } ?? false
+    }
+
+    nonisolated var nextLimit: Int {
+        guard let maximumRows else { return Self.pageSize }
+        return Swift.min(Self.pageSize, Swift.max(0, maximumRows - loadedCount))
+    }
+
+    nonisolated func acceptedCount(for pageCount: Int) -> Int {
+        guard let maximumRows else { return pageCount }
+        return Swift.min(pageCount, Swift.max(0, maximumRows - loadedCount))
+    }
+
+    nonisolated mutating func receive(
+        pageCount: Int,
+        acceptedCount: Int,
+        lastRowId: String?,
+        total: Int?,
+        requestedLimit: Int
+    ) {
+        loadedCount += acceptedCount
+        offset += pageCount
+
+        if let maximumRows, loadedCount >= maximumRows {
+            isComplete = true
+            return
+        }
+        if pageCount == 0 || pageCount < requestedLimit {
+            isComplete = true
+            return
+        }
+        if let total, loadedCount >= total {
+            isComplete = true
+            return
+        }
+
+        let normalizedLastRowId = lastRowId?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedLastRowId,
+           !normalizedLastRowId.isEmpty,
+           normalizedLastRowId != cursorAfter {
+            cursorAfter = normalizedLastRowId
+        } else if normalizedLastRowId == cursorAfter,
+                  normalizedLastRowId?.isEmpty == false {
+            // A repeated cursor means the backend returned the same full page.
+            // Stop instead of cycling forever or silently duplicating rows.
+            isComplete = true
+        } else {
+            cursorAfter = nil
+        }
     }
 }
 
@@ -129,13 +396,16 @@ actor AppwriteService {
     }
 
     func logOut() async throws {
+        defer { clearLocalSession() }
         _ = try await sendRequest(
             method: "DELETE",
             pathComponents: ["account", "sessions", "current"],
-            expectedStatusCodes: [204]
+            expectedStatusCodes: [204, 401]
         )
+    }
+
+    func clearLocalSession() {
         clearCookies()
-        cachedFunctionJWT = nil
     }
 
     func updateProfile(for user: User) async throws -> User {
@@ -250,19 +520,24 @@ actor AppwriteService {
         guard let mainEvent = upcomingEvents.first else { return nil }
 
         let eventId = stringValue(forKey: "$id", in: mainEvent) ?? ""
-        let eventRegistrations = try await listRows(
-            tableId: configuration.eventRegistrationsTableId,
-            queries: [
-                AppwriteQuery.equal("eventId", values: [eventId])
-            ]
-        )
-
-        let snapshot = makeMainEventSnapshot(eventRow: mainEvent, registrations: eventRegistrations)
         let accountId = try await resolvedAccountId(from: user)
+        let currentUserRegistrations: [[String: Any]]
+        if let accountId, !accountId.isEmpty {
+            currentUserRegistrations = try await listRows(
+                tableId: configuration.eventRegistrationsTableId,
+                queries: [
+                    AppwriteQuery.equal("eventId", values: [eventId]),
+                    AppwriteQuery.equal("userId", values: [accountId])
+                ]
+            )
+        } else {
+            currentUserRegistrations = []
+        }
+
+        let snapshot = makeMainEventSnapshot(eventRow: mainEvent)
         let currentStatus: EventHistoryStatus?
-        if let accountId {
-            let sortedUserRegistrations = eventRegistrations
-                .filter { stringValue(forKey: "userId", in: $0) == accountId }
+        if accountId != nil {
+            let sortedUserRegistrations = currentUserRegistrations
                 .sorted { lhs, rhs in
                     let lhsUpdatedAt = dateValue(forKey: "$updatedAt", in: lhs)
                         ?? dateValue(forKey: "updatedAt", in: lhs)
@@ -304,6 +579,9 @@ actor AppwriteService {
     }
 
     func registerForMainEvent(for user: User, eventId: String? = nil) async throws -> EventHistoryStatus {
+        guard !configuration.registerForEventFunctionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID")
+        }
         _ = try await resolvedRequiredAccountId(from: user)
         var body: [String: Any] = [:]
         if let eventId, !eventId.isEmpty {
@@ -323,11 +601,12 @@ actor AppwriteService {
         return status
     }
 
-    func cancelMainEventRegistration(for user: User, eventId: String? = nil, force: Bool = false) async throws {
+    func cancelMainEventRegistration(for user: User, eventId: String? = nil) async throws {
+        guard !configuration.cancelEventRegistrationFunctionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID")
+        }
         _ = try await resolvedRequiredAccountId(from: user)
-        var body: [String: Any] = [
-            "force": force
-        ]
+        var body: [String: Any] = [:]
         if let eventId, !eventId.isEmpty {
             body["eventId"] = eventId
         }
@@ -352,8 +631,7 @@ actor AppwriteService {
             "maxParticipants": draft.maxParticipants,
             "maleLimit": draft.maleLimit,
             "femaleLimit": draft.femaleLimit,
-            "adminUserIds": draft.adminUserIds,
-            "adminEmails": draft.adminEmails
+            "participantLimit": EventAdminParticipantPageAccumulator.pageSize
         ]
         if let registrationClosesAt = draft.registrationClosesAt {
             body["registrationClosesAt"] = Self.dateFormatter.string(from: registrationClosesAt)
@@ -367,11 +645,7 @@ actor AppwriteService {
             body: body
         )
 
-        guard let state = makeEventAdminState(from: response) else {
-            throw AppwriteServiceError.invalidResponse
-        }
-
-        return state
+        return try await completeEventAdminStateAfterMutation(response, eventId: eventId)
     }
 
     func addEventParticipantAsAdmin(eventId: String, lookup: String, status: EventHistoryStatus) async throws -> EventAdminState {
@@ -385,15 +659,12 @@ actor AppwriteService {
                 "action": "addParticipant",
                 "eventId": eventId,
                 "userLookup": lookup,
-                "status": status.rawValue
+                "status": status.rawValue,
+                "participantLimit": EventAdminParticipantPageAccumulator.pageSize
             ]
         )
 
-        guard let state = makeEventAdminState(from: response) else {
-            throw AppwriteServiceError.invalidResponse
-        }
-
-        return state
+        return try await completeEventAdminStateAfterMutation(response, eventId: eventId)
     }
 
     func removeEventParticipantAsAdmin(eventId: String, registrationId: String) async throws -> EventAdminState {
@@ -406,107 +677,63 @@ actor AppwriteService {
             body: [
                 "action": "removeParticipant",
                 "eventId": eventId,
-                "registrationId": registrationId
+                "registrationId": registrationId,
+                "participantLimit": EventAdminParticipantPageAccumulator.pageSize
             ]
         )
 
-        guard let state = makeEventAdminState(from: response) else {
-            throw AppwriteServiceError.invalidResponse
-        }
-
-        return state
+        return try await completeEventAdminStateAfterMutation(response, eventId: eventId)
     }
 
     func fetchDiscoverProfiles() async throws -> [DiscoverProfileDTO] {
-        // Prefer the server-side projection when available so discover can stay privacy-safe.
-        if let functionId = configuration.discoverProfilesFunctionId {
-            let response = try await executeUserFunction(functionId: functionId, body: [:])
+        guard let functionId = configuration.discoverProfilesFunctionId else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_DISCOVER_PROFILES_FUNCTION_ID")
+        }
+
+        var pagination = DiscoveryWindowPaginationState()
+        while pagination.canRequest {
+            let profileCursor = pagination.beginRequest()
+            var body: [String: Any] = [:]
+            if let profileCursor {
+                body["profileCursor"] = profileCursor
+            }
+
+            let response = try await executeUserFunction(functionId: functionId, body: body)
             guard let profiles = response["profiles"] as? [[String: Any]] else {
                 throw AppwriteServiceError.invalidResponse
             }
-
-            return profiles.compactMap(makeDiscoverProfileDTO(from:))
-        }
-
-        let currentAccountId = try await fetchCurrentAccountId(required: false)
-        let excludedUserIds = try await excludedDiscoverUserIds(currentAccountId: currentAccountId)
-        let currentProfileRow = try await fetchProfileRow(id: currentAccountId ?? "")
-        let currentInterests = currentProfileRow.map(interestListValue(for:)) ?? []
-        let excludeSmokers = boolValue(forKey: "excludeSmokers", in: currentProfileRow) ?? false
-        let excludeDrinkers = boolValue(forKey: "excludeDrinkers", in: currentProfileRow) ?? false
-        let rows = try await listRows(
-            tableId: configuration.profilesTableId,
-            queries: []
-        )
-
-        let mappedProfiles: [DiscoverProfileDTO] = rows.compactMap { (row: [String: Any]) -> DiscoverProfileDTO? in
-            guard let userId = stringValue(forKey: "userId", in: row),
-                  userId != currentAccountId,
-                  !excludedUserIds.contains(userId),
-                  !(excludeSmokers && (boolValue(forKey: "smokes", in: row) ?? false)),
-                  !(excludeDrinkers && (boolValue(forKey: "drinks", in: row) ?? false)),
-                  let _ = genderValue(for: stringValue(forKey: "gender", in: row)) else {
-                return nil
+            if !profiles.isEmpty {
+                return profiles.compactMap(makeDiscoverProfileDTO(from:))
             }
-            return makeFallbackDiscoverProfileDTO(from: row, currentUserInterests: currentInterests)
+
+            let nextCursor: String?
+            if response["nextCursor"] == nil || response["nextCursor"] is NSNull {
+                nextCursor = nil
+            } else if let parsedCursor = stringValue(forKey: "nextCursor", in: response) {
+                nextCursor = parsedCursor
+            } else {
+                throw AppwriteServiceError.invalidResponse
+            }
+            guard pagination.advanceAfterEmptyPage(nextCursor: nextCursor) else {
+                return []
+            }
         }
-        return mappedProfiles
+
+        return []
     }
 
     private func ensureProfileRow(for user: User) async throws -> User {
         let accountId = try await resolvedRequiredAccountId(from: user)
         let payload = makeProfilePayload(for: user)
-        let existingProfileRow = try await fetchProfileRow(id: accountId)
-
-        // Use the Auth account id as the profile row id so auth and profile stay trivially linked.
-        if existingProfileRow == nil {
-            _ = try await sendRequest(
-                method: "POST",
-                pathComponents: [
-                    "tablesdb",
-                    configuration.databaseId,
-                    "tables",
-                    configuration.profilesTableId,
-                    "rows"
-                ],
-                jsonBody: [
-                    "rowId": accountId,
-                    "data": payload,
-                    "permissions": profilePermissions(ownerUserId: accountId)
-                ],
-                expectedStatusCodes: [201]
-            )
-        } else {
-            let existingRowId = stringValue(forKey: "$id", in: existingProfileRow) ?? accountId
-            _ = try await sendRequest(
-                method: "PATCH",
-                pathComponents: [
-                    "tablesdb",
-                    configuration.databaseId,
-                    "tables",
-                    configuration.profilesTableId,
-                    "rows",
-                    existingRowId
-                ],
-                jsonBody: [
-                    "data": payload,
-                    "permissions": profilePermissions(ownerUserId: accountId)
-                ],
-                expectedStatusCodes: [200]
-            )
-        }
+        _ = try await executeUserFunction(
+            functionId: configuration.manageProfileFunctionId,
+            body: payload,
+            includeCurrentUserId: false
+        )
 
         var updatedUser = user
         updatedUser.appwriteUserId = accountId
         return updatedUser
-    }
-
-    private func profilePermissions(ownerUserId: String) -> [String] {
-        [
-            "read(\"user:\(ownerUserId)\")",
-            "update(\"user:\(ownerUserId)\")",
-            "delete(\"user:\(ownerUserId)\")"
-        ]
     }
 
     private func fetchCurrentUser(required: Bool) async throws -> User? {
@@ -543,7 +770,7 @@ actor AppwriteService {
             fileId: stringValue(forKey: "avatarFileId", in: profileRow)
         )
 
-        var user = User(email: email, password: "")
+        var user = User(email: email)
         user.appwriteUserId = accountId
         user.firstName = stringValue(forKey: "firstName", in: profileRow)
         user.lastName = stringValue(forKey: "lastName", in: profileRow)
@@ -711,85 +938,36 @@ actor AppwriteService {
         .sorted(by: { $0.timestamp > $1.timestamp })
     }
 
-    private func excludedDiscoverUserIds(currentAccountId: String?) async throws -> Set<String> {
-        guard let currentAccountId, !currentAccountId.isEmpty else { return [] }
-
-        var excluded = Set<String>()
-
-        // Hide profiles already handled locally when discover falls back to direct table reads.
-        if let swipesTableId = configuration.swipesTableId {
-            let swipeRows = try await listRows(
-                tableId: swipesTableId,
-                queries: [
-                    AppwriteQuery.equal("fromUserId", values: [currentAccountId]),
-                ]
-            )
-
-            for row in swipeRows {
-                if let userId = stringValue(forKey: "toUserId", in: row) {
-                    excluded.insert(userId)
-                }
-            }
-        }
-
-        if let matchesTableId = configuration.matchesTableId {
-            let matchRows = try await listRows(
-                tableId: matchesTableId,
-                queries: [
-                ]
-            )
-
-            for row in matchRows {
-                let userAId = stringValue(forKey: "userAId", in: row)
-                let userBId = stringValue(forKey: "userBId", in: row)
-
-                if userAId == currentAccountId, let userBId {
-                    excluded.insert(userBId)
-                } else if userBId == currentAccountId, let userAId {
-                    excluded.insert(userAId)
-                }
-            }
-        }
-
-        return excluded
-    }
-
-    private func makeMainEventSnapshot(eventRow: [String: Any], registrations: [[String: Any]]) -> MainEventSnapshot {
-        let confirmedStatuses: Set<String> = ["confirmed", "promoted"]
-        let confirmedRows = registrations.filter {
-            guard let status = stringValue(forKey: "status", in: $0)?.lowercased() else { return false }
-            return confirmedStatuses.contains(status)
-        }
-
-        let maleCount = confirmedRows.filter { stringValue(forKey: "gender", in: $0) == "male" }.count
-        let femaleCount = confirmedRows.filter { stringValue(forKey: "gender", in: $0) == "female" }.count
-        let waitingListCount = registrations.filter { stringValue(forKey: "status", in: $0) == "waitlisted" }.count
+    private func makeMainEventSnapshot(eventRow: [String: Any]) -> MainEventSnapshot {
+        let counters = EventServerCounters(eventRow: eventRow)
 
         return MainEventSnapshot(
             date: dateValue(forKey: "startsAt", in: eventRow) ?? Date(),
             title: stringValue(forKey: "title", in: eventRow) ?? "Event",
+            place: stringValue(forKey: "place", in: eventRow),
+            eventDescription: stringValue(forKey: "description", in: eventRow),
+            rules: stringArrayValue(forKey: "rules", in: eventRow),
             maxParticipants: intValue(forKey: "maxParticipants", in: eventRow) ?? 48,
             maleLimit: intValue(forKey: "maleLimit", in: eventRow) ?? 24,
             femaleLimit: intValue(forKey: "femaleLimit", in: eventRow) ?? 24,
-            maleCount: maleCount,
-            femaleCount: femaleCount,
-            waitingListCount: waitingListCount,
+            maleCount: counters.maleCount,
+            femaleCount: counters.femaleCount,
+            waitingListCount: counters.waitingListCount,
             registrationClosesAt: dateValue(forKey: "registrationClosesAt", in: eventRow),
             cancellationClosesAt: dateValue(forKey: "cancellationClosesAt", in: eventRow)
         )
     }
 
     private func resolvedAccountId(from user: User?) async throws -> String? {
-        if let accountId = user?.appwriteUserId?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !accountId.isEmpty {
-            return accountId
+        if let user {
+            let accountId = user.appwriteUserId?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return accountId?.isEmpty == false ? accountId : nil
         }
 
         return try await fetchCurrentAccountId(required: false)
     }
 
     private func resolvedRequiredAccountId(from user: User?) async throws -> String {
-        // Old persisted sessions may miss appwriteUserId; recover from /account before failing the request.
         guard let accountId = try await resolvedAccountId(from: user) else {
             throw AppwriteServiceError.missingAccountId
         }
@@ -797,9 +975,17 @@ actor AppwriteService {
         return accountId
     }
 
-    func executeUserFunction(functionId: String, body: [String: Any]) async throws -> [String: Any] {
+    func executeUserFunction(
+        functionId: String,
+        body: [String: Any],
+        includeCurrentUserId: Bool = true
+    ) async throws -> [String: Any] {
+        guard !functionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_FUNCTION_ID")
+        }
         var payload = body
-        if payload["currentUserId"] == nil,
+        if includeCurrentUserId,
+           payload["currentUserId"] == nil,
            let currentUserId = try await fetchCurrentAccountId(required: true) {
             payload["currentUserId"] = currentUserId
         }
@@ -828,11 +1014,11 @@ actor AppwriteService {
             }
 
 #if DEBUG
-            debugPrint("Direct function invoke denied for \(functionId). Falling back to execution API: \(error.localizedDescription)")
+            debugPrint("Direct function invoke denied; falling back to execution API")
 #endif
         }
 #if DEBUG
-        debugPrint("Direct function invoke returned no JSON payload for \(functionId). Falling back to execution polling.")
+        debugPrint("Direct function invoke returned no JSON payload; falling back to execution polling")
 #endif
         return try await executeFunction(functionId: functionId, body: payload)
     }
@@ -844,10 +1030,14 @@ actor AppwriteService {
             || configuration.recordSwipeFunctionId == functionId
             || configuration.sendMessageFunctionId == functionId
             || configuration.eventAdminFunctionId == functionId
+            || configuration.manageProfileFunctionId == functionId
             || configuration.manageRelationshipFunctionId == functionId
     }
 
     private func executeFunction(functionId: String, body: [String: Any]) async throws -> [String: Any] {
+        guard !functionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_FUNCTION_ID")
+        }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
         let bodyString = String(decoding: bodyData, as: UTF8.self)
 
@@ -877,7 +1067,7 @@ actor AppwriteService {
     private func executeFunctionDirectly(functionId: String, body: [String: Any]) async throws -> [String: Any]? {
         guard let directURL = generatedFunctionURL(functionId: functionId) else {
 #if DEBUG
-            debugPrint("Unable to derive generated Appwrite function URL for \(functionId) from endpoint \(configuration.endpointURL.absoluteString)")
+            debugPrint("Unable to derive generated Appwrite function URL")
 #endif
             return nil
         }
@@ -901,27 +1091,27 @@ actor AppwriteService {
 
             guard (200..<300).contains(httpResponse.statusCode) else {
 #if DEBUG
-                debugPrint("Direct function invoke failed for \(functionId) status=\(httpResponse.statusCode) responseBytes=\(data.count)")
+                debugPrint("Direct function invoke failed status=\(httpResponse.statusCode) responseBytes=\(data.count)")
 #endif
                 throw makeAPIError(from: data, statusCode: httpResponse.statusCode)
             }
 
             if data.isEmpty {
 #if DEBUG
-                debugPrint("Direct function invoke returned empty body for \(functionId) @ \(directURL.absoluteString)")
+                debugPrint("Direct function invoke returned empty body")
 #endif
                 return [:]
             }
 
 #if DEBUG
-            debugPrint("Direct function invoke succeeded for \(functionId) responseBytes=\(data.count)")
+            debugPrint("Direct function invoke succeeded responseBytes=\(data.count)")
 #endif
             return try decodeJSONObject(from: data)
         } catch let error as AppwriteServiceError {
             throw error
         } catch {
 #if DEBUG
-            debugPrint("Direct function invoke network error for \(functionId) @ \(directURL.absoluteString): \(error.localizedDescription)")
+            debugPrint("Direct function invoke network error")
 #endif
             throw AppwriteServiceError.network(error)
         }
@@ -1092,24 +1282,51 @@ actor AppwriteService {
         return nil
     }
 
-    func listRows(tableId: String, queries: [String]) async throws -> [[String: Any]] {
-        let payload = try await sendJSONObjectRequest(
-            method: "GET",
-            pathComponents: [
-                "tablesdb",
-                configuration.databaseId,
-                "tables",
-                tableId,
-                "rows"
-            ],
-            queryItems: queries.map { URLQueryItem(name: "queries[]", value: $0) }
-        )
+    func listRows(
+        tableId: String,
+        queries: [String],
+        maximumRows: Int? = nil
+    ) async throws -> [[String: Any]] {
+        var pagination = AppwritePaginationState(maximumRows: maximumRows)
+        var collectedRows: [[String: Any]] = []
 
-        if let rows = payload["rows"] as? [[String: Any]] {
-            return rows
+        while !pagination.isComplete {
+            let pageLimit = pagination.nextLimit
+            guard pageLimit > 0 else { break }
+
+            var pageQueries = queries
+            pageQueries.append(AppwriteQuery.limit(pageLimit))
+            if let cursorAfter = pagination.cursorAfter {
+                pageQueries.append(AppwriteQuery.cursorAfter(cursorAfter))
+            } else if pagination.offset > 0 {
+                pageQueries.append(AppwriteQuery.offset(pagination.offset))
+            }
+
+            let payload = try await sendJSONObjectRequest(
+                method: "GET",
+                pathComponents: [
+                    "tablesdb",
+                    configuration.databaseId,
+                    "tables",
+                    tableId,
+                    "rows"
+                ],
+                queryItems: pageQueries.map { URLQueryItem(name: "queries[]", value: $0) }
+            )
+
+            let pageRows = payload["rows"] as? [[String: Any]] ?? []
+            let acceptedCount = pagination.acceptedCount(for: pageRows.count)
+            collectedRows.append(contentsOf: pageRows.prefix(acceptedCount))
+            pagination.receive(
+                pageCount: pageRows.count,
+                acceptedCount: acceptedCount,
+                lastRowId: pageRows.last?["$id"] as? String,
+                total: intValue(forKey: "total", in: payload),
+                requestedLimit: pageLimit
+            )
         }
 
-        return []
+        return collectedRows
     }
 
     private func uploadAvatar(data: Data, fileId: String, ownerUserId: String) async throws {
@@ -1172,9 +1389,9 @@ actor AppwriteService {
         }
     }
 
-    private func avatarPermissions(ownerUserId: String) -> [String] {
+    func avatarPermissions(ownerUserId: String) -> [String] {
         [
-            "read(\"users\")",
+            "read(\"user:\(ownerUserId)\")",
             "update(\"user:\(ownerUserId)\")",
             "delete(\"user:\(ownerUserId)\")"
         ]
@@ -1336,9 +1553,7 @@ actor AppwriteService {
     }
 
     private func makeProfilePayload(for user: User) -> [String: Any] {
-        [
-            "userId": user.appwriteUserId ?? "",
-            "email": user.email,
+        ManageProfilePayload.upsert([
             "firstName": nullOrString(user.firstName),
             "lastName": nullOrString(user.lastName),
             "city": nullOrString(user.city),
@@ -1360,10 +1575,9 @@ actor AppwriteService {
             "interests": nullOrString(user.normalizedInterests),
             "instagramTag": nullOrString(user.normalizedInstagramTag),
             "spotifyTag": nullOrString(user.normalizedSpotifyTag),
-            "profileReady": user.isProfileComplete,
             "avatarFileId": nullOrString(user.avatarFileId),
             "photoFileIds": user.resolvedPhotoFileIds
-        ]
+        ])
     }
 
     private func makeDiscoverProfileDTO(from row: [String: Any]) -> DiscoverProfileDTO? {
@@ -1384,53 +1598,10 @@ actor AppwriteService {
             bio: discoverBio(from: row),
             city: stringValue(forKey: "city", in: row),
             gender: stringValue(forKey: "gender", in: row),
-            orientation: stringValue(forKey: "orientation", in: row),
             intent: stringValue(forKey: "intent", in: row),
-            smokes: boolValue(forKey: "smokes", in: row),
-            drinks: boolValue(forKey: "drinks", in: row),
             instagramTag: socialTagValue(forKey: "instagramTag", in: row),
             spotifyTag: socialTagValue(forKey: "spotifyTag", in: row),
             relationshipState: relationshipStateValue(for: stringValue(forKey: "relationshipState", in: row))
-        )
-    }
-
-    private func makeFallbackDiscoverProfileDTO(from row: [String: Any], currentUserInterests: [String]) -> DiscoverProfileDTO? {
-        guard let userId = stringValue(forKey: "userId", in: row) else {
-            return nil
-        }
-
-        let firstName = stringValue(forKey: "firstName", in: row) ?? ""
-        let lastName = stringValue(forKey: "lastName", in: row) ?? ""
-        let fullName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
-        let email = stringValue(forKey: "email", in: row) ?? ""
-        let name = fullName.isEmpty ? (ThreadNaming.discoverFallbackName(email: email) ?? ThreadNaming.placeholderTitle) : fullName
-        let interests = interestListValue(for: row)
-        let commonInterests = interests.filter { currentUserInterests.contains($0) }
-        let photos = discoverPhotoURLs(from: row)
-        let hasBio = !(stringValue(forKey: "bio", in: row) ?? "").isEmpty
-        let fallbackScore = min(
-            86,
-            max(28 + (min(commonInterests.count, 4) * 11) + (photos.isEmpty ? 0 : 4) + (hasBio ? 3 : 0), 28)
-        )
-
-        return DiscoverProfileDTO(
-            id: userId,
-            name: name,
-            age: ageValue(from: dateValue(forKey: "birthDate", in: row)),
-            photos: photos,
-            compatibilityScore: fallbackScore,
-            distance: intValue(forKey: "distanceKm", in: row),
-            commonInterests: Array(commonInterests.prefix(4)),
-            bio: discoverBio(from: row),
-            city: stringValue(forKey: "city", in: row),
-            gender: stringValue(forKey: "gender", in: row),
-            orientation: stringValue(forKey: "orientation", in: row),
-            intent: stringValue(forKey: "intent", in: row),
-            smokes: boolValue(forKey: "smokes", in: row),
-            drinks: boolValue(forKey: "drinks", in: row),
-            instagramTag: socialTagValue(forKey: "instagramTag", in: row),
-            spotifyTag: socialTagValue(forKey: "spotifyTag", in: row),
-            relationshipState: .none
         )
     }
 
@@ -1440,28 +1611,93 @@ actor AppwriteService {
         }
 
         do {
-            let response = try await executeUserFunction(
-                functionId: functionId,
-                body: [
-                    "action": "fetch",
-                    "eventId": eventId
-                ]
-            )
-            return makeEventAdminState(from: response)
+            return try await fetchCompleteEventAdminState(eventId: eventId, functionId: functionId)
         } catch let error as AppwriteServiceError where error.statusCode == 401 || error.statusCode == 403 || error.statusCode == 404 {
             return nil
         }
     }
 
+    private func fetchCompleteEventAdminState(
+        eventId: String,
+        functionId: String
+    ) async throws -> EventAdminState {
+        var accumulator = EventAdminParticipantPageAccumulator()
+        var participantCursor: String?
+        var firstState: EventAdminState?
+        var participants: [EventAdminParticipant] = []
+
+        while true {
+            var body: [String: Any] = [
+                "action": "fetch",
+                "eventId": eventId,
+                "participantLimit": EventAdminParticipantPageAccumulator.pageSize
+            ]
+            if let participantCursor {
+                body["participantCursor"] = participantCursor
+            }
+
+            let response = try await executeUserFunction(
+                functionId: functionId,
+                body: body
+            )
+            let state = try validatedEventAdminState(from: response, eventId: eventId)
+            firstState = firstState ?? state
+            participants.append(contentsOf: state.participants)
+
+            participantCursor = try accumulator.append(response)
+            if participantCursor == nil {
+                guard let firstState else {
+                    throw AppwriteServiceError.invalidResponse
+                }
+                return eventAdminState(
+                    firstState,
+                    replacingParticipants: sortedEventAdminParticipants(participants)
+                )
+            }
+        }
+    }
+
+    private func completeEventAdminStateAfterMutation(
+        _ response: [String: Any],
+        eventId: String
+    ) async throws -> EventAdminState {
+        let state = try validatedEventAdminState(from: response, eventId: eventId)
+        var accumulator = EventAdminParticipantPageAccumulator()
+
+        // A mutation is executed exactly once. If its first roster page is not
+        // complete, reload the roster only through the read-only fetch action.
+        guard try accumulator.append(response) != nil else {
+            return state
+        }
+        guard let functionId = configuration.eventAdminFunctionId else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_EVENT_ADMIN_FUNCTION_ID")
+        }
+        return try await fetchCompleteEventAdminState(eventId: eventId, functionId: functionId)
+    }
+
+    private func validatedEventAdminState(
+        from payload: [String: Any],
+        eventId: String
+    ) throws -> EventAdminState {
+        guard let state = makeEventAdminState(from: payload),
+              state.eventId == eventId,
+              let rawParticipants = payload["participants"] as? [[String: Any]],
+              rawParticipants.count == state.participants.count else {
+            throw AppwriteServiceError.invalidResponse
+        }
+        return state
+    }
+
     private func makeEventAdminState(from payload: [String: Any]) -> EventAdminState? {
-        guard (boolValue(forKey: "isAdmin", in: payload) ?? true),
+        guard EventAdminBootstrapAuthorization.isAuthorized(payload),
               let event = payload["event"] as? [String: Any],
               let eventId = stringValue(forKey: "$id", in: event) ?? stringValue(forKey: "eventId", in: event),
               let startsAt = dateValue(forKey: "startsAt", in: event) else {
             return nil
         }
 
-        let participants = (payload["participants"] as? [[String: Any]] ?? []).compactMap { row -> EventAdminParticipant? in
+        let participants = sortedEventAdminParticipants(
+            (payload["participants"] as? [[String: Any]] ?? []).compactMap { row -> EventAdminParticipant? in
             guard let id = stringValue(forKey: "registrationId", in: row) ?? stringValue(forKey: "$id", in: row),
                   let userId = stringValue(forKey: "userId", in: row),
                   let status = eventHistoryStatus(for: stringValue(forKey: "status", in: row)) else {
@@ -1482,13 +1718,7 @@ actor AppwriteService {
                 status: status,
                 createdAt: dateValue(forKey: "createdAt", in: row) ?? dateValue(forKey: "$createdAt", in: row)
             )
-        }
-        .sorted { lhs, rhs in
-            if lhs.status == rhs.status {
-                return (lhs.createdAt ?? .distantPast) < (rhs.createdAt ?? .distantPast)
-            }
-            return lhs.status.sortOrder < rhs.status.sortOrder
-        }
+        })
 
         return EventAdminState(
             eventId: eventId,
@@ -1499,8 +1729,34 @@ actor AppwriteService {
             femaleLimit: intValue(forKey: "femaleLimit", in: event) ?? 24,
             registrationClosesAt: dateValue(forKey: "registrationClosesAt", in: event),
             cancellationClosesAt: dateValue(forKey: "cancellationClosesAt", in: event),
-            adminUserIds: stringValue(forKey: "adminUserIds", in: event) ?? "",
-            adminEmails: stringValue(forKey: "adminEmails", in: event) ?? "",
+            participants: participants
+        )
+    }
+
+    private func sortedEventAdminParticipants(
+        _ participants: [EventAdminParticipant]
+    ) -> [EventAdminParticipant] {
+        participants.sorted { lhs, rhs in
+            if lhs.status == rhs.status {
+                return (lhs.createdAt ?? .distantPast) < (rhs.createdAt ?? .distantPast)
+            }
+            return lhs.status.sortOrder < rhs.status.sortOrder
+        }
+    }
+
+    private func eventAdminState(
+        _ state: EventAdminState,
+        replacingParticipants participants: [EventAdminParticipant]
+    ) -> EventAdminState {
+        return EventAdminState(
+            eventId: state.eventId,
+            title: state.title,
+            startsAt: state.startsAt,
+            maxParticipants: state.maxParticipants,
+            maleLimit: state.maleLimit,
+            femaleLimit: state.femaleLimit,
+            registrationClosesAt: state.registrationClosesAt,
+            cancellationClosesAt: state.cancellationClosesAt,
             participants: participants
         )
     }
@@ -1520,22 +1776,7 @@ actor AppwriteService {
     }
 
     private func discoverPhotoURLs(from row: [String: Any]) -> [URL] {
-        let directURLs = stringArrayValue(forKey: "photos", in: row).compactMap(URL.init(string:))
-        if !directURLs.isEmpty {
-            return directURLs
-        }
-
-        if let directURL = stringValue(forKey: "imageUrl", in: row).flatMap(URL.init(string:)) {
-            return [directURL]
-        }
-
-        let fileIds = discoverPhotoFileIds(from: row)
-        let urls = fileIds.compactMap(avatarURL(fileId:))
-        if !urls.isEmpty {
-            return urls
-        }
-
-        return []
+        DiscoverPhotoProjectionContract.urls(from: row)
     }
 
     private func discoverPhotoFileIds(from row: [String: Any]) -> [String] {
@@ -1562,17 +1803,8 @@ actor AppwriteService {
         return interestListValue(for: stringValue(forKey: "commonInterests", in: row))
     }
 
-    private func interestListValue(for row: [String: Any]) -> [String] {
-        interestListValue(for: stringValue(forKey: "interests", in: row))
-    }
-
     private func socialTagValue(forKey key: String, in row: [String: Any]?) -> String? {
         normalizedSocialTag(stringValue(forKey: key, in: row))
-    }
-
-    private func ageValue(from date: Date?) -> Int {
-        guard let date else { return 18 }
-        return max(18, Calendar.current.dateComponents([.year], from: date, to: Date()).year ?? 18)
     }
 
     private func nullOrString(_ value: String?) -> Any {
@@ -1773,24 +2005,6 @@ actor AppwriteService {
         return String(withoutAt.prefix(64))
     }
 
-    private func avatarURL(fileId: String?) -> URL? {
-        guard let fileId, !fileId.isEmpty else { return nil }
-
-        var url = configuration.endpointURL
-        url.appendPathComponent("storage")
-        url.appendPathComponent("buckets")
-        url.appendPathComponent(configuration.avatarsBucketId)
-        url.appendPathComponent("files")
-        url.appendPathComponent(fileId)
-        url.appendPathComponent("view")
-
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "project", value: configuration.projectId)
-        ]
-        return components?.url
-    }
-
     private func stringValue(for value: UserOrientation?) -> String? {
         switch value {
         case .straight:
@@ -1845,9 +2059,16 @@ actor AppwriteService {
         guard let host = configuration.endpointURL.host,
               let cookies = HTTPCookieStorage.shared.cookies else { return }
 
-        for cookie in cookies where cookie.domain.contains(host) {
+        for cookie in cookies where Self.cookieDomain(cookie.domain, matches: host) {
             HTTPCookieStorage.shared.deleteCookie(cookie)
         }
+    }
+
+    private static func cookieDomain(_ domain: String, matches host: String) -> Bool {
+        let normalizedDomain = domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        let normalizedHost = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !normalizedDomain.isEmpty, !normalizedHost.isEmpty else { return false }
+        return normalizedHost == normalizedDomain || normalizedHost.hasSuffix(".\(normalizedDomain)")
     }
 
     func makeRandomIdentifier() -> String {
@@ -1963,19 +2184,27 @@ actor AppwriteService {
 }
 
 enum AppwriteQuery {
-    static func equal(_ field: String, values: [String]) -> String {
+    nonisolated static func equal(_ field: String, values: [String]) -> String {
         query(method: "equal", column: field, values: values)
     }
 
-    static func orderAsc(_ field: String) -> String {
+    nonisolated static func orderAsc(_ field: String) -> String {
         query(method: "orderAsc", column: field)
     }
 
-    static func limit(_ value: Int) -> String {
+    nonisolated static func limit(_ value: Int) -> String {
         query(method: "limit", values: [value])
     }
 
-    private static func query(method: String, column: String? = nil, values: [Any] = []) -> String {
+    nonisolated static func cursorAfter(_ rowId: String) -> String {
+        query(method: "cursorAfter", values: [rowId])
+    }
+
+    nonisolated static func offset(_ value: Int) -> String {
+        query(method: "offset", values: [value])
+    }
+
+    nonisolated private static func query(method: String, column: String? = nil, values: [Any] = []) -> String {
         var payload: [String: Any] = ["method": method]
         if let column {
             // Appwrite's REST parser currently expects "attribute" for filtered/sorted row queries.

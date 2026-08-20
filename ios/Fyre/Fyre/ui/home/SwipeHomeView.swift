@@ -19,10 +19,7 @@ private struct SwipeProfile: Identifiable, Equatable {
     let bio: String
     let city: String?
     let gender: String?
-    let orientation: String?
     let intent: String?
-    let smokes: Bool?
-    let drinks: Bool?
     let instagramTag: String?
     let spotifyTag: String?
     let relationshipState: RelationshipStateDTO
@@ -31,7 +28,6 @@ private struct SwipeProfile: Identifiable, Equatable {
 private struct DiscoverProfileDetailsView: View {
     let profile: SwipeProfile
     let genderLabel: String?
-    let orientationLabel: String?
     let intentLabel: String?
 
     @Environment(\.dismiss) private var dismiss
@@ -53,10 +49,7 @@ private struct DiscoverProfileDetailsView: View {
 
                     infoBlock(title: L10n.tr("discover.details.section.info")) {
                         infoRow(L10n.tr("profile.gender"), value: genderLabel)
-                        infoRow(L10n.tr("profile.orientation"), value: orientationLabel)
                         infoRow(L10n.tr("profile.intent"), value: intentLabel)
-                        infoRow(L10n.tr("profile.smokes"), value: yesNo(profile.smokes))
-                        infoRow(L10n.tr("profile.drinks"), value: yesNo(profile.drinks))
                         infoRow(L10n.tr("profile.instagramTag"), value: profile.instagramTag)
                         infoRow(L10n.tr("profile.spotifyTag"), value: profile.spotifyTag)
                     }
@@ -119,11 +112,6 @@ private struct DiscoverProfileDetailsView: View {
                     .fontWeight(.semibold)
             }
         }
-    }
-
-    private func yesNo(_ value: Bool?) -> String? {
-        guard let value else { return nil }
-        return value ? L10n.tr("discover.details.value.yes") : L10n.tr("discover.details.value.no")
     }
 
     private func normalized(_ value: String?) -> String? {
@@ -192,6 +180,7 @@ struct SwipeHomeView: View {
     @State private var swipeErrorMessage: String?
     @State private var activePhotoIndices: [String: Int] = [:]
     @State private var selectedDetailsProfile: SwipeProfile?
+    @State private var profileLoadGeneration: UInt = 0
 
     var onMatchedThread: (ChatThread) -> Void = { _ in }
 
@@ -221,19 +210,20 @@ struct SwipeHomeView: View {
             .toolbarBackground(discoveryBarBackground, for: .tabBar)
             .toolbarBackground(.visible, for: .tabBar)
         }
-        .onAppear {
-            Task {
-                await loadProfiles()
-            }
-        }
         .task(id: discoverFilterID) {
-            await loadProfiles()
+            while !Task.isCancelled {
+                await loadProfiles()
+                do {
+                    try await Task.sleep(nanoseconds: 240_000_000_000)
+                } catch {
+                    return
+                }
+            }
         }
         .fullScreenCover(item: $selectedDetailsProfile) { profile in
             DiscoverProfileDetailsView(
                 profile: profile,
                 genderLabel: genderLabel(for: profile.gender),
-                orientationLabel: orientationLabel(for: profile.orientation),
                 intentLabel: intentLabel(for: profile.intent)
             )
         }
@@ -513,17 +503,15 @@ struct SwipeHomeView: View {
 
     @MainActor
     private func loadProfiles() async {
+        profileLoadGeneration &+= 1
+        let generation = profileLoadGeneration
+        let expectedUserId = store.currentUser?.appwriteUserId
         do {
             swipeErrorMessage = nil
             let dtos = try await services.backend.fetchDiscoverProfiles()
-            let visibleDTOs = dtos.filter { dto in
-                let excludeSmokers = store.currentUser?.excludeSmokers ?? false
-                let excludeDrinkers = store.currentUser?.excludeDrinkers ?? false
-                return !(excludeSmokers && (dto.smokes ?? false))
-                    && !(excludeDrinkers && (dto.drinks ?? false))
-            }
-
-            profiles = visibleDTOs.map {
+            guard generation == profileLoadGeneration,
+                  expectedUserId == store.currentUser?.appwriteUserId else { return }
+            profiles = dtos.map {
                 SwipeProfile(
                     id: $0.id,
                     name: $0.name,
@@ -535,10 +523,7 @@ struct SwipeHomeView: View {
                     bio: $0.bio,
                     city: nonEmpty($0.city),
                     gender: nonEmpty($0.gender),
-                    orientation: nonEmpty($0.orientation),
                     intent: nonEmpty($0.intent),
-                    smokes: $0.smokes,
-                    drinks: $0.drinks,
                     instagramTag: nonEmpty($0.instagramTag),
                     spotifyTag: nonEmpty($0.spotifyTag),
                     relationshipState: $0.relationshipState
@@ -552,6 +537,8 @@ struct SwipeHomeView: View {
                 self.selectedDetailsProfile = nil
             }
         } catch {
+            guard generation == profileLoadGeneration,
+                  expectedUserId == store.currentUser?.appwriteUserId else { return }
             profiles = []
             swipeErrorMessage = error.localizedDescription
         }
@@ -641,12 +628,10 @@ struct SwipeHomeView: View {
             return L10n.tr("profile.intent.friendship")
         case "casual":
             return L10n.tr("profile.intent.casual")
-        case "networking":
-            return "Networking"
-        case "notsure", "not_sure":
+        case "notsure":
             return L10n.tr("profile.intent.notSure")
         default:
-            return rawValue
+            return nil
         }
     }
 
@@ -664,29 +649,6 @@ struct SwipeHomeView: View {
             return L10n.tr("profile.gender.nonBinary")
         case "other":
             return L10n.tr("profile.gender.other")
-        default:
-            return rawValue
-        }
-    }
-
-    private func orientationLabel(for rawValue: String?) -> String? {
-        guard let normalized = nonEmpty(rawValue)?.lowercased() else {
-            return nil
-        }
-
-        switch normalized {
-        case "straight":
-            return L10n.tr("profile.orientation.straight")
-        case "gay":
-            return L10n.tr("profile.orientation.gay")
-        case "lesbian":
-            return L10n.tr("profile.orientation.lesbian")
-        case "bisexual":
-            return L10n.tr("profile.orientation.bisexual")
-        case "pansexual":
-            return L10n.tr("profile.orientation.pansexual")
-        case "other":
-            return L10n.tr("profile.orientation.other")
         default:
             return rawValue
         }

@@ -9,11 +9,10 @@ import Foundation
 
 enum ThreadNaming {
     nonisolated static let placeholderTitle = "Match"
-    nonisolated static let legacyPlaceholderTitle = "Fyre match"
 
     nonisolated static func isPlaceholderThreadName(_ name: String) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty || trimmed == placeholderTitle || trimmed == legacyPlaceholderTitle
+        return trimmed.isEmpty || trimmed == placeholderTitle
     }
 
     nonisolated static func displayName(firstName: String?, lastName: String?, email: String?, fallback: String?) -> String {

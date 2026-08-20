@@ -10,13 +10,19 @@ import Combine
 @MainActor
 final class AppRouter: ObservableObject {
     enum Root: Equatable {
+        case loading
         case auth
         case main
     }
 
-    @Published var root: Root = .auth
+    @Published private(set) var root: Root = .loading
+
+    func completeBootstrap(isLoggedIn: Bool) {
+        root = isLoggedIn ? .main : .auth
+    }
 
     func sync(isLoggedIn: Bool) {
+        guard root != .loading else { return }
         root = isLoggedIn ? .main : .auth
     }
 }

@@ -14,14 +14,55 @@ private enum MainTab: Hashable {
     case account
 }
 
+@MainActor
+enum MatchSeenStore {
+    private static let securePrefix = "match.seen.v1."
+
+    static func mark(_ threadId: String, currentUserId: String?) -> Bool {
+        let trimmed = threadId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let key = secureKey(currentUserId: currentUserId)
+        var seenThreadIds = load(key: key)
+        guard !seenThreadIds.contains(trimmed) else { return false }
+
+        seenThreadIds.append(trimmed)
+        if seenThreadIds.count > 200 {
+            seenThreadIds.removeFirst(seenThreadIds.count - 200)
+        }
+        do {
+            try SecurePersistenceStore.setData(try JSONEncoder().encode(seenThreadIds), forKey: key)
+        } catch {
+            try? SecurePersistenceStore.removeData(forKey: key)
+        }
+        return true
+    }
+
+    static func clearForLogout(currentUserId: String?) {
+        try? SecurePersistenceStore.removeData(forKey: secureKey(currentUserId: currentUserId))
+        try? SecurePersistenceStore.removeData(forKey: secureKey(currentUserId: nil))
+    }
+
+    private static func load(key: String) -> [String] {
+        do {
+            guard let data = try SecurePersistenceStore.data(forKey: key) else { return [] }
+            return try JSONDecoder().decode([String].self, from: data)
+        } catch {
+            try? SecurePersistenceStore.removeData(forKey: key)
+            return []
+        }
+    }
+
+    private static func secureKey(currentUserId: String?) -> String {
+        let trimmed = currentUserId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return securePrefix + (trimmed.isEmpty ? "anonymous" : trimmed)
+    }
+}
+
 struct MainTabView: View {
     private struct MatchBanner: Identifiable, Equatable {
         let id: String
         let thread: ChatThread
-    }
-
-    private enum DefaultsKey {
-        static let seenMatchThreadIdsPrefix = "main_seen_match_thread_ids"
     }
 
     @Environment(AppServices.self) private var services
@@ -166,7 +207,7 @@ struct MainTabView: View {
             },
             onError: { error in
 #if DEBUG
-                debugPrint("Main tab realtime error: \(error.localizedDescription)")
+                debugPrint("Main tab realtime error")
 #endif
             }
         )
@@ -248,7 +289,7 @@ struct MainTabView: View {
             showMatchBanner(for: thread)
         } catch {
 #if DEBUG
-            debugPrint("Realtime match fetch failed for \(threadId): \(error.localizedDescription)")
+            debugPrint("Realtime match fetch failed")
 #endif
         }
     }
@@ -263,7 +304,7 @@ struct MainTabView: View {
             surfaceNewMatchedThreads(from: threads)
         } catch {
 #if DEBUG
-            debugPrint("Unread badge refresh failed: \(error.localizedDescription)")
+            debugPrint("Unread badge refresh failed")
 #endif
         }
     }
@@ -310,24 +351,7 @@ struct MainTabView: View {
     }
 
     private func markMatchThreadSeen(_ threadId: String) -> Bool {
-        let trimmed = threadId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-
-        var seenThreadIds = UserDefaults.standard.stringArray(forKey: seenMatchThreadIdsKey) ?? []
-        guard !seenThreadIds.contains(trimmed) else { return false }
-
-        seenThreadIds.append(trimmed)
-        if seenThreadIds.count > 200 {
-            seenThreadIds.removeFirst(seenThreadIds.count - 200)
-        }
-        UserDefaults.standard.set(seenThreadIds, forKey: seenMatchThreadIdsKey)
-        return true
-    }
-
-    private var seenMatchThreadIdsKey: String {
-        let userId = store.currentUser?.appwriteUserId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let scope = userId?.isEmpty == false ? userId ?? "anonymous" : "anonymous"
-        return "\(DefaultsKey.seenMatchThreadIdsPrefix).\(scope)"
+        MatchSeenStore.mark(threadId, currentUserId: store.currentUser?.appwriteUserId)
     }
 }
 

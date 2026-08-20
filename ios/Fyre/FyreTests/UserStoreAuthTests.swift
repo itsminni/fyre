@@ -26,6 +26,19 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertFalse(UserStore.isValidEmail("name@example.com "))
     }
 
+    func testSessionBootstrapCompletesAndCanBeCalledAgainSafely() async {
+        resetLocalStoreState()
+        let store = UserStore.shared
+
+        XCTAssertFalse(store.isSessionBootstrapComplete)
+
+        await store.restoreRemoteSessionIfNeeded()
+        XCTAssertTrue(store.isSessionBootstrapComplete)
+
+        await store.restoreRemoteSessionIfNeeded()
+        XCTAssertTrue(store.isSessionBootstrapComplete)
+    }
+
     func testUserStoreSignUpAndLogin() async {
         resetLocalStoreState()
         let store = UserStore.shared
@@ -42,6 +55,21 @@ final class UserStoreAuthTests: XCTestCase {
         let loginError = await store.logIn(email: email, password: "password123")
         XCTAssertNil(loginError)
         XCTAssertEqual(store.currentUser?.email, email)
+    }
+
+    func testResetDropsMemoryOnlyLocalAccount() async {
+        resetLocalStoreState()
+        let store = UserStore.shared
+        let email = "\(UUID().uuidString.lowercased())@example.test"
+
+        let signUpError = await store.signUp(email: email, password: "password123")
+        XCTAssertNil(signUpError)
+
+        store.resetForTests()
+
+        let loginError = await store.logIn(email: email, password: "password123")
+        XCTAssertEqual(loginError, L10n.tr("error.login.userNotFound"))
+        XCTAssertNil(store.currentUser)
     }
 
     func testSignUpRejectsEmailsWithSpaces() async {
@@ -74,6 +102,24 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertEqual(snapshot.waitingListCount, 0)
         XCTAssertTrue(store.isCurrentUserRegisteredForMainEvent)
         XCTAssertFalse(store.isCurrentUserWaitingForMainEvent)
+    }
+
+    func testMockMainEventUsesExplicitLocalDeadlines() throws {
+        resetLocalStoreState()
+        let snapshot = UserStore.shared.mainEventSnapshot
+        let registrationClosesAt = try XCTUnwrap(snapshot.registrationClosesAt)
+        let cancellationClosesAt = try XCTUnwrap(snapshot.cancellationClosesAt)
+
+        XCTAssertEqual(
+            registrationClosesAt.timeIntervalSince(snapshot.date),
+            -(24 * 60 * 60),
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            cancellationClosesAt.timeIntervalSince(snapshot.date),
+            -(48 * 60 * 60),
+            accuracy: 0.001
+        )
     }
 
     func testMainEventWaitlistsAfterGenderCapAndPromotesWhenSameGenderSlotOpens() async {
@@ -132,38 +178,24 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertNil(signUpError)
         let setGenderError = await store.setProfileGender(.male)
         XCTAssertNil(setGenderError)
-        let initialProfileError = await store.updateProfile(
+        let initialProfileError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
-            orientation: .straight,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 28,
+            orientation: .straight
         )
         XCTAssertNil(initialProfileError)
         let initialRegistration = await store.registerForMainEvent()
         XCTAssertNil(initialRegistration)
         XCTAssertTrue(store.isCurrentUserRegisteredForMainEvent)
 
-        let changedOrientationError = await store.updateProfile(
+        let changedOrientationError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
-            orientation: .bisexual,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 28,
+            orientation: .bisexual
         )
         XCTAssertNil(changedOrientationError)
         XCTAssertFalse(store.isCurrentUserRegisteredForMainEvent)
@@ -178,19 +210,12 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertNil(signUpError)
         let setGenderError = await store.setProfileGender(.male)
         XCTAssertNil(setGenderError)
-        let profileError = await store.updateProfile(
+        let profileError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
-            orientation: .straight,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 28,
+            orientation: .straight
         )
         XCTAssertNil(profileError)
         let initialRegistration = await store.registerForMainEvent()
@@ -211,19 +236,12 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertNil(signUpError)
         let setGenderError = await store.setProfileGender(.female)
         XCTAssertNil(setGenderError)
-        let profileError = await store.updateProfile(
+        let profileError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -24, to: Date()),
-            orientation: .bisexual,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 24,
+            orientation: .bisexual
         )
         XCTAssertNil(profileError)
 
@@ -241,19 +259,12 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertNil(signUpError)
         let setGenderError = await store.setProfileGender(.other)
         XCTAssertNil(setGenderError)
-        let profileError = await store.updateProfile(
+        let profileError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -24, to: Date()),
-            orientation: .straight,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 24,
+            orientation: .straight
         )
         XCTAssertNil(profileError)
 
@@ -271,19 +282,12 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertNil(signUpError)
         let setGenderError = await store.setProfileGender(.male)
         XCTAssertNil(setGenderError)
-        let initialProfileError = await store.updateProfile(
+        let initialProfileError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -29, to: Date()),
-            orientation: .straight,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 29,
+            orientation: .straight
         )
         XCTAssertNil(initialProfileError)
         let initialRegistration = await store.registerForMainEvent()
@@ -291,19 +295,12 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertTrue(store.isCurrentUserRegisteredForMainEvent)
         XCTAssertTrue(store.willCurrentUserLoseMainEventRegistrations(orientation: .bisexual))
 
-        let changedOrientationError = await store.updateProfile(
+        let changedOrientationError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -29, to: Date()),
-            orientation: .bisexual,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 29,
+            orientation: .bisexual
         )
         XCTAssertNil(changedOrientationError)
 
@@ -331,7 +328,7 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertFalse(store.isCurrentUserWaitingForMainEvent)
     }
 
-    func testUpdateProfilePersistsShowMePreference() async {
+    func testUpdateProfilePersistsPreferredGenders() async {
         resetLocalStoreState()
         let store = UserStore.shared
         let email = "\(UUID().uuidString.lowercased())@example.test"
@@ -340,24 +337,17 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertNil(signUpError)
         let setGenderError = await store.setProfileGender(.male)
         XCTAssertNil(setGenderError)
-        let profileError = await store.updateProfile(
+        let profileError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
+            age: 28,
             orientation: .straight,
-            showMe: .women,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            preferredGenders: [.female]
         )
         XCTAssertNil(profileError)
 
-        XCTAssertEqual(store.currentUser?.showMe, .women)
+        XCTAssertEqual(store.currentUser?.resolvedPreferredGenders, [.female])
     }
 
     func testUpdateProfilePersistsCity() async {
@@ -369,31 +359,79 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertNil(signUpError)
         let setGenderError = await store.setProfileGender(.female)
         XCTAssertNil(setGenderError)
-        let profileError = await store.updateProfile(
+        let profileError = await updateCompleteProfile(
+            store: store,
             firstName: "A",
             lastName: "B",
             city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -26, to: Date()),
-            orientation: .straight,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 26,
+            orientation: .straight
         )
         XCTAssertNil(profileError)
 
         XCTAssertEqual(store.currentUser?.city, "Rome")
     }
 
-    func testShowMeMatchesExpectedGenders() {
-        XCTAssertTrue(UserShowMe.men.matches(.male))
-        XCTAssertFalse(UserShowMe.men.matches(.female))
-        XCTAssertTrue(UserShowMe.women.matches(.female))
-        XCTAssertFalse(UserShowMe.women.matches(.nonBinary))
-        XCTAssertTrue(UserShowMe.everyone.matches(.other))
+    func testPreferredGendersKeepCanonicalOrder() {
+        var user = User(email: "profile@example.test")
+        user.preferredGenders = [.other, .female]
+
+        XCTAssertEqual(user.resolvedPreferredGenders, [.female, .other])
+    }
+
+    func testProfileCompletenessRequiresExplicitCanonicalFieldsButNotCoordinates() throws {
+        var user = User(email: "complete@example.test")
+        user.firstName = "Ada"
+        user.city = "Rome"
+        user.birthDate = try XCTUnwrap(Calendar.current.date(byAdding: .year, value: -24, to: Date()))
+        user.gender = .female
+        user.orientation = .bisexual
+        user.bio = "Profilo completo"
+        user.preferredGenders = [.female, .other]
+
+        XCTAssertNil(user.latitude)
+        XCTAssertNil(user.longitude)
+        XCTAssertTrue(user.isProfileComplete)
+
+        var missingPreferences = user
+        missingPreferences.preferredGenders = nil
+        XCTAssertEqual(missingPreferences.resolvedPreferredGenders, UserStore.defaultPreferredGenders)
+        XCTAssertFalse(missingPreferences.isProfileComplete)
+
+        var emptyPreferences = user
+        emptyPreferences.preferredGenders = []
+        XCTAssertFalse(emptyPreferences.isProfileComplete)
+
+        var missingOrientation = user
+        missingOrientation.orientation = nil
+        XCTAssertFalse(missingOrientation.isProfileComplete)
+
+        var underage = user
+        underage.birthDate = try XCTUnwrap(Calendar.current.date(byAdding: .year, value: -17, to: Date()))
+        XCTAssertFalse(underage.isProfileComplete)
+    }
+
+    func testDiscoveryPreferencesStayInsideCanonicalBounds() {
+        var user = User(email: "filters@example.test")
+        user.minPreferredAge = 99
+        user.maxPreferredAge = 18
+        user.maxDistanceKm = 10_000
+
+        XCTAssertEqual(user.resolvedMinPreferredAge, 98)
+        XCTAssertEqual(user.resolvedMaxPreferredAge, 99)
+        XCTAssertEqual(user.normalizedMaxDistanceKm, 999)
+
+        user.minPreferredAge = 1
+        user.maxPreferredAge = 200
+        user.maxDistanceKm = 1
+
+        XCTAssertEqual(user.resolvedMinPreferredAge, 18)
+        XCTAssertEqual(user.resolvedMaxPreferredAge, 99)
+        XCTAssertEqual(user.normalizedMaxDistanceKm, 5)
+
+        user.maxDistanceKm = nil
+        XCTAssertNil(user.normalizedMaxDistanceKm)
+        XCTAssertNil(UserIntent(rawValue: "networking"))
     }
 
     private func resetLocalStoreState() {
@@ -415,21 +453,45 @@ final class UserStoreAuthTests: XCTestCase {
         XCTAssertNil(signUpError)
         let setGenderError = await store.setProfileGender(gender)
         XCTAssertNil(setGenderError)
-        let profileError = await store.updateProfile(
+        let profileError = await updateCompleteProfile(
+            store: store,
             firstName: firstName,
             lastName: lastName,
-            city: "Rome",
-            birthDate: Calendar.current.date(byAdding: .year, value: -28, to: Date()),
-            orientation: .straight,
-            smokes: false,
-            drinks: true,
-            hobbies: "",
-            passions: "",
-            lookingFor: "",
-            favoriteSong: "",
-            favoriteMovie: ""
+            age: 28,
+            orientation: .straight
         )
         XCTAssertNil(profileError)
+    }
+
+    private func updateCompleteProfile(
+        store: UserStore,
+        firstName: String,
+        lastName: String,
+        city: String = "Rome",
+        age: Int,
+        orientation: UserOrientation,
+        preferredGenders: [UserGender] = UserStore.defaultPreferredGenders
+    ) async -> String? {
+        await store.updateProfile(
+            firstName: firstName,
+            lastName: lastName,
+            city: city,
+            birthDate: Calendar.current.date(byAdding: .year, value: -age, to: Date()),
+            orientation: orientation,
+            bio: "Profilo di test completo",
+            intent: .relationship,
+            interests: "Musica",
+            instagramTag: "",
+            spotifyTag: "",
+            preferredGenders: preferredGenders,
+            minPreferredAge: 18,
+            maxPreferredAge: 35,
+            maxDistanceKm: 50,
+            excludeSmokers: false,
+            excludeDrinkers: false,
+            smokes: false,
+            drinks: true
+        )
     }
 
     @discardableResult
