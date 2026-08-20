@@ -23,20 +23,13 @@ export type TranslationKey =
   | 'auth.signup.loading'
   | 'auth.noAccount'
   | 'auth.hasAccount'
-  | 'auth.termsPrefix'
-  | 'auth.termsLink'
-  | 'terms.title'
-  | 'terms.subtitle'
-  | 'terms.body1'
-  | 'terms.body2'
-  | 'terms.back'
-  | 'mobile.title.ios'
-  | 'mobile.title.android'
-  | 'mobile.title.generic'
-  | 'mobile.body'
-  | 'mobile.openIos'
-  | 'mobile.openAndroid'
-  | 'mobile.continue'
+  | 'auth.demoNoticePrefix'
+  | 'auth.demoNoticeLink'
+  | 'demoNotice.title'
+  | 'demoNotice.subtitle'
+  | 'demoNotice.body1'
+  | 'demoNotice.body2'
+  | 'demoNotice.back'
   | 'home.title'
   | 'home.skip'
   | 'home.like'
@@ -66,9 +59,10 @@ export type TranslationKey =
   | 'profileSetup.photos.remove'
   | 'profileSetup.required.title'
   | 'profileSetup.city.placeholder'
+  | 'geocoding.attribution'
   | 'profileSetup.discovery.title'
   | 'profileSetup.discovery.subtitle'
-  | 'profileSetup.showMe.title'
+  | 'profileSetup.preferredGenders.title'
   | 'profileSetup.genderPreference.required'
   | 'profileSetup.maxDistance.placeholder'
   | 'profileSetup.excludeSmokers'
@@ -156,7 +150,6 @@ export type TranslationKey =
   | 'account.profileVisibility.title'
   | 'account.profileVisibility.subtitle'
   | 'account.bio'
-  | 'account.showMe'
   | 'account.intent'
   | 'account.minAge'
   | 'account.maxAge'
@@ -178,10 +171,6 @@ export type TranslationKey =
   | 'account.notifications.browserPush'
   | 'account.notifications.requestPermission'
   | 'account.notifications.markRead'
-  | 'account.security.title'
-  | 'account.security.subtitle'
-  | 'account.security.passwordReset'
-  | 'account.security.emailChange'
   | 'account.security.logout'
   | 'account.events.title'
   | 'account.events.empty'
@@ -190,7 +179,6 @@ export type TranslationKey =
   | 'account.tab.preferences'
   | 'account.tab.notifications'
   | 'account.tab.appearance'
-  | 'account.tab.security'
   | 'account.tab.events'
   | 'orientation.straight'
   | 'orientation.gay'
@@ -198,9 +186,6 @@ export type TranslationKey =
   | 'orientation.bisexual'
   | 'orientation.pansexual'
   | 'orientation.other'
-  | 'showMe.men'
-  | 'showMe.women'
-  | 'showMe.everyone'
   | 'gender.male'
   | 'gender.female'
   | 'gender.nonBinary'
@@ -210,6 +195,7 @@ export type TranslationKey =
   | 'eventStatus.cancelled'
   | 'eventStatus.promoted'
   | 'events.title'
+  | 'events.unavailable'
   | 'events.badge.confirmed'
   | 'events.badge.pending'
   | 'events.preview.openDetail'
@@ -262,7 +248,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'nav.discovery': 'Discovery',
     'nav.messages': 'Messaggi',
     'nav.events': 'Eventi',
-    'nav.profile': 'Profile',
+    'nav.profile': 'Profilo',
     'language.italian': 'Italiano',
     'language.english': 'English',
     'landing.tagline': 'Dalla scintilla al Fyre',
@@ -279,20 +265,13 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'auth.signup.loading': 'Registrazione in corso...',
     'auth.noAccount': 'Non hai un account?',
     'auth.hasAccount': 'Hai già un account?',
-    'auth.termsPrefix': 'Accetto i',
-    'auth.termsLink': 'Termini e l\'Informativa sulla privacy',
-    'terms.title': 'Informativa su Termini e Privacy',
-    'terms.subtitle': 'Termini e Privacy',
-    'terms.body1': 'Trattiamo i dati forniti dall\'utente solo e soltanto per consentire l\'uso dei servizi e delle relative funzioni dell\'app.',
-    'terms.body2': 'I dati non sono condivisi con nessun altro.',
-    'terms.back': 'Torna alla registrazione',
-    'mobile.title.ios': 'Usa Fyre su iPhone',
-    'mobile.title.android': 'Usa Fyre su Android',
-    'mobile.title.generic': 'Usa l\'app Fyre',
-    'mobile.body': 'La versione mobile è pensata per l\'app nativa. Per chat, discovery e notifiche usa l\'app sul tuo dispositivo.',
-    'mobile.openIos': 'Apri app iOS',
-    'mobile.openAndroid': 'Apri app Android',
-    'mobile.continue': 'Continua sul web',
+    'auth.demoNoticePrefix': 'Ho letto la',
+    'auth.demoNoticeLink': 'nota sulla demo e sui dati',
+    'demoNotice.title': 'Dimostrazione di un progetto scolastico',
+    'demoNotice.subtitle': 'Nota demo',
+    'demoNotice.body1': 'Fyre è un progetto scolastico in pre-release. Negli ambienti dimostrativi usa soltanto dati sintetici.',
+    'demoNotice.body2': 'Il client comunica con Appwrite e, per la ricerca città, con Photon su dati OpenStreetMap. Prima di offrire un servizio reale, il gestore deve fornire termini e informativa privacy completi.',
+    'demoNotice.back': 'Torna alla registrazione',
     'home.title': 'Discovery',
     'home.skip': 'Salta',
     'home.like': 'Fyre',
@@ -322,9 +301,10 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'profileSetup.photos.remove': 'Rimuovi foto',
     'profileSetup.required.title': 'Obbligatorio',
     'profileSetup.city.placeholder': 'Es. Reggio Emilia',
+    'geocoding.attribution': 'Dati © collaboratori OpenStreetMap',
     'profileSetup.discovery.title': 'Scoperta',
     'profileSetup.discovery.subtitle': 'Questi campi cambiano chi vedi e quanto i profili risultano rilevanti.',
-    'profileSetup.showMe.title': 'Mostrami *',
+    'profileSetup.preferredGenders.title': 'Generi preferiti *',
     'profileSetup.genderPreference.required': 'Seleziona almeno una preferenza di genere.',
     'profileSetup.maxDistance.placeholder': 'Nessun limite',
     'profileSetup.excludeSmokers': 'Nascondi chi fuma',
@@ -369,9 +349,9 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'messages.sending': 'Invio...',
     'messages.sent': 'Inviato',
     'messages.typing': 'Sta scrivendo...',
-    'account.title': 'Profile',
+    'account.title': 'Profilo',
     'account.info.title': 'Informazioni',
-    'account.info.subtitle': 'Solo alcuni dati restano bloccati dopo il setup. Se devi modificarli, invia una mail al supporto.',
+    'account.info.subtitle': 'Alcuni dati restano bloccati dopo il setup; questa demo non offre ancora un flusso per modificarli.',
     'account.discovery.title': 'Scoperta',
     'account.discovery.subtitle': 'Questi campi cambiano chi vedi e quanto i profili risultano rilevanti.',
     'account.appearance.title': 'Aspetto app',
@@ -412,7 +392,6 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'account.profileVisibility.title': 'Preferenze profilo',
     'account.profileVisibility.subtitle': 'Scegli quali informazioni mostrare agli altri profili.',
     'account.bio': 'Bio',
-    'account.showMe': 'Mostrami',
     'account.intent': 'Cerco',
     'account.minAge': 'Età minima',
     'account.maxAge': 'Età massima',
@@ -434,10 +413,6 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'account.notifications.browserPush': 'Push browser',
     'account.notifications.requestPermission': 'Richiedi permesso push ({permission})',
     'account.notifications.markRead': 'Segna notifiche lette',
-    'account.security.title': 'Sicurezza',
-    'account.security.subtitle': 'Per resettare la password o cambiare email, invia una mail al supporto includendo l\'email del profilo qui sotto.',
-    'account.security.passwordReset': 'Richiedi reset password',
-    'account.security.emailChange': 'Richiedi cambio email',
     'account.security.logout': 'Disconnettiti',
     'account.events.title': 'Le mie iscrizioni eventi',
     'account.events.empty': 'Nessuna attività eventi futuri.',
@@ -446,7 +421,6 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'account.tab.preferences': 'Preferenze',
     'account.tab.notifications': 'Notifiche',
     'account.tab.appearance': 'Aspetto',
-    'account.tab.security': 'Sicurezza',
     'account.tab.events': 'Eventi',
     'orientation.straight': 'Etero',
     'orientation.gay': 'Gay',
@@ -454,9 +428,6 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'orientation.bisexual': 'Bisessuale',
     'orientation.pansexual': 'Pansessuale',
     'orientation.other': 'Altro',
-    'showMe.men': 'Uomini',
-    'showMe.women': 'Donne',
-    'showMe.everyone': 'Tutti',
     'gender.male': 'Uomo',
     'gender.female': 'Donna',
     'gender.nonBinary': 'Non binario',
@@ -466,6 +437,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'eventStatus.cancelled': 'Annullato',
     'eventStatus.promoted': 'Promosso dalla waiting list',
     'events.title': 'Eventi',
+    'events.unavailable': 'Nessun evento live è disponibile in questo momento.',
     'events.badge.confirmed': 'Confermato',
     'events.badge.pending': 'In attesa',
     'events.preview.openDetail': 'Apri dettaglio evento',
@@ -534,20 +506,13 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'auth.signup.loading': 'Creating account...',
     'auth.noAccount': 'Don\'t have an account?',
     'auth.hasAccount': 'Already have an account?',
-    'auth.termsPrefix': 'I accept the',
-    'auth.termsLink': 'Terms and Privacy Policy',
-    'terms.title': 'Terms and Privacy Notice',
-    'terms.subtitle': 'Terms and Privacy',
-    'terms.body1': 'We process the data you provide only to enable the app services and related features.',
-    'terms.body2': 'Data is not shared with anyone else.',
-    'terms.back': 'Back to sign up',
-    'mobile.title.ios': 'Use Fyre on iPhone',
-    'mobile.title.android': 'Use Fyre on Android',
-    'mobile.title.generic': 'Use the Fyre app',
-    'mobile.body': 'The mobile experience is designed for the native app. Use the app on your device for chat, discovery, and notifications.',
-    'mobile.openIos': 'Open iOS app',
-    'mobile.openAndroid': 'Open Android app',
-    'mobile.continue': 'Continue on web',
+    'auth.demoNoticePrefix': 'I have read the',
+    'auth.demoNoticeLink': 'demo and data notice',
+    'demoNotice.title': 'School project demonstration',
+    'demoNotice.subtitle': 'Demo notice',
+    'demoNotice.body1': 'Fyre is a pre-release school project. Use synthetic data only in demonstration environments.',
+    'demoNotice.body2': 'The client communicates with Appwrite and, for city search, Photon using OpenStreetMap data. Before any real-world service, the operator must provide complete terms and a privacy notice.',
+    'demoNotice.back': 'Back to sign up',
     'home.title': 'Discovery',
     'home.skip': 'Skip',
     'home.like': 'Fyre',
@@ -577,9 +542,10 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'profileSetup.photos.remove': 'Remove photo',
     'profileSetup.required.title': 'Required',
     'profileSetup.city.placeholder': 'E.g. Reggio Emilia',
+    'geocoding.attribution': 'Data © OpenStreetMap contributors',
     'profileSetup.discovery.title': 'Discovery',
     'profileSetup.discovery.subtitle': 'These fields shape who you see and how relevant profiles are.',
-    'profileSetup.showMe.title': 'Show me *',
+    'profileSetup.preferredGenders.title': 'Preferred genders *',
     'profileSetup.genderPreference.required': 'Select at least one gender preference.',
     'profileSetup.maxDistance.placeholder': 'No limit',
     'profileSetup.excludeSmokers': 'Hide smokers',
@@ -626,7 +592,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'messages.typing': 'Typing...',
     'account.title': 'Profile',
     'account.info.title': 'Information',
-    'account.info.subtitle': 'Only some details stay locked after setup. If you need to change them, email support.',
+    'account.info.subtitle': 'Some details stay locked after setup; this demo does not yet provide a flow to change them.',
     'account.discovery.title': 'Discovery',
     'account.discovery.subtitle': 'These fields shape who you see and how relevant profiles are.',
     'account.appearance.title': 'App appearance',
@@ -667,7 +633,6 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'account.profileVisibility.title': 'Profile preferences',
     'account.profileVisibility.subtitle': 'Choose which details are shown to other profiles.',
     'account.bio': 'Bio',
-    'account.showMe': 'Show me',
     'account.intent': 'Looking for',
     'account.minAge': 'Minimum age',
     'account.maxAge': 'Maximum age',
@@ -689,10 +654,6 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'account.notifications.browserPush': 'Browser push',
     'account.notifications.requestPermission': 'Request push permission ({permission})',
     'account.notifications.markRead': 'Mark notifications read',
-    'account.security.title': 'Security',
-    'account.security.subtitle': 'To reset your password or change email, email support and include the profile email below.',
-    'account.security.passwordReset': 'Request password reset',
-    'account.security.emailChange': 'Request email change',
     'account.security.logout': 'Log out',
     'account.events.title': 'My event registrations',
     'account.events.empty': 'No upcoming event activity.',
@@ -701,7 +662,6 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'account.tab.preferences': 'Preferences',
     'account.tab.notifications': 'Notifications',
     'account.tab.appearance': 'Appearance',
-    'account.tab.security': 'Security',
     'account.tab.events': 'Events',
     'orientation.straight': 'Straight',
     'orientation.gay': 'Gay',
@@ -709,9 +669,6 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'orientation.bisexual': 'Bisexual',
     'orientation.pansexual': 'Pansexual',
     'orientation.other': 'Other',
-    'showMe.men': 'Men',
-    'showMe.women': 'Women',
-    'showMe.everyone': 'Everyone',
     'gender.male': 'Man',
     'gender.female': 'Woman',
     'gender.nonBinary': 'Non-binary',
@@ -721,6 +678,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'eventStatus.cancelled': 'Cancelled',
     'eventStatus.promoted': 'Promoted from waitlist',
     'events.title': 'Events',
+    'events.unavailable': 'No live event is available right now.',
     'events.badge.confirmed': 'Confirmed',
     'events.badge.pending': 'Pending',
     'events.preview.openDetail': 'Open event details',

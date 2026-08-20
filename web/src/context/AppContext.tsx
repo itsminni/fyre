@@ -30,9 +30,7 @@ import {
   User,
   UserGender,
   UserOrientation,
-  inferShowMeFromPreferredGenders,
   calculateAge,
-  createEmptyUser,
   getDisplayName,
   isProfileComplete,
   isValidEmail,
@@ -41,17 +39,15 @@ import {
 } from '../types/models';
 import {
   loadPersistedState,
-  persistState
+  persistState,
+  removePersistedState,
+  withoutSensitivePersistedData
 } from '../services/persistence';
 import {
-  cancelMainEventRegistration,
-  getFlags,
-  getSnapshot,
-  registerForMainEvent,
-  removeUserFromMainEvent,
-  willLoseMainEventRegistrations
-} from '../services/eventEngine';
-import { formatTime } from '../data/mockData';
+  createEmptyMainEventConfig,
+  createEmptyMainEventInfo,
+  createEmptyMainEventSnapshot
+} from '../data/appDefaults';
 import { loadAppwriteConfiguration } from '../services/appwriteConfiguration';
 import { AppwriteService, AppwriteServiceError, EventRemoteState } from '../services/appwriteService';
 
@@ -68,7 +64,6 @@ interface SendMessageInput {
 }
 
 type SwipeDecision = 'left' | 'right';
-type ParticipantBucket = 'participants' | 'waitingList';
 type RelationshipAction = 'archive' | 'unmatch' | 'block';
 
 interface SwipeDecisionResult {
@@ -85,11 +80,12 @@ interface EventAdminActionResult {
 
 interface AppContextValue {
   persisted: PersistedAppState;
-  isBackendMode: boolean;
+  isAuthInitialized: boolean;
   currentUser: User | null;
   discoverProfiles: DiscoverProfile[];
   mainEventConfig: MainEventConfig;
   mainEventInfo: MainEventInfo;
+  hasMainEvent: boolean;
   isEventAdmin: boolean;
   isEventAdminEnabled: boolean;
   mainEventSnapshot: MainEventSnapshot;
@@ -109,42 +105,29 @@ interface AppContextValue {
   updateProfile(input: ProfileUpdateInput): Promise<string | null>;
   updateAccountPreferences(input: {
     city?: string | null;
-    cityLat?: number;
-    cityLng?: number;
+    latitude?: number;
+    longitude?: number;
     orientation: UserOrientation;
-    showMe: User['showMe'];
     preferredGenders: UserGender[];
     smokes: boolean;
     drinks: boolean;
     excludeSmokers: boolean;
     excludeDrinkers: boolean;
     bio: string;
-    ageRangeMin: number;
-    ageRangeMax: number;
+    minPreferredAge: number;
+    maxPreferredAge: number;
     maxDistanceKm?: number;
     intent: MatchIntent;
-    hobbies: string;
-    passions: string;
-    lookingFor: string;
-    instagram: string;
+    interests: string;
     instagramTag: string;
-    telegram: string;
     spotifyTag: string;
-    website: string;
-    favoriteSong: string;
-    favoriteMovie: string;
   }): Promise<string | null>;
-  willUserLoseEventRegistrations(nextGender: UserGender, nextOrientation: UserOrientation): boolean;
+  willUserLoseEventRegistrations(
+    nextGender: UserGender | undefined,
+    nextOrientation: UserOrientation | undefined
+  ): boolean;
   registerCurrentUserForMainEvent(): Promise<EventFeedback>;
   cancelCurrentUserMainEventRegistration(): Promise<EventFeedback>;
-  updateMainEventConfig(patch: Partial<MainEventConfig>): string | null;
-  updateMainEventInfo(patch: Partial<MainEventInfo>): void;
-  adminAddMainEventParticipant(
-    email: string,
-    gender: UserGender,
-    destination: ParticipantBucket
-  ): string | null;
-  adminRemoveMainEventParticipant(email: string, destination: ParticipantBucket): string | null;
   sendMessage(input: SendMessageInput): void;
   markThreadRead(threadId: string): void;
   setThreadNotifications(threadId: string, enabled: boolean): Promise<string | null>;
@@ -187,8 +170,35 @@ const EVENT_MESSAGE_BY_KEY: Record<string, string> = {
 
 const appwriteConfiguration = loadAppwriteConfiguration();
 const appwriteService = new AppwriteService(appwriteConfiguration);
-const IS_BACKEND_MODE = true;
-const IS_EVENT_ADMIN_ENABLED = IS_BACKEND_MODE && Boolean(appwriteConfiguration?.eventAdminFunctionId);
+const IS_EVENT_ADMIN_ENABLED = Boolean(appwriteConfiguration.eventAdminFunctionId);
+const LOGOUT_TOMBSTONE_KEY = 'fyre_backend_logout_pending_v1';
+const DISCOVERY_TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
+
+function hasLogoutTombstone(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(LOGOUT_TOMBSTONE_KEY) === '1';
+  } catch {
+    return true;
+  }
+}
+
+function setLogoutTombstone(isPending: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    if (isPending) {
+      window.localStorage.setItem(LOGOUT_TOMBSTONE_KEY, '1');
+    } else {
+      window.localStorage.removeItem(LOGOUT_TOMBSTONE_KEY);
+    }
+  } catch {
+    // Storage failure remains fail-closed for the current in-memory session.
+  }
+}
 
 function upsertUser(users: User[], user: User): User[] {
   const normalizedUser = normalizeUser(user);
@@ -206,8 +216,7 @@ function upsertUser(users: User[], user: User): User[] {
   const nextUsers = [...users];
   nextUsers[existingIndex] = normalizeUser({
     ...nextUsers[existingIndex],
-    ...normalizedUser,
-    password: ''
+    ...normalizedUser
   });
   return nextUsers;
 }
@@ -338,7 +347,7 @@ function normalizePreferredGenders(preferredGenders: UserGender[]): UserGender[]
 }
 
 function normalizeSocialHandle(value: string): string {
-  return value.trim().replace(/^@+/, '').replace(/\s+/g, '');
+  return value.trim().replace(/@/g, '').replace(/\s+/g, '').slice(0, 64);
 }
 
 function normalizeMaxDistanceKm(value: number | undefined): number | undefined {
@@ -350,7 +359,7 @@ function normalizeMaxDistanceKm(value: number | undefined): number | undefined {
     return undefined;
   }
 
-  return Math.max(Math.floor(value), 5);
+  return Math.min(Math.max(Math.floor(value), 5), 999);
 }
 
 function shouldPreferCachedThread(cachedThread: ChatThread, fetchedThread: ChatThread): boolean {
@@ -451,7 +460,7 @@ function mergeChatMessages(existingMessages: ChatMessage[], incomingMessages: Ch
   return dedupeChatMessages([...existingMessages, ...incomingMessages]);
 }
 
-function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThread[]): ChatThread[] {
+export function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThread[]): ChatThread[] {
   const merged = fetchedThreads.map((thread) => ({
     ...thread,
     messages: dedupeChatMessages(thread.messages)
@@ -472,7 +481,14 @@ function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThrea
           : merged[existingIndex]),
         messages: mergedMessages
       };
-    } else if (!fetchedThreadIds.has(normalizedCachedThread.id)) {
+    } else if (
+      !fetchedThreadIds.has(normalizedCachedThread.id) &&
+      normalizedCachedThread.messages.some((message) => (
+        isClientGeneratedMessageId(message.id) && message.deliveryState === 'sending'
+      ))
+    ) {
+      // Preserve only an explicit optimistic send. A successful authoritative
+      // fetch must remove conversations whose ACL was revoked by block/unmatch.
       merged.unshift(normalizedCachedThread);
     }
   }
@@ -487,34 +503,11 @@ function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThrea
   });
 }
 
-function createHistoryEntry(
-  email: string,
-  status: EventHistoryItem['status'],
-  config: MainEventConfig
-): EventHistoryItem {
-  return {
-    id: crypto.randomUUID(),
-    email,
-    eventTitle: config.title,
-    eventDate: config.date,
-    status,
-    timestamp: nowIso()
-  };
-}
-
 export function AppProvider({ children }: { children: ReactNode }): JSX.Element {
-  const [persisted, setPersisted] = useState<PersistedAppState>(() => {
-    const initialState = loadPersistedState();
-    if (!IS_BACKEND_MODE) {
-      return initialState;
-    }
-
-    return {
-      ...initialState,
-      threads: [],
-      notifications: []
-    };
-  });
+  const [persisted, setPersisted] = useState<PersistedAppState>(() =>
+    withoutSensitivePersistedData(loadPersistedState())
+  );
+  const [isAuthInitialized, setIsAuthInitialized] = useState(false);
   const [discoverProfiles, setDiscoverProfiles] = useState<DiscoverProfile[]>([]);
   const [remoteMainEventState, setRemoteMainEventState] = useState<EventRemoteState | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<
@@ -526,62 +519,94 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     return Notification.permission;
   });
 
-  const pendingTimeoutsRef = useRef<number[]>([]);
   const lastBrowserNotificationRef = useRef<string | null>(null);
+  const sessionInvalidationRef = useRef(0);
+  const eventRefreshRequestRef = useRef(0);
+  const threadRefreshRequestRef = useRef(0);
+  const discoveryRefreshRequestRef = useRef(0);
+  const authQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const runSerializedAuth = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const result = authQueueRef.current.then(operation, operation);
+    authQueueRef.current = result.then(() => undefined, () => undefined);
+    return result;
+  }, []);
+
+  const finishPendingBackendLogout = useCallback(async (): Promise<boolean> => {
+    if (!hasLogoutTombstone()) {
+      return true;
+    }
+    try {
+      await appwriteService.logOut();
+      setLogoutTombstone(false);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
-    persistState(persisted);
+    persistState(withoutSensitivePersistedData(persisted));
   }, [persisted]);
 
-  useEffect(
-    () => () => {
-      pendingTimeoutsRef.current.forEach((timer) => window.clearTimeout(timer));
-      pendingTimeoutsRef.current = [];
-    },
-    []
-  );
-
-  const mainEventConfig = persisted.mainEventConfig;
-  const mainEventInfo = persisted.mainEventInfo;
   const currentUser = useMemo(() => {
-    if (!persisted.currentUserEmail) {
+    if (!isAuthInitialized || !persisted.currentUserEmail) {
       return null;
     }
 
     return (
       persisted.users.find((candidate) => candidate.email === persisted.currentUserEmail) ?? null
     );
-  }, [persisted.currentUserEmail, persisted.users]);
+  }, [isAuthInitialized, persisted.currentUserEmail, persisted.users]);
 
   const refreshRemoteMainEventState = useCallback(async (user: User | null): Promise<EventRemoteState | null> => {
-    if (!IS_BACKEND_MODE || !appwriteService) {
-      setRemoteMainEventState(null);
-      return null;
-    }
-
+    const sessionGeneration = sessionInvalidationRef.current;
+    const requestGeneration = ++eventRefreshRequestRef.current;
     try {
       const nextState = await appwriteService.fetchMainEventState(user);
+      if (
+        sessionGeneration !== sessionInvalidationRef.current ||
+        requestGeneration !== eventRefreshRequestRef.current
+      ) {
+        return null;
+      }
       setRemoteMainEventState(nextState);
       return nextState;
     } catch {
+      if (
+        sessionGeneration !== sessionInvalidationRef.current ||
+        requestGeneration !== eventRefreshRequestRef.current
+      ) {
+        return null;
+      }
       setRemoteMainEventState(null);
       return null;
     }
   }, []);
 
   const refreshThreads = useCallback(async (): Promise<void> => {
-    if (!IS_BACKEND_MODE || !appwriteService) {
-      return;
-    }
-
+    const sessionGeneration = sessionInvalidationRef.current;
+    const requestGeneration = ++threadRefreshRequestRef.current;
     try {
       const threads = await appwriteService.fetchThreads();
+      if (
+        sessionGeneration !== sessionInvalidationRef.current ||
+        requestGeneration !== threadRefreshRequestRef.current
+      ) {
+        return;
+      }
       setPersisted((prev) => ({
         ...prev,
         threads: mergeChatThreads(threads, prev.threads),
         realtimeState: 'connected'
       }));
     } catch {
+      if (
+        sessionGeneration !== sessionInvalidationRef.current ||
+        requestGeneration !== threadRefreshRequestRef.current
+      ) {
+        return;
+      }
       setPersisted((prev) => ({
         ...prev,
         realtimeState: 'disconnected'
@@ -590,14 +615,17 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   }, []);
 
   const commitCurrentUser = useCallback((user: User | null): void => {
+    if (!user) {
+      sessionInvalidationRef.current += 1;
+      eventRefreshRequestRef.current += 1;
+      threadRefreshRequestRef.current += 1;
+      discoveryRefreshRequestRef.current += 1;
+      removePersistedState();
+    }
+
     setPersisted((prev) => {
       if (!user) {
-        return {
-          ...prev,
-          currentUserEmail: null,
-          threads: IS_BACKEND_MODE ? [] : prev.threads,
-          notifications: IS_BACKEND_MODE ? [] : prev.notifications
-        };
+        return withoutSensitivePersistedData(prev);
       }
 
       const normalizedUser = normalizeUser(user);
@@ -611,34 +639,48 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   }, []);
 
   useEffect(() => {
-    if (!IS_BACKEND_MODE || !appwriteService) {
-      return;
-    }
-
     let isCancelled = false;
+    const bootstrapGeneration = sessionInvalidationRef.current;
 
     void (async () => {
-      try {
-        const restoredUser = await appwriteService.restoreCurrentUser();
-        if (!isCancelled) {
-          commitCurrentUser(restoredUser);
-          await refreshRemoteMainEventState(restoredUser);
+      await runSerializedAuth(async () => {
+        if (hasLogoutTombstone()) {
+          await finishPendingBackendLogout();
+          if (!isCancelled) {
+            // Never resurrect an account while a remote logout is unresolved.
+            commitCurrentUser(null);
+            setRemoteMainEventState(null);
+            setIsAuthInitialized(true);
+          }
+          return;
         }
-      } catch {
-        if (!isCancelled) {
-          commitCurrentUser(null);
-          setRemoteMainEventState(null);
+
+        try {
+          const restoredUser = await appwriteService.restoreCurrentUser();
+          if (!isCancelled && bootstrapGeneration === sessionInvalidationRef.current) {
+            if (restoredUser) {
+              sessionInvalidationRef.current += 1;
+            }
+            commitCurrentUser(restoredUser);
+            setIsAuthInitialized(true);
+          }
+        } catch {
+          if (!isCancelled && bootstrapGeneration === sessionInvalidationRef.current) {
+            commitCurrentUser(null);
+            setRemoteMainEventState(null);
+            setIsAuthInitialized(true);
+          }
         }
-      }
+      });
     })();
 
     return () => {
       isCancelled = true;
     };
-  }, [commitCurrentUser, refreshRemoteMainEventState]);
+  }, [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth]);
 
   useEffect(() => {
-    if (!IS_BACKEND_MODE || !appwriteService || !currentUser) {
+    if (!isAuthInitialized || !currentUser) {
       return;
     }
 
@@ -672,48 +714,51 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       window.removeEventListener('pagehide', markOffline);
       markOffline();
     };
-  }, [currentUser]);
+  }, [currentUser, isAuthInitialized]);
 
   useEffect(() => {
-    if (!IS_BACKEND_MODE) {
-      setRemoteMainEventState(null);
+    if (!isAuthInitialized) {
       return;
     }
 
     void refreshRemoteMainEventState(currentUser);
-  }, [currentUser, refreshRemoteMainEventState]);
+  }, [currentUser, isAuthInitialized, refreshRemoteMainEventState]);
 
   const hydrateDiscoverProfiles = useCallback(async (): Promise<void> => {
-    if (IS_BACKEND_MODE && appwriteService) {
-      try {
-        const profiles = await appwriteService.fetchDiscoverProfiles();
-        setDiscoverProfiles(profiles);
-        return;
-      } catch {
-        setDiscoverProfiles([]);
+    const sessionGeneration = sessionInvalidationRef.current;
+    const requestGeneration = ++discoveryRefreshRequestRef.current;
+    try {
+      const profiles = await appwriteService.fetchDiscoverProfiles();
+      if (
+        sessionGeneration !== sessionInvalidationRef.current ||
+        requestGeneration !== discoveryRefreshRequestRef.current
+      ) {
         return;
       }
+      setDiscoverProfiles(profiles);
+    } catch {
+      if (
+        sessionGeneration !== sessionInvalidationRef.current ||
+        requestGeneration !== discoveryRefreshRequestRef.current
+      ) {
+        return;
+      }
+      setDiscoverProfiles([]);
     }
-
-    setDiscoverProfiles([]);
   }, []);
 
   const hydrateThreads = useCallback(async (): Promise<void> => {
-    if (IS_BACKEND_MODE && appwriteService) {
-      await refreshThreads();
-      return;
-    }
-
-    setPersisted((prev) => ({
-      ...prev,
-      threads: []
-    }));
+    await refreshThreads();
   }, [refreshThreads]);
 
   useEffect(() => {
+    if (!isAuthInitialized) {
+      return;
+    }
+
     void hydrateDiscoverProfiles();
     void hydrateThreads();
-  }, [persisted.currentUserEmail, hydrateDiscoverProfiles, hydrateThreads]);
+  }, [persisted.currentUserEmail, hydrateDiscoverProfiles, hydrateThreads, isAuthInitialized]);
 
   const discoveryProfileRefreshKey = useMemo(() => {
     if (!currentUser || !isProfileComplete(currentUser)) {
@@ -724,10 +769,9 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       currentUser.appwriteUserId ?? currentUser.email,
       currentUser.gender,
       currentUser.orientation,
-      currentUser.showMe,
       (currentUser.preferredGenders ?? []).join(','),
-      currentUser.ageRangeMin,
-      currentUser.ageRangeMax,
+      currentUser.minPreferredAge,
+      currentUser.maxPreferredAge,
       currentUser.maxDistanceKm ?? 'none',
       currentUser.excludeSmokers,
       currentUser.excludeDrinkers,
@@ -744,7 +788,25 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   }, [discoveryProfileRefreshKey, hydrateDiscoverProfiles]);
 
   useEffect(() => {
-    if (!IS_BACKEND_MODE || !appwriteService || !currentUser?.appwriteUserId) {
+    if (!discoveryProfileRefreshKey) {
+      return;
+    }
+
+    const refresh = () => {
+      if (document.visibilityState === 'visible') {
+        void hydrateDiscoverProfiles();
+      }
+    };
+    const interval = window.setInterval(refresh, DISCOVERY_TOKEN_REFRESH_INTERVAL_MS);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [discoveryProfileRefreshKey, hydrateDiscoverProfiles]);
+
+  useEffect(() => {
+    if (!isAuthInitialized || !currentUser?.appwriteUserId) {
       return;
     }
 
@@ -799,19 +861,44 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       }
       unsubscribe();
     };
-  }, [currentUser?.appwriteUserId, refreshThreads]);
+  }, [currentUser?.appwriteUserId, isAuthInitialized, refreshThreads]);
 
-  const isEventAdmin = useMemo(() => {
-    if (!currentUser) {
-      return false;
+  const [verifiedEventAdminUserId, setVerifiedEventAdminUserId] = useState<string | null>(null);
+  const activeAppwriteUserId = currentUser?.appwriteUserId ?? null;
+  const isEventAdmin = Boolean(
+    activeAppwriteUserId && verifiedEventAdminUserId === activeAppwriteUserId
+  );
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!IS_EVENT_ADMIN_ENABLED || !activeAppwriteUserId) {
+      setVerifiedEventAdminUserId(null);
+      return () => {
+        isCancelled = true;
+      };
     }
 
-    return currentUser.email === 'admin@fyre.local';
-  }, [currentUser]);
+    void appwriteService.fetchEventAdminState()
+      .then(() => {
+        if (!isCancelled) {
+          setVerifiedEventAdminUserId(activeAppwriteUserId);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setVerifiedEventAdminUserId(null);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeAppwriteUserId]);
 
   const resolvedMainEventConfig = useMemo<MainEventConfig>(() => {
-    if (!IS_BACKEND_MODE || !remoteMainEventState) {
-      return mainEventConfig;
+    if (!remoteMainEventState) {
+      return createEmptyMainEventConfig();
     }
 
     const maleLimit =
@@ -825,23 +912,39 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       maxParticipants: remoteMainEventState.snapshot.maxParticipants,
       maxPerGender: Math.max(maleLimit, femaleLimit, 1)
     };
-  }, [mainEventConfig, remoteMainEventState]);
+  }, [remoteMainEventState]);
 
-  const mainEventSnapshot = useMemo(
-    () => remoteMainEventState?.snapshot ?? getSnapshot(persisted.mainEventState, resolvedMainEventConfig),
-    [persisted.mainEventState, remoteMainEventState, resolvedMainEventConfig]
-  );
-
-  const mainEventFlags = useMemo(() => {
-    if (IS_BACKEND_MODE) {
-      return {
-        isRegistered: remoteMainEventState?.currentStatus === 'confirmed' || remoteMainEventState?.currentStatus === 'promoted',
-        isWaiting: remoteMainEventState?.currentStatus === 'waitlisted'
-      };
+  const resolvedMainEventInfo = useMemo<MainEventInfo>(() => {
+    if (!remoteMainEventState) {
+      return createEmptyMainEventInfo();
     }
 
-    return getFlags(persisted.mainEventState, currentUser?.email ?? null);
-  }, [currentUser?.email, persisted.mainEventState, remoteMainEventState]);
+    const remoteInfo = remoteMainEventState.info;
+    return {
+      venue: remoteInfo.venue,
+      address: '',
+      timeLabel: '',
+      contribution: '',
+      contact: '',
+      dressCode: '',
+      description: remoteInfo.description,
+      rules: remoteInfo.rules,
+      registrationClosesAt: remoteInfo.registrationClosesAt,
+      cancellationClosesAt: remoteInfo.cancellationClosesAt
+    };
+  }, [remoteMainEventState]);
+
+  const mainEventSnapshot = useMemo(
+    () => remoteMainEventState?.snapshot ?? createEmptyMainEventSnapshot(),
+    [remoteMainEventState]
+  );
+
+  const mainEventFlags = useMemo(() => ({
+    isRegistered: remoteMainEventState?.currentStatus === 'confirmed' || remoteMainEventState?.currentStatus === 'promoted',
+    isWaiting: remoteMainEventState?.currentStatus === 'waitlisted'
+  }), [remoteMainEventState]);
+
+  const hasMainEvent = remoteMainEventState !== null;
 
   const currentUserUpcomingEventHistory = useMemo(() => {
     if (!currentUser) {
@@ -849,9 +952,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     }
 
     const now = Date.now();
-    const sourceHistory = IS_BACKEND_MODE && remoteMainEventState
-      ? remoteMainEventState.history
-      : persisted.mainEventState.history;
+    const sourceHistory = remoteMainEventState?.history ?? [];
 
     return sourceHistory
       .filter((item) => item.email === currentUser.email && new Date(item.eventDate).getTime() >= now)
@@ -859,7 +960,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         (left, right) =>
           new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime()
       );
-  }, [currentUser, persisted.mainEventState.history, remoteMainEventState]);
+  }, [currentUser, remoteMainEventState]);
 
   const unreadNotificationsCount = useMemo(
     () => persisted.notifications.filter((notification) => !notification.readAt).length,
@@ -878,58 +979,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     [mainEventFlags.isRegistered, mainEventFlags.isWaiting]
   );
 
-  const withCurrentUser = useCallback(
-    (callback: (user: User) => User): void => {
-      setPersisted((prev) => {
-        if (!prev.currentUserEmail) {
-          return prev;
-        }
-
-        const userIndex = prev.users.findIndex((candidate) => candidate.email === prev.currentUserEmail);
-        if (userIndex < 0) {
-          return {
-            ...prev,
-            currentUserEmail: null
-          };
-        }
-
-        const updatedUser = normalizeUser(callback(prev.users[userIndex]));
-        const updatedUsers = [...prev.users];
-        updatedUsers[userIndex] = updatedUser;
-
-        return {
-          ...prev,
-          users: updatedUsers
-        };
-      });
-    },
-    []
-  );
-
-  const pushNotification = useCallback(
-    (payload: Omit<AppNotification, 'id' | 'createdAt' | 'readAt'>): void => {
-      if (!isNotificationEnabledForType(persisted.settings, payload.type)) {
-        return;
-      }
-
-      setPersisted((prev) => ({
-        ...prev,
-        notifications: [
-          {
-            id: crypto.randomUUID(),
-            type: payload.type,
-            title: payload.title,
-            body: payload.body,
-            threadId: payload.threadId,
-            createdAt: nowIso()
-          },
-          ...prev.notifications
-        ].slice(0, 180)
-      }));
-    },
-    [persisted.settings]
-  );
-
   const signUp = useCallback(
     async (email: string, password: string): Promise<string | null> => {
       if (!isValidEmail(email)) {
@@ -942,32 +991,25 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const normalized = normalizeEmail(email);
 
-      if (IS_BACKEND_MODE && appwriteService) {
+      const authGeneration = sessionInvalidationRef.current;
+      return runSerializedAuth(async () => {
+        if (!(await finishPendingBackendLogout())) {
+          return 'Disconnessione precedente non completata. Riprova quando il server è raggiungibile.';
+        }
         try {
           const user = await appwriteService.signUp(normalized, password);
+          if (authGeneration !== sessionInvalidationRef.current) {
+            return 'Operazione di accesso annullata.';
+          }
+          sessionInvalidationRef.current += 1;
           commitCurrentUser(user);
           return null;
         } catch (error) {
           return mapAppwriteError(error, 'Registrazione non riuscita. Riprova.');
         }
-      }
-
-      const alreadyExists = persisted.users.some((candidate) => candidate.email === normalized);
-      if (alreadyExists) {
-        return 'Esiste già un account con questa email.';
-      }
-
-      const nextUser = createEmptyUser(normalized, password);
-
-      setPersisted((prev) => ({
-        ...prev,
-        users: [...prev.users, nextUser],
-        currentUserEmail: nextUser.email
-      }));
-
-      return null;
+      });
     },
-    [commitCurrentUser, persisted.users]
+    [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth]
   );
 
   const logIn = useCallback(
@@ -978,52 +1020,48 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const normalized = normalizeEmail(email);
 
-      if (IS_BACKEND_MODE && appwriteService) {
+      const authGeneration = sessionInvalidationRef.current;
+      return runSerializedAuth(async () => {
+        if (!(await finishPendingBackendLogout())) {
+          return 'Disconnessione precedente non completata. Riprova quando il server è raggiungibile.';
+        }
         try {
           const user = await appwriteService.logIn(normalized, password);
+          if (authGeneration !== sessionInvalidationRef.current) {
+            return 'Operazione di accesso annullata.';
+          }
+          sessionInvalidationRef.current += 1;
           commitCurrentUser(user);
           return null;
         } catch (error) {
           return mapAppwriteError(error, 'Accesso non riuscito. Riprova.');
         }
-      }
-
-      const account = persisted.users.find((candidate) => candidate.email === normalized);
-
-      if (!account) {
-        return 'Nessun account trovato con questa email.';
-      }
-
-      if (account.password !== password) {
-        return 'Password errata.';
-      }
-
-      setPersisted((prev) => ({
-        ...prev,
-        currentUserEmail: normalized
-      }));
-
-      return null;
+      });
     },
-    [commitCurrentUser, persisted.users]
+    [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth]
   );
 
   const logOut = useCallback(async (): Promise<void> => {
-    if (IS_BACKEND_MODE && appwriteService) {
+    setLogoutTombstone(true);
+    commitCurrentUser(null);
+    setIsAuthInitialized(true);
+    setDiscoverProfiles([]);
+    setRemoteMainEventState(null);
+    lastBrowserNotificationRef.current = null;
+    await runSerializedAuth(async () => {
       try {
         await appwriteService.logOut();
+        setLogoutTombstone(false);
       } catch {
-        // Clear the local session state even if the backend logout call fails.
+        // Keep the tombstone: bootstrap and future login remain fail-closed.
+      } finally {
+        // A late auth response must never repopulate local authenticated state.
+        commitCurrentUser(null);
+        setDiscoverProfiles([]);
+        setRemoteMainEventState(null);
       }
-    }
-
-    commitCurrentUser(null);
-    setDiscoverProfiles([]);
-    setPersisted((prev) => ({
-      ...prev,
-      realtimeState: 'disconnected'
-    }));
-  }, [commitCurrentUser]);
+    });
+  }, [commitCurrentUser, runSerializedAuth]);
 
   const updateProfileImage = useCallback(
     async (imageData: string): Promise<string | null> => {
@@ -1031,25 +1069,19 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Effettua di nuovo l\'accesso.';
       }
 
-      if (IS_BACKEND_MODE && appwriteService) {
-        try {
-          const updatedUser = await appwriteService.updateProfileImage(currentUser, imageData);
-          commitCurrentUser(updatedUser);
+      const sessionGeneration = sessionInvalidationRef.current;
+      try {
+        const updatedUser = await appwriteService.updateProfileImage(currentUser, imageData);
+        if (sessionGeneration !== sessionInvalidationRef.current) {
           return null;
-        } catch (error) {
-          return mapAppwriteError(error, 'Impossibile aggiornare la foto profilo.');
         }
+        commitCurrentUser(updatedUser);
+        return null;
+      } catch (error) {
+        return mapAppwriteError(error, 'Impossibile aggiornare la foto profilo.');
       }
-
-      withCurrentUser((existing) => ({
-        ...normalizeUser(existing),
-        profileImageData: imageData.trim().length > 0 ? imageData : undefined,
-        avatarFileId: imageData.trim().length > 0 ? existing.avatarFileId : undefined
-      }));
-
-      return null;
     },
-    [commitCurrentUser, currentUser, withCurrentUser]
+    [commitCurrentUser, currentUser]
   );
 
   const updateProfileImages = useCallback(
@@ -1072,63 +1104,40 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
             )
       });
 
-      if (IS_BACKEND_MODE && appwriteService) {
-        try {
-          const updatedUser = await appwriteService.updateProfile(nextUser);
-          commitCurrentUser(updatedUser);
+      const sessionGeneration = sessionInvalidationRef.current;
+      try {
+        const updatedUser = await appwriteService.updateProfile(nextUser);
+        if (sessionGeneration !== sessionInvalidationRef.current) {
           return null;
-        } catch (error) {
-          return mapAppwriteError(error, 'Impossibile aggiornare le foto per lo swipe.');
         }
+        commitCurrentUser(updatedUser);
+        return null;
+      } catch (error) {
+        return mapAppwriteError(error, 'Impossibile aggiornare le foto per lo swipe.');
       }
-
-      withCurrentUser((existing) => ({
-        ...normalizeUser(existing),
-        profilePhotoDataItems: sanitizedImages,
-        photoFileIds: sanitizedImages.length === 0
-          ? []
-          : (existing.photoFileIds ?? []).filter((fileId) =>
-              sanitizedImages.some((image) => image.includes(fileId))
-            )
-      }));
-
-      return null;
     },
-    [commitCurrentUser, currentUser, withCurrentUser]
+    [commitCurrentUser, currentUser]
   );
 
   const willUserLoseEventRegistrations = useCallback(
-    (nextGender: UserGender, nextOrientation: UserOrientation): boolean => {
-      if (IS_BACKEND_MODE) {
-        if (!hasRemoteMainEventRegistration) {
-          return false;
-        }
-
-        const isGenderSupported = nextGender === 'male' || nextGender === 'female';
-        return !isGenderSupported || nextOrientation !== 'straight';
+    (nextGender: UserGender | undefined, nextOrientation: UserOrientation | undefined): boolean => {
+      if (!hasRemoteMainEventRegistration) {
+        return false;
       }
 
-      return willLoseMainEventRegistrations(
-        persisted.mainEventState,
-        currentUser,
-        nextGender,
-        nextOrientation
-      );
+      const isGenderSupported = nextGender === 'male' || nextGender === 'female';
+      return !isGenderSupported || nextOrientation !== 'straight';
     },
-    [currentUser, hasRemoteMainEventRegistration, persisted.mainEventState]
+    [hasRemoteMainEventRegistration]
   );
 
   const enforceRemoteMainEventEligibilityAfterProfileChange = useCallback(
     async (shouldRemoveRegistration: boolean, user: User): Promise<string | null> => {
-      if (!IS_BACKEND_MODE || !appwriteService) {
-        return null;
-      }
-
       if (shouldRemoveRegistration) {
         try {
-          await appwriteService.cancelMainEventRegistration(user, remoteMainEventState?.eventId, true);
+          await appwriteService.cancelMainEventRegistration(user, remoteMainEventState?.eventId);
         } catch {
-          // Refresh below decides whether the forced cancellation actually applied.
+          // Refresh below decides whether the server-side cancellation policy allowed the change.
         }
       }
 
@@ -1163,7 +1172,13 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Devi avere almeno 18 anni.';
       }
 
-      if (input.ageRangeMin < 18 || input.ageRangeMax <= input.ageRangeMin) {
+      if (
+        !Number.isInteger(input.minPreferredAge) ||
+        !Number.isInteger(input.maxPreferredAge) ||
+        input.minPreferredAge < 18 ||
+        input.maxPreferredAge > 99 ||
+        input.maxPreferredAge <= input.minPreferredAge
+      ) {
         return 'La fascia d\'età non è valida.';
       }
 
@@ -1174,9 +1189,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Seleziona almeno una preferenza di genere.';
       }
 
-      const shouldRemoveMainEvent = willLoseMainEventRegistrations(
-        persisted.mainEventState,
-        currentUser,
+      const shouldRemoveMainEvent = willUserLoseEventRegistrations(
         input.gender,
         input.orientation
       );
@@ -1186,111 +1199,84 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         firstName: input.firstName.trim(),
         lastName: input.lastName.trim(),
         city: input.city.trim(),
-        cityLat: input.cityLat,
-        cityLng: input.cityLng,
+        latitude: input.latitude,
+        longitude: input.longitude,
         birthDate: input.birthDate,
         gender: input.gender,
         orientation: input.orientation,
-        showMe: inferShowMeFromPreferredGenders(preferredGenders, input.showMe),
         preferredGenders,
         smokes: input.smokes,
         drinks: input.drinks,
         excludeSmokers: input.excludeSmokers,
         excludeDrinkers: input.excludeDrinkers,
         bio: input.bio.trim(),
-        ageRangeMin: input.ageRangeMin,
-        ageRangeMax: input.ageRangeMax,
+        minPreferredAge: input.minPreferredAge,
+        maxPreferredAge: input.maxPreferredAge,
         maxDistanceKm: normalizedMaxDistanceKm,
         intent: input.intent,
-        hobbies: input.hobbies.trim(),
-        passions: '',
-        lookingFor: '',
-        instagram: input.instagram.trim(),
+        interests: input.interests.trim(),
         instagramTag: normalizeSocialHandle(input.instagramTag),
-        telegram: input.telegram.trim(),
-        spotifyTag: normalizeSocialHandle(input.spotifyTag),
-        website: input.website.trim(),
-        favoriteSong: '',
-        favoriteMovie: ''
+        spotifyTag: normalizeSocialHandle(input.spotifyTag)
       });
 
-      if (IS_BACKEND_MODE && appwriteService) {
-        try {
-          const savedUser = await appwriteService.updateProfile(updatedUser);
-          commitCurrentUser(savedUser);
-          const eventError = await enforceRemoteMainEventEligibilityAfterProfileChange(
-            shouldRemoveMainEvent,
-            savedUser
-          );
-          if (eventError) {
-            return eventError;
-          }
+      const sessionGeneration = sessionInvalidationRef.current;
+      try {
+        const savedUser = await appwriteService.updateProfile(updatedUser);
+        if (sessionGeneration !== sessionInvalidationRef.current) {
           return null;
-        } catch (error) {
-          return mapAppwriteError(error, 'Impossibile salvare il profilo adesso. Riprova.');
         }
+        commitCurrentUser(savedUser);
+        const eventError = await enforceRemoteMainEventEligibilityAfterProfileChange(
+          shouldRemoveMainEvent,
+          savedUser
+        );
+        if (eventError) {
+          return eventError;
+        }
+        return null;
+      } catch (error) {
+        return mapAppwriteError(error, 'Impossibile salvare il profilo adesso. Riprova.');
       }
-
-      setPersisted((prev) => {
-        if (!prev.currentUserEmail) {
-          return prev;
-        }
-
-        const userIndex = prev.users.findIndex((candidate) => candidate.email === prev.currentUserEmail);
-        if (userIndex < 0) {
-          return prev;
-        }
-
-        const users = [...prev.users];
-        users[userIndex] = updatedUser;
-
-        return {
-          ...prev,
-          users,
-          mainEventState: shouldRemoveMainEvent
-            ? removeUserFromMainEvent(prev.mainEventState, updatedUser.email, prev.mainEventConfig)
-            : prev.mainEventState
-        };
-      });
-
-      return null;
     },
-    [commitCurrentUser, currentUser, enforceRemoteMainEventEligibilityAfterProfileChange, persisted.mainEventState]
+    [
+      commitCurrentUser,
+      currentUser,
+      enforceRemoteMainEventEligibilityAfterProfileChange,
+      willUserLoseEventRegistrations
+    ]
   );
 
   const updateAccountPreferences = useCallback(
     async (input: {
       orientation: UserOrientation;
-      showMe: User['showMe'];
       preferredGenders: UserGender[];
       smokes: boolean;
       drinks: boolean;
       excludeSmokers: boolean;
       excludeDrinkers: boolean;
       bio: string;
-      ageRangeMin: number;
-      ageRangeMax: number;
+      minPreferredAge: number;
+      maxPreferredAge: number;
       maxDistanceKm?: number;
       city?: string | null;
-      cityLat?: number;
-      cityLng?: number;
+      latitude?: number;
+      longitude?: number;
       intent: MatchIntent;
-      hobbies: string;
-      passions: string;
-      lookingFor: string;
-      instagram: string;
+      interests: string;
       instagramTag: string;
-      telegram: string;
       spotifyTag: string;
-      website: string;
-      favoriteSong: string;
-      favoriteMovie: string;
     }): Promise<string | null> => {
       if (!currentUser) {
         return 'Effettua di nuovo l\'accesso.';
       }
 
-      if (input.ageRangeMin < 18 || input.ageRangeMax <= input.ageRangeMin) {
+      if (
+        !Number.isInteger(input.minPreferredAge) ||
+        !Number.isInteger(input.maxPreferredAge) ||
+        input.minPreferredAge < 18 ||
+        input.maxPreferredAge > 99 ||
+        input.maxPreferredAge <= input.minPreferredAge
+      ) {
         return 'Fascia d\'età non valida.';
       }
 
@@ -1301,9 +1287,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Seleziona almeno una preferenza di genere.';
       }
 
-      const shouldRemoveMainEvent = willLoseMainEventRegistrations(
-        persisted.mainEventState,
-        currentUser,
+      const shouldRemoveMainEvent = willUserLoseEventRegistrations(
         currentUser.gender,
         input.orientation
       );
@@ -1313,413 +1297,178 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         ...(input.city != null
           ? {
               city: input.city.trim(),
-              cityLat: input.cityLat,
-              cityLng: input.cityLng
+              latitude: input.latitude,
+              longitude: input.longitude
             }
           : {}),
         orientation: input.orientation,
-        showMe: inferShowMeFromPreferredGenders(preferredGenders, input.showMe),
         preferredGenders,
         smokes: input.smokes,
         drinks: input.drinks,
         excludeSmokers: input.excludeSmokers,
         excludeDrinkers: input.excludeDrinkers,
         bio: input.bio.trim(),
-        ageRangeMin: input.ageRangeMin,
-        ageRangeMax: input.ageRangeMax,
+        minPreferredAge: input.minPreferredAge,
+        maxPreferredAge: input.maxPreferredAge,
         maxDistanceKm: normalizedMaxDistanceKm,
         intent: input.intent,
-        hobbies: input.hobbies.trim(),
-        passions: '',
-        lookingFor: '',
-        instagram: input.instagram.trim(),
+        interests: input.interests.trim(),
         instagramTag: normalizeSocialHandle(input.instagramTag),
-        telegram: input.telegram.trim(),
-        spotifyTag: normalizeSocialHandle(input.spotifyTag),
-        website: input.website.trim(),
-        favoriteSong: '',
-        favoriteMovie: ''
+        spotifyTag: normalizeSocialHandle(input.spotifyTag)
       });
 
-      if (IS_BACKEND_MODE && appwriteService) {
-        try {
-          const savedUser = await appwriteService.updateProfile(updatedUser);
-          commitCurrentUser(savedUser);
-          const eventError = await enforceRemoteMainEventEligibilityAfterProfileChange(
-            shouldRemoveMainEvent,
-            savedUser
-          );
-          if (eventError) {
-            return eventError;
-          }
+      const sessionGeneration = sessionInvalidationRef.current;
+      try {
+        const savedUser = await appwriteService.updateProfile(updatedUser);
+        if (sessionGeneration !== sessionInvalidationRef.current) {
           return null;
-        } catch (error) {
-          return mapAppwriteError(error, 'Aggiornamento preferenze non riuscito. Riprova.');
         }
+        commitCurrentUser(savedUser);
+        const eventError = await enforceRemoteMainEventEligibilityAfterProfileChange(
+          shouldRemoveMainEvent,
+          savedUser
+        );
+        if (eventError) {
+          return eventError;
+        }
+        return null;
+      } catch (error) {
+        return mapAppwriteError(error, 'Aggiornamento preferenze non riuscito. Riprova.');
       }
-
-      withCurrentUser(() => updatedUser);
-
-      if (shouldRemoveMainEvent) {
-        setPersisted((prev) => {
-          if (!prev.currentUserEmail) {
-            return prev;
-          }
-          return {
-            ...prev,
-            mainEventState: removeUserFromMainEvent(
-              prev.mainEventState,
-              prev.currentUserEmail,
-              prev.mainEventConfig
-            )
-          };
-        });
-      }
-
-      return null;
     },
     [
       commitCurrentUser,
       currentUser,
       enforceRemoteMainEventEligibilityAfterProfileChange,
-      persisted.mainEventState,
-      withCurrentUser
+      willUserLoseEventRegistrations
     ]
   );
 
   const registerCurrentUserForMainEvent = useCallback(async (): Promise<EventFeedback> => {
-    if (IS_BACKEND_MODE && appwriteService) {
-      if (!currentUser) {
+    if (!currentUser) {
+      return {
+        message: 'Effettua di nuovo l\'accesso.',
+        isError: true
+      };
+    }
+
+    if (!remoteMainEventState?.eventId) {
+      return {
+        message: 'Nessun evento live disponibile.',
+        isError: true
+      };
+    }
+
+    if (!currentUser.gender) {
+      return {
+        message: EVENT_MESSAGE_BY_KEY['events.error.genderRequired'],
+        isError: true
+      };
+    }
+
+    if (currentUser.gender !== 'male' && currentUser.gender !== 'female') {
+      return {
+        message: EVENT_MESSAGE_BY_KEY['events.error.genderUnsupported'],
+        isError: true
+      };
+    }
+
+    if (currentUser.orientation !== 'straight') {
+      return {
+        message: EVENT_MESSAGE_BY_KEY['events.error.orientationUnsupported'],
+        isError: true
+      };
+    }
+
+    const hadRegistrationBeforeRequest = hasRemoteMainEventRegistration;
+
+    try {
+      const status = await appwriteService.registerForMainEvent(currentUser, remoteMainEventState.eventId);
+      const nextState = await refreshRemoteMainEventState(currentUser);
+      const resolvedStatus = nextState?.currentStatus ?? status;
+
+      if (!nextState?.currentStatus) {
         return {
-          message: 'Effettua di nuovo l\'accesso.',
+          message: 'Iscrizione non confermata dal server. Riprova.',
           isError: true
         };
       }
 
-      if (!currentUser.gender) {
-        return {
-          message: EVENT_MESSAGE_BY_KEY['events.error.genderRequired'],
-          isError: true
-        };
-      }
-
-      if (currentUser.gender !== 'male' && currentUser.gender !== 'female') {
-        return {
-          message: EVENT_MESSAGE_BY_KEY['events.error.genderUnsupported'],
-          isError: true
-        };
-      }
-
-      if (currentUser.orientation !== 'straight') {
-        return {
-          message: EVENT_MESSAGE_BY_KEY['events.error.orientationUnsupported'],
-          isError: true
-        };
-      }
-
-      const hadRegistrationBeforeRequest = hasRemoteMainEventRegistration;
-
-      try {
-        const status = await appwriteService.registerForMainEvent(currentUser, remoteMainEventState?.eventId);
-        const nextState = await refreshRemoteMainEventState(currentUser);
-        const resolvedStatus = nextState?.currentStatus ?? status;
-
-        if (!nextState?.currentStatus) {
-          return {
-            message: 'Iscrizione non confermata dal server. Riprova.',
-            isError: true
-          };
-        }
-
+      return {
+        message:
+          resolvedStatus === 'waitlisted'
+            ? 'Iscrizione registrata: sei in waiting list.'
+            : 'Iscrizione evento confermata.',
+        isError: false
+      };
+    } catch (error) {
+      const nextState = await refreshRemoteMainEventState(currentUser);
+      if (!hadRegistrationBeforeRequest && nextState?.currentStatus) {
         return {
           message:
-            resolvedStatus === 'waitlisted'
+            nextState.currentStatus === 'waitlisted'
               ? 'Iscrizione registrata: sei in waiting list.'
               : 'Iscrizione evento confermata.',
           isError: false
         };
-      } catch (error) {
-        const nextState = await refreshRemoteMainEventState(currentUser);
-        if (!hadRegistrationBeforeRequest && nextState?.currentStatus) {
-          return {
-            message:
-              nextState.currentStatus === 'waitlisted'
-                ? 'Iscrizione registrata: sei in waiting list.'
-                : 'Iscrizione evento confermata.',
-            isError: false
-          };
-        }
-
-        return {
-          message: eventErrorMessage(error, 'Operazione evento non riuscita. Riprova.'),
-          isError: true
-        };
       }
+
+      return {
+        message: eventErrorMessage(error, 'Operazione evento non riuscita. Riprova.'),
+        isError: true
+      };
     }
-
-    const result = registerForMainEvent(
-      persisted.mainEventState,
-      currentUser,
-      persisted.mainEventConfig
-    );
-
-    if (result.nextState !== persisted.mainEventState) {
-      setPersisted((prev) => ({
-        ...prev,
-        mainEventState: result.nextState
-      }));
-    }
-
-    return {
-      message: result.message,
-      isError: result.isError
-    };
   }, [
     currentUser,
     hasRemoteMainEventRegistration,
-    persisted.mainEventConfig,
-    persisted.mainEventState,
     refreshRemoteMainEventState,
     remoteMainEventState?.eventId
   ]);
 
   const cancelCurrentUserMainEventRegistration = useCallback(async (): Promise<EventFeedback> => {
-    if (IS_BACKEND_MODE && appwriteService) {
-      if (!currentUser) {
-        return {
-          message: 'Effettua di nuovo l\'accesso.',
-          isError: true
-        };
-      }
+    if (!currentUser) {
+      return {
+        message: 'Effettua di nuovo l\'accesso.',
+        isError: true
+      };
+    }
 
-      const hadRegistrationBeforeRequest = hasRemoteMainEventRegistration;
+    if (!remoteMainEventState?.eventId) {
+      return {
+        message: 'Nessun evento live disponibile.',
+        isError: true
+      };
+    }
 
-      try {
-        await appwriteService.cancelMainEventRegistration(currentUser, remoteMainEventState?.eventId);
-        await refreshRemoteMainEventState(currentUser);
+    const hadRegistrationBeforeRequest = hasRemoteMainEventRegistration;
+
+    try {
+      await appwriteService.cancelMainEventRegistration(currentUser, remoteMainEventState.eventId);
+      await refreshRemoteMainEventState(currentUser);
+      return {
+        message: 'Iscrizione evento annullata.',
+        isError: false
+      };
+    } catch (error) {
+      const nextState = await refreshRemoteMainEventState(currentUser);
+      if (hadRegistrationBeforeRequest && !nextState?.currentStatus) {
         return {
           message: 'Iscrizione evento annullata.',
           isError: false
         };
-      } catch (error) {
-        const nextState = await refreshRemoteMainEventState(currentUser);
-        if (hadRegistrationBeforeRequest && !nextState?.currentStatus) {
-          return {
-            message: 'Iscrizione evento annullata.',
-            isError: false
-          };
-        }
-
-        return {
-          message: eventErrorMessage(error, 'Operazione evento non riuscita. Riprova.'),
-          isError: true
-        };
       }
+
+      return {
+        message: eventErrorMessage(error, 'Operazione evento non riuscita. Riprova.'),
+        isError: true
+      };
     }
-
-    const result = cancelMainEventRegistration(
-      persisted.mainEventState,
-      currentUser,
-      persisted.mainEventConfig
-    );
-
-    if (result.nextState !== persisted.mainEventState) {
-      setPersisted((prev) => ({
-        ...prev,
-        mainEventState: result.nextState
-      }));
-    }
-
-    return {
-      message: result.message,
-      isError: result.isError
-    };
   }, [
     currentUser,
     hasRemoteMainEventRegistration,
-    persisted.mainEventConfig,
-    persisted.mainEventState,
     refreshRemoteMainEventState,
     remoteMainEventState?.eventId
   ]);
-
-  const updateMainEventConfig = useCallback((patch: Partial<MainEventConfig>): string | null => {
-    if (patch.maxParticipants !== undefined && patch.maxParticipants < 2) {
-      return 'La capienza totale deve essere almeno 2.';
-    }
-
-    if (patch.maxPerGender !== undefined && patch.maxPerGender < 1) {
-      return 'I posti per genere devono essere almeno 1.';
-    }
-
-    if (patch.date !== undefined && Number.isNaN(new Date(patch.date).getTime())) {
-      return 'Data evento non valida.';
-    }
-
-    setPersisted((prev) => {
-      const merged: MainEventConfig = {
-        ...prev.mainEventConfig,
-        ...patch
-      };
-
-      const maxParticipants = Math.max(2, Math.round(merged.maxParticipants));
-      const maxPerGender = Math.max(1, Math.min(Math.round(merged.maxPerGender), maxParticipants));
-
-      return {
-        ...prev,
-        mainEventConfig: {
-          ...merged,
-          maxParticipants,
-          maxPerGender
-        }
-      };
-    });
-
-    return null;
-  }, []);
-
-  const updateMainEventInfo = useCallback((patch: Partial<MainEventInfo>): void => {
-    setPersisted((prev) => ({
-      ...prev,
-      mainEventInfo: {
-        ...prev.mainEventInfo,
-        ...patch,
-        rules: patch.rules ?? prev.mainEventInfo.rules
-      }
-    }));
-  }, []);
-
-  const adminAddMainEventParticipant = useCallback(
-    (email: string, gender: UserGender, destination: ParticipantBucket): string | null => {
-      const normalized = normalizeEmail(email);
-      if (!isValidEmail(normalized)) {
-        return 'Inserisci una email valida.';
-      }
-
-      if (gender !== 'male' && gender !== 'female') {
-        return 'Per questo evento admin sono ammessi solo uomo/donna.';
-      }
-
-      const alreadyPresent =
-        persisted.mainEventState.participants.some((item) => item.email === normalized) ||
-        persisted.mainEventState.waitingList.some((item) => item.email === normalized);
-
-      if (alreadyPresent) {
-        return 'Questo utente è già presente in evento o waiting list.';
-      }
-
-      setPersisted((prev) => ({
-        ...prev,
-        mainEventState: {
-          ...prev.mainEventState,
-          participants:
-            destination === 'participants'
-              ? [...prev.mainEventState.participants, { email: normalized, gender }]
-              : prev.mainEventState.participants,
-          waitingList:
-            destination === 'waitingList'
-              ? [...prev.mainEventState.waitingList, { email: normalized, gender }]
-              : prev.mainEventState.waitingList,
-          history: [
-            ...prev.mainEventState.history,
-            createHistoryEntry(
-              normalized,
-              destination === 'participants' ? 'confirmed' : 'waitlisted',
-              prev.mainEventConfig
-            )
-          ]
-        }
-      }));
-
-      pushNotification({
-        type: 'event',
-        title: 'Evento aggiornato',
-        body:
-          destination === 'participants'
-            ? `${normalized} aggiunto ai partecipanti.`
-            : `${normalized} aggiunto alla waiting list.`
-      });
-
-      return null;
-    },
-    [persisted.mainEventState.participants, persisted.mainEventState.waitingList, pushNotification]
-  );
-
-  const adminRemoveMainEventParticipant = useCallback(
-    (email: string, destination: ParticipantBucket): string | null => {
-      const normalized = normalizeEmail(email);
-
-      if (destination === 'participants') {
-        const exists = persisted.mainEventState.participants.some((item) => item.email === normalized);
-        if (!exists) {
-          return 'Utente non presente tra i partecipanti.';
-        }
-
-        setPersisted((prev) => ({
-          ...prev,
-          mainEventState: removeUserFromMainEvent(prev.mainEventState, normalized, prev.mainEventConfig)
-        }));
-      } else {
-        const exists = persisted.mainEventState.waitingList.some((item) => item.email === normalized);
-        if (!exists) {
-          return 'Utente non presente in waiting list.';
-        }
-
-        setPersisted((prev) => ({
-          ...prev,
-          mainEventState: {
-            ...prev.mainEventState,
-            waitingList: prev.mainEventState.waitingList.filter((item) => item.email !== normalized),
-            history: [
-              ...prev.mainEventState.history,
-              createHistoryEntry(normalized, 'cancelled', prev.mainEventConfig)
-            ]
-          }
-        }));
-      }
-
-      pushNotification({
-        type: 'event',
-        title: 'Evento aggiornato',
-        body: `${normalized} rimosso da ${destination === 'participants' ? 'partecipanti' : 'waiting list'}.`
-      });
-
-      return null;
-    },
-    [persisted.mainEventState.participants, persisted.mainEventState.waitingList, pushNotification]
-  );
-
-  const updateMessageDeliveryState = useCallback(
-    (
-      threadId: string,
-      messageId: string,
-      patch: Partial<Pick<ChatMessage, 'deliveryState' | 'readAt'>>
-    ): void => {
-      setPersisted((prev) => ({
-        ...prev,
-        threads: prev.threads.map((thread) => {
-          if (thread.id !== threadId) {
-            return thread;
-          }
-
-          return {
-            ...thread,
-            messages: thread.messages.map((message) => {
-              if (message.id !== messageId) {
-                return message;
-              }
-
-              return {
-                ...message,
-                ...patch
-              };
-            })
-          };
-        })
-      }));
-    },
-    []
-  );
 
   const sendMessage = useCallback(
     (input: SendMessageInput): void => {
@@ -1730,122 +1479,64 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return;
       }
 
-      const targetThread = persisted.threads.find((thread) => thread.id === input.threadId);
-      if (!targetThread) {
+      if (!persisted.threads.some((thread) => thread.id === input.threadId)) {
         return;
       }
 
-      if (IS_BACKEND_MODE && appwriteService) {
-        void (async () => {
-          try {
-            const pendingMessages =
-              attachments.length > 0
-                ? attachments.map((attachment, index) => ({
+      void (async () => {
+        try {
+          const pendingMessages =
+            attachments.length > 0
+              ? attachments.map((attachment, index) => ({
+                  threadId: input.threadId,
+                  text: index === 0 ? normalizedText : '',
+                  replyToMessageId: index === 0 ? input.replyToMessageId : undefined,
+                  attachment
+                }))
+              : [
+                  {
                     threadId: input.threadId,
-                    text: index === 0 ? normalizedText : '',
-                    replyToMessageId: index === 0 ? input.replyToMessageId : undefined,
-                    attachment
-                  }))
-                : [
-                    {
-                      threadId: input.threadId,
-                      text: normalizedText,
-                      replyToMessageId: input.replyToMessageId
-                    }
-                  ];
-            const sentMessages: ChatMessage[] = [];
+                    text: normalizedText,
+                    replyToMessageId: input.replyToMessageId
+                  }
+                ];
+          const sentMessages: ChatMessage[] = [];
 
-            for (const pendingMessage of pendingMessages) {
-              const message = await appwriteService.sendMessage(pendingMessage);
-              sentMessages.push({
-                ...message,
-                senderName: currentUser ? getDisplayName(currentUser) : 'Tu'
-              });
-            }
-
-            setPersisted((prev) => ({
-              ...prev,
-              threads: prev.threads.map((thread) => {
-                if (thread.id !== input.threadId) {
-                  return thread;
-                }
-
-                return {
-                  ...thread,
-                  unreadCount: 0,
-                  messages: mergeChatMessages(thread.messages, sentMessages),
-                  isTyping: false
-                };
-              })
-            }));
-          } catch {
-            // Leave the thread untouched when the backend rejects the message.
-          }
-        })();
-
-        return;
-      }
-
-      const now = new Date();
-      const messageId = crypto.randomUUID();
-
-      setPersisted((prev) => ({
-        ...prev,
-        threads: prev.threads.map((thread) => {
-          if (thread.id !== input.threadId) {
-            return thread;
+          for (const pendingMessage of pendingMessages) {
+            const message = await appwriteService.sendMessage(pendingMessage);
+            sentMessages.push({
+              ...message,
+              senderName: currentUser ? getDisplayName(currentUser) : 'Tu'
+            });
           }
 
-          return {
-            ...thread,
-            messages: [
-              ...thread.messages,
-              {
-                id: messageId,
-                text: normalizedText,
-                isMe: true,
-                time: formatTime(now),
-                createdAt: now.toISOString(),
-                senderName: currentUser ? getDisplayName(currentUser) : 'Tu',
-                replyToMessageId: input.replyToMessageId,
-                attachments,
-                deliveryState: 'sending'
+          setPersisted((prev) => ({
+            ...prev,
+            threads: prev.threads.map((thread) => {
+              if (thread.id !== input.threadId) {
+                return thread;
               }
-            ],
-            isTyping: false
-          };
-        })
-      }));
 
-      const sentTimeout = window.setTimeout(() => {
-        updateMessageDeliveryState(input.threadId, messageId, { deliveryState: 'sent' });
-      }, 220);
-
-      const deliveredTimeout = window.setTimeout(() => {
-        updateMessageDeliveryState(input.threadId, messageId, { deliveryState: 'delivered' });
-      }, 900);
-
-      pendingTimeoutsRef.current.push(sentTimeout, deliveredTimeout);
-
-      if (targetThread.isOnline) {
-        const readTimeout = window.setTimeout(() => {
-          updateMessageDeliveryState(input.threadId, messageId, {
-            deliveryState: 'read',
-            readAt: nowIso()
-          });
-        }, 2600);
-        pendingTimeoutsRef.current.push(readTimeout);
-      }
+              return {
+                ...thread,
+                unreadCount: 0,
+                messages: mergeChatMessages(thread.messages, sentMessages),
+                isTyping: false
+              };
+            })
+          }));
+        } catch {
+          // Leave the thread untouched when the backend rejects the message.
+        }
+      })();
     },
-    [currentUser, persisted.threads, updateMessageDeliveryState]
+    [currentUser, persisted.threads]
   );
 
   const markThreadRead = useCallback((threadId: string): void => {
     const readAt = nowIso();
 
-    if (IS_BACKEND_MODE && appwriteService) {
-      void appwriteService.markThreadRead(threadId).catch(() => undefined);
-    }
+    void appwriteService.markThreadRead(threadId).catch(() => undefined);
 
     setPersisted((prev) => {
       let didChangeThread = false;
@@ -1925,23 +1616,21 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         )
       }));
 
-      if (IS_BACKEND_MODE && appwriteService) {
-        try {
-          await appwriteService.updateThreadNotifications(threadId, enabled);
-        } catch {
-          setPersisted((prev) => ({
-            ...prev,
-            threads: prev.threads.map((candidate) =>
-              candidate.id === threadId
-                ? {
-                    ...candidate,
-                    notificationsEnabled: thread.notificationsEnabled
-                  }
-                : candidate
-            )
-          }));
-          return 'Aggiornamento notifiche chat non riuscito. Riprova.';
-        }
+      try {
+        await appwriteService.updateThreadNotifications(threadId, enabled);
+      } catch {
+        setPersisted((prev) => ({
+          ...prev,
+          threads: prev.threads.map((candidate) =>
+            candidate.id === threadId
+              ? {
+                  ...candidate,
+                  notificationsEnabled: thread.notificationsEnabled
+                }
+              : candidate
+          )
+        }));
+        return 'Aggiornamento notifiche chat non riuscito. Riprova.';
       }
 
       return null;
@@ -1964,12 +1653,10 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         return 'Conversazione non trovata.';
       }
 
-      if (IS_BACKEND_MODE && appwriteService && appwriteConfiguration?.manageRelationshipFunctionId) {
-        try {
-          await appwriteService.updateRelationship(threadId, action);
-        } catch {
-          return 'Operazione relazione non riuscita. Riprova.';
-        }
+      try {
+        await appwriteService.updateRelationship(threadId, action);
+      } catch {
+        return 'Operazione relazione non riuscita. Riprova.';
       }
 
       setPersisted((prev) => ({
@@ -1994,71 +1681,69 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         };
       }
 
-      if (IS_BACKEND_MODE && appwriteService) {
-        const backendDecision = decision === 'right' ? 'liked' : 'passed';
+      const backendDecision = decision === 'right' ? 'liked' : 'passed';
+      const sessionGeneration = sessionInvalidationRef.current;
 
-        try {
-          const thread = await appwriteService.submitSwipe(profile.id, profile.name, backendDecision);
-
-          if (!thread) {
-            return {
-              matched: false,
-              message: decision === 'left'
-                ? `Hai saltato ${profile.name}.`
-                : `Like inviato a ${profile.name}.`,
-              recorded: true
-            };
-          }
-
-          const createdAt = nowIso();
-          const matchNotification: AppNotification = {
-            id: crypto.randomUUID(),
-            type: 'match',
-            title: `Nuovo match con ${profile.name}`,
-            body: 'La chat è stata creata automaticamente.',
-            createdAt,
-            threadId: thread.id
-          };
-
-          setPersisted((prev) => ({
-            ...prev,
-            threads: [
-              thread,
-              ...prev.threads.filter((existingThread) => existingThread.id !== thread.id)
-            ],
-            notifications: isNotificationEnabledForType(prev.settings, 'match')
-              ? [matchNotification, ...prev.notifications].slice(0, 180)
-              : prev.notifications
-          }));
-
-          return {
-            matched: true,
-            threadId: thread.id,
-            message: `È un match con ${profile.name}!`,
-            recorded: true
-          };
-        } catch {
+      try {
+        const thread = await appwriteService.submitSwipe(profile.id, profile.name, backendDecision);
+        if (sessionGeneration !== sessionInvalidationRef.current) {
           return {
             matched: false,
-            message: 'Swipe non registrato. Riprova.',
+            message: 'Sessione terminata.',
             recorded: false
           };
         }
-      }
 
-      return {
-        matched: false,
-        message: IS_BACKEND_MODE
-          ? 'Swipe non disponibile. Riprova.'
-          : 'Backend non configurato: impossibile creare chat o match.',
-        recorded: false
-      };
+        if (!thread) {
+          return {
+            matched: false,
+            message: decision === 'left'
+              ? `Hai saltato ${profile.name}.`
+              : `Like inviato a ${profile.name}.`,
+            recorded: true
+          };
+        }
+
+        const createdAt = nowIso();
+        const matchNotification: AppNotification = {
+          id: crypto.randomUUID(),
+          type: 'match',
+          title: `Nuovo match con ${profile.name}`,
+          body: 'La chat è stata creata automaticamente.',
+          createdAt,
+          threadId: thread.id
+        };
+
+        setPersisted((prev) => ({
+          ...prev,
+          threads: [
+            thread,
+            ...prev.threads.filter((existingThread) => existingThread.id !== thread.id)
+          ],
+          notifications: isNotificationEnabledForType(prev.settings, 'match')
+            ? [matchNotification, ...prev.notifications].slice(0, 180)
+            : prev.notifications
+        }));
+
+        return {
+          matched: true,
+          threadId: thread.id,
+          message: `È un match con ${profile.name}!`,
+          recorded: true
+        };
+      } catch {
+        return {
+          matched: false,
+          message: 'Swipe non registrato. Riprova.',
+          recorded: false
+        };
+      }
     },
     [discoverProfiles]
   );
 
   const fetchMainEventAdminState = useCallback(async (eventId?: string): Promise<EventAdminActionResult> => {
-    if (!IS_EVENT_ADMIN_ENABLED || !appwriteService) {
+    if (!IS_EVENT_ADMIN_ENABLED) {
       return {
         state: null,
         error: 'Funzione admin evento non configurata.'
@@ -2083,7 +1768,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     eventId: string,
     draft: EventAdminDraftInput
   ): Promise<EventAdminActionResult> => {
-    if (!IS_EVENT_ADMIN_ENABLED || !appwriteService) {
+    if (!IS_EVENT_ADMIN_ENABLED) {
       return {
         state: null,
         error: 'Funzione admin evento non configurata.'
@@ -2116,7 +1801,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     lookup: string,
     status: EventAdminMutableStatus
   ): Promise<EventAdminActionResult> => {
-    if (!IS_EVENT_ADMIN_ENABLED || !appwriteService) {
+    if (!IS_EVENT_ADMIN_ENABLED) {
       return {
         state: null,
         error: 'Funzione admin evento non configurata.'
@@ -2155,7 +1840,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     eventId: string,
     registrationId: string
   ): Promise<EventAdminActionResult> => {
-    if (!IS_EVENT_ADMIN_ENABLED || !appwriteService) {
+    if (!IS_EVENT_ADMIN_ENABLED) {
       return {
         state: null,
         error: 'Funzione admin evento non configurata.'
@@ -2252,6 +1937,66 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
   useEffect(() => {
     if (
+      !hasMainEvent ||
+      !currentUser ||
+      (!mainEventFlags.isRegistered && !mainEventFlags.isWaiting) ||
+      !isNotificationEnabledForType(persisted.settings, 'event')
+    ) {
+      return;
+    }
+
+    const eventId = remoteMainEventState?.eventId;
+    if (!eventId) {
+      return;
+    }
+    const eventStartsAt = Date.parse(resolvedMainEventConfig.date);
+    if (Number.isNaN(eventStartsAt)) {
+      return;
+    }
+
+    const reconcileReminder = () => {
+      const remainingMs = eventStartsAt - Date.now();
+      if (remainingMs <= 0 || remainingMs > 24 * 60 * 60 * 1000) {
+        return;
+      }
+      const milestone = remainingMs <= 60 * 60 * 1000 ? '1h' : '24h';
+      const reminderId = `event-reminder:${eventId}:${milestone}`;
+      setPersisted((prev) => {
+        if (prev.notifications.some((notification) => notification.id === reminderId)) {
+          return prev;
+        }
+        const isEnglish = prev.settings.language === 'en';
+        return {
+          ...prev,
+          notifications: [{
+            id: reminderId,
+            type: 'event',
+            title: isEnglish ? 'Event reminder' : 'Promemoria evento',
+            body: isEnglish
+              ? `${resolvedMainEventConfig.title} starts ${milestone === '1h' ? 'within one hour' : 'within 24 hours'}.`
+              : `${resolvedMainEventConfig.title} inizia ${milestone === '1h' ? 'entro un’ora' : 'entro 24 ore'}.`,
+            createdAt: nowIso()
+          }, ...prev.notifications]
+        };
+      });
+    };
+
+    reconcileReminder();
+    const interval = window.setInterval(reconcileReminder, 60_000);
+    return () => window.clearInterval(interval);
+  }, [
+    currentUser,
+    hasMainEvent,
+    mainEventFlags.isRegistered,
+    mainEventFlags.isWaiting,
+    persisted.settings,
+    remoteMainEventState?.eventId,
+    resolvedMainEventConfig.date,
+    resolvedMainEventConfig.title
+  ]);
+
+  useEffect(() => {
+    if (
       notificationPermission !== 'granted' ||
       !persisted.settings.browserPushEnabled ||
       typeof window === 'undefined' ||
@@ -2280,11 +2025,12 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   const contextValue = useMemo<AppContextValue>(
     () => ({
       persisted,
-      isBackendMode: IS_BACKEND_MODE,
+      isAuthInitialized,
       currentUser,
       discoverProfiles,
       mainEventConfig: resolvedMainEventConfig,
-      mainEventInfo,
+      mainEventInfo: resolvedMainEventInfo,
+      hasMainEvent,
       isEventAdmin,
       isEventAdminEnabled: IS_EVENT_ADMIN_ENABLED,
       mainEventSnapshot,
@@ -2303,10 +2049,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       willUserLoseEventRegistrations,
       registerCurrentUserForMainEvent,
       cancelCurrentUserMainEventRegistration,
-      updateMainEventConfig,
-      updateMainEventInfo,
-      adminAddMainEventParticipant,
-      adminRemoveMainEventParticipant,
       sendMessage,
       markThreadRead,
       setThreadNotifications,
@@ -2325,10 +2067,12 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     }),
     [
       persisted,
+      isAuthInitialized,
       currentUser,
       discoverProfiles,
       resolvedMainEventConfig,
-      mainEventInfo,
+      resolvedMainEventInfo,
+      hasMainEvent,
       isEventAdmin,
       mainEventSnapshot,
       mainEventFlags,
@@ -2346,10 +2090,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       willUserLoseEventRegistrations,
       registerCurrentUserForMainEvent,
       cancelCurrentUserMainEventRegistration,
-      updateMainEventConfig,
-      updateMainEventInfo,
-      adminAddMainEventParticipant,
-      adminRemoveMainEventParticipant,
       sendMessage,
       markThreadRead,
       setThreadNotifications,

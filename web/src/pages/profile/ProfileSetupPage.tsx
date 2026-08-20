@@ -195,15 +195,15 @@ export function ProfileSetupPage(): JSX.Element {
   const [orientation, setOrientation] = useState<UserOrientation>(currentUser?.orientation ?? 'straight');
   const [bio, setBio] = useState(currentUser?.bio ?? '');
   const [intent, setIntent] = useState<MatchIntent>(currentUser?.intent ?? 'relationship');
-  const [interests, setInterests] = useState(currentUser?.hobbies ?? '');
+  const [interests, setInterests] = useState(currentUser?.interests ?? '');
   const [preferredGenders, setPreferredGenders] = useState<UserGender[]>(
     defaultPreferredGenders(currentUser?.preferredGenders)
   );
   const [ageRangeMin, setAgeRangeMin] = useState(
-    ageInputValue(currentUser?.ageRangeMin ?? currentUser?.minPreferredAge, 20)
+    ageInputValue(currentUser?.minPreferredAge, 20)
   );
   const [ageRangeMax, setAgeRangeMax] = useState(
-    ageInputValue(currentUser?.ageRangeMax ?? currentUser?.maxPreferredAge, 32)
+    ageInputValue(currentUser?.maxPreferredAge, 32)
   );
   const [maxDistanceKm, setMaxDistanceKm] = useState(
     currentUser?.maxDistanceKm == null ? '' : String(currentUser.maxDistanceKm)
@@ -584,32 +584,24 @@ export function ProfileSetupPage(): JSX.Element {
       firstName,
       lastName,
       city: resolvedCity.city,
-      cityLat: resolvedCity.lat,
-      cityLng: resolvedCity.lng,
+      latitude: resolvedCity.lat,
+      longitude: resolvedCity.lng,
       birthDate,
       gender,
       orientation,
-      showMe: 'everyone',
       preferredGenders,
       smokes,
       drinks,
       excludeSmokers,
       excludeDrinkers,
       bio,
-      ageRangeMin: parsedAgeRangeMin,
-      ageRangeMax: parsedAgeRangeMax,
+      minPreferredAge: parsedAgeRangeMin,
+      maxPreferredAge: parsedAgeRangeMax,
       maxDistanceKm: parsedMaxDistance,
       intent,
-      hobbies: interests,
-      passions: '',
-      lookingFor: '',
-      instagram: '',
+      interests,
       instagramTag,
-      telegram: '',
-      spotifyTag,
-      website: '',
-      favoriteSong: '',
-      favoriteMovie: ''
+      spotifyTag
     });
     setIsSaving(false);
 
@@ -762,6 +754,11 @@ export function ProfileSetupPage(): JSX.Element {
                       </div>
                     )}
                   </div>
+                  <small className="city-autocomplete__attribution">
+                    <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+                      {t('geocoding.attribution')}
+                    </a>
+                  </small>
                 </label>
 
                 <label>
@@ -824,7 +821,7 @@ export function ProfileSetupPage(): JSX.Element {
               </label>
 
               <div className="profile-setup-form__section-head">
-                <h4>{t('profileSetup.showMe.title')}</h4>
+                <h4>{t('profileSetup.preferredGenders.title')}</h4>
               </div>
 
               <div className="profile-setup-choice-grid">
@@ -895,7 +892,8 @@ export function ProfileSetupPage(): JSX.Element {
                   {t('account.maxDistance')}
                   <input
                     type="number"
-                    min={0}
+                    min={5}
+                    max={999}
                     value={maxDistanceKm}
                     placeholder={t('profileSetup.maxDistance.placeholder')}
                     onChange={(event) => setMaxDistanceKm(event.target.value)}

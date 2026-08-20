@@ -19,7 +19,6 @@ export function HomePage(): JSX.Element {
   const { t } = useI18n();
 
   const filteredProfiles = useMemo(() => {
-    const showMe = currentUser?.showMe ?? 'everyone';
     const preferredGenders = currentUser?.preferredGenders;
 
     return discoverProfiles.filter((profile) => {
@@ -27,9 +26,9 @@ export function HomePage(): JSX.Element {
         return false;
       }
 
-      return preferredGenderMatches(preferredGenders, showMe, profile.gender);
+      return preferredGenderMatches(preferredGenders, profile.gender);
     });
-  }, [currentUser?.preferredGenders, currentUser?.showMe, discoverProfiles]);
+  }, [currentUser?.preferredGenders, discoverProfiles]);
 
   const [index, setIndex] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
@@ -132,6 +131,8 @@ export function HomePage(): JSX.Element {
                     showDistance={settings.showDistance}
                     showIntent={settings.showIntent}
                     showInterests={settings.showInterests}
+                    showInstagramTag={settings.showInstagramTag}
+                    showSpotifyTag={settings.showSpotifyTag}
                     style={{
                       transform: isTopCard
                         ? `translateX(${dragOffset}px) translateY(0px) rotate(${dragOffset / 22}deg)`

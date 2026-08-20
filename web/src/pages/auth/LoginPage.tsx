@@ -61,7 +61,7 @@ export function LoginPage(): JSX.Element {
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="nome@email.com"
+                placeholder="nome@example.com"
                 autoComplete="username"
               />
             </label>

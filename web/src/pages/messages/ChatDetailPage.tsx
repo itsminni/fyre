@@ -7,19 +7,17 @@ import { ChatAttachment, ChatMessage } from '../../types/models';
 import { formatLastSeen } from '../../utils/formatLastSeen';
 
 const CHAT_ATTACHMENT_EXTENSIONS = [
-  'heif',
   'jpg',
-  'pdf',
-  'gif',
-  'mp4',
   'jpeg',
-  'hevc',
   'png',
-  'mp3',
+  'webp',
+  'heic',
+  'pdf',
   'm4a',
-  'aac',
+  'mp3',
   'wav',
-  'zip'
+  'mp4',
+  'mov'
 ] as const;
 const CHAT_ATTACHMENT_ACCEPT = CHAT_ATTACHMENT_EXTENSIONS.map((extension) => `.${extension}`).join(',');
 const CHAT_ATTACHMENT_EXTENSION_SET = new Set<string>(CHAT_ATTACHMENT_EXTENSIONS);
@@ -589,7 +587,6 @@ export function ChatDetailPage(): JSX.Element {
   const { threadId } = useParams();
   const {
     persisted,
-    isBackendMode,
     sendMessage,
     markThreadRead,
     setThreadNotifications,
@@ -875,7 +872,7 @@ export function ChatDetailPage(): JSX.Element {
     }
   }
 
-  if (!thread && isBackendMode && persisted.realtimeState !== 'connected') {
+  if (!thread && persisted.realtimeState !== 'connected') {
     return (
       <section className="chat-detail-page fade-in-up">
         <Link className="chat-back-link" to="/app/messages">

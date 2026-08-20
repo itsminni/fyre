@@ -2,19 +2,19 @@ import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { MainTabsLayout } from './components/layout/MainTabsLayout';
-import { MobileAppGate } from './components/layout/MobileAppGate';
 import { useAppStore } from './hooks/useAppStore';
 import { isProfileComplete } from './types/models';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { SignUpPage } from './pages/auth/SignUpPage';
-import { TermsPrivacyPage } from './pages/auth/TermsPrivacyPage';
+import { DemoNoticePage } from './pages/auth/DemoNoticePage';
 import { ProfileSetupPage } from './pages/profile/ProfileSetupPage';
 import { HomePage } from './pages/home/HomePage';
 import { MessagesPage } from './pages/messages/MessagesPage';
 import { ChatDetailPage } from './pages/messages/ChatDetailPage';
 import { EventsPage } from './pages/events/EventsPage';
 import { EventDetailPage } from './pages/events/EventDetailPage';
+import { EventAdminPage } from './pages/events/EventAdminPage';
 import { AccountPage } from './pages/account/AccountPage';
 import { EventHistoryPage } from './pages/account/EventHistoryPage';
 
@@ -27,6 +27,7 @@ function ThemeBridge(): null {
 
   useEffect(() => {
     const root = document.documentElement;
+    root.lang = language;
 
     if (themeMode === 'system') {
       const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -35,7 +36,6 @@ function ThemeBridge(): null {
     }
 
     root.dataset.theme = themeMode;
-    root.lang = language;
   }, [language, themeMode]);
 
   return null;
@@ -80,15 +80,32 @@ function RootRedirect(): JSX.Element {
 }
 
 function AppRoutes(): JSX.Element {
+  const { isAuthInitialized, persisted } = useAppStore();
+
+  if (!isAuthInitialized) {
+    const message = persisted.settings.language === 'it'
+      ? 'Ripristino della sessione…'
+      : 'Restoring your session…';
+
+    return (
+      <>
+        <ThemeBridge />
+        <main className="auth-bootstrap" role="status" aria-live="polite" aria-busy="true">
+          <img src="/images/fyre-app-icon.png" alt="" aria-hidden />
+          <span>{message}</span>
+        </main>
+      </>
+    );
+  }
+
   return (
     <>
       <ThemeBridge />
-      <MobileAppGate />
       <Routes>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/auth/login" element={<LoginPage />} />
         <Route path="/auth/signup" element={<SignUpPage />} />
-        <Route path="/auth/terms-privacy" element={<TermsPrivacyPage />} />
+        <Route path="/auth/demo-notice" element={<DemoNoticePage />} />
 
         <Route element={<RequireAuth />}>
           <Route path="/profile/setup" element={<ProfileSetupPage />} />
@@ -102,7 +119,7 @@ function AppRoutes(): JSX.Element {
             <Route path="messages/:threadId" element={<ChatDetailPage />} />
             <Route path="events" element={<EventsPage />} />
             <Route path="events/main" element={<EventDetailPage />} />
-            <Route path="events/admin" element={<Navigate to="/app/events/main" replace />} />
+            <Route path="events/admin" element={<EventAdminPage />} />
             <Route path="account" element={<AccountPage />} />
             <Route path="account/events" element={<EventHistoryPage />} />
           </Route>

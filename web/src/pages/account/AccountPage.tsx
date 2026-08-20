@@ -23,16 +23,16 @@ import {
 } from '../../services/geocode';
 import {
   EventHistoryStatus,
+  GENDER_OPTIONS,
   MatchIntent,
   ThemeMode,
   UserGender,
   UserOrientation,
-  UserShowMe,
   calculateAge,
   getDisplayName
 } from '../../types/models';
 
-type Section = 'account' | 'preferences' | 'notifications' | 'security' | 'appearance' | 'events';
+type Section = 'account' | 'preferences' | 'notifications' | 'appearance' | 'events';
 
 interface FeedbackState {
   isError: boolean;
@@ -46,12 +46,6 @@ const orientationLabelKeys: Record<UserOrientation, TranslationKey> = {
   bisexual: 'orientation.bisexual',
   pansexual: 'orientation.pansexual',
   other: 'orientation.other'
-};
-
-const showMeLabelKeys: Record<UserShowMe, TranslationKey> = {
-  men: 'showMe.men',
-  women: 'showMe.women',
-  everyone: 'showMe.everyone'
 };
 
 const genderLabelKeys: Record<UserGender, TranslationKey> = {
@@ -106,22 +100,12 @@ interface SwipePhotoCropDragState {
 }
 
 function defaultPreferredGenders(
-  preferredGenders: UserGender[] | undefined,
-  showMe: UserShowMe | undefined
+  preferredGenders: UserGender[] | undefined
 ): UserGender[] {
   if (preferredGenders && preferredGenders.length > 0) {
     return preferredGenders;
   }
-
-  if (showMe === 'men') {
-    return ['male'];
-  }
-
-  if (showMe === 'women') {
-    return ['female'];
-  }
-
-  return ['male', 'female'];
+  return [...GENDER_OPTIONS];
 }
 
 function ageInputValue(value: number | undefined, fallback: number): string {
@@ -217,7 +201,6 @@ export function AccountPage(): JSX.Element {
   const [section, setSection] = useState<Section>('account');
   const [profileFeedback, setProfileFeedback] = useState<FeedbackState | null>(null);
   const [settingsFeedback, setSettingsFeedback] = useState<FeedbackState | null>(null);
-  const [securityFeedback, setSecurityFeedback] = useState<FeedbackState | null>(null);
   const [isSavingSwipePhotos, setIsSavingSwipePhotos] = useState(false);
   const [pendingSwipePhotoCrop, setPendingSwipePhotoCrop] = useState<SwipePhotoCropState | null>(null);
   const [swipePhotoCropDrag, setSwipePhotoCropDrag] = useState<SwipePhotoCropDragState | null>(null);
@@ -230,9 +213,8 @@ export function AccountPage(): JSX.Element {
   const [isCityFieldFocused, setIsCityFieldFocused] = useState(false);
 
   const [orientation, setOrientation] = useState<UserOrientation>(currentUser?.orientation ?? 'straight');
-  const [showMe, setShowMe] = useState<UserShowMe>(currentUser?.showMe ?? 'everyone');
   const [preferredGenders, setPreferredGenders] = useState<UserGender[]>(
-    defaultPreferredGenders(currentUser?.preferredGenders, currentUser?.showMe)
+    defaultPreferredGenders(currentUser?.preferredGenders)
   );
   const [city, setCity] = useState(currentUser?.city ?? '');
   const [smokes, setSmokes] = useState(Boolean(currentUser?.smokes));
@@ -241,23 +223,16 @@ export function AccountPage(): JSX.Element {
   const [excludeDrinkers, setExcludeDrinkers] = useState(Boolean(currentUser?.excludeDrinkers));
   const [bio, setBio] = useState(currentUser?.bio ?? '');
   const [ageRangeMin, setAgeRangeMin] = useState(
-    ageInputValue(currentUser?.ageRangeMin ?? currentUser?.minPreferredAge, 24)
+    ageInputValue(currentUser?.minPreferredAge, 24)
   );
   const [ageRangeMax, setAgeRangeMax] = useState(
-    ageInputValue(currentUser?.ageRangeMax ?? currentUser?.maxPreferredAge, 40)
+    ageInputValue(currentUser?.maxPreferredAge, 40)
   );
   const [maxDistanceKm, setMaxDistanceKm] = useState(distanceInputValue(currentUser?.maxDistanceKm));
   const [intent, setIntent] = useState<MatchIntent>(currentUser?.intent ?? 'relationship');
-  const [hobbies, setHobbies] = useState(currentUser?.hobbies ?? '');
-  const [passions, setPassions] = useState(currentUser?.passions ?? '');
-  const [lookingFor, setLookingFor] = useState(currentUser?.lookingFor ?? '');
-  const [instagram, setInstagram] = useState(currentUser?.instagram ?? '');
+  const [interests, setInterests] = useState(currentUser?.interests ?? '');
   const [instagramTag, setInstagramTag] = useState(currentUser?.instagramTag ?? '');
-  const [telegram, setTelegram] = useState(currentUser?.telegram ?? '');
   const [spotifyTag, setSpotifyTag] = useState(currentUser?.spotifyTag ?? '');
-  const [website, setWebsite] = useState(currentUser?.website ?? '');
-  const [favoriteSong, setFavoriteSong] = useState(currentUser?.favoriteSong ?? '');
-  const [favoriteMovie, setFavoriteMovie] = useState(currentUser?.favoriteMovie ?? '');
 
   const localCitySuggestions = useMemo(() => searchCities(city), [city]);
   const citySuggestions = useMemo(
@@ -275,8 +250,7 @@ export function AccountPage(): JSX.Element {
     const isCityBeingEdited = cityIsDirtyRef.current || isCityFieldFocused || city.trim().length > 0;
 
     setOrientation(currentUser.orientation ?? 'straight');
-    setShowMe(currentUser.showMe ?? 'everyone');
-    setPreferredGenders(defaultPreferredGenders(currentUser.preferredGenders, currentUser.showMe));
+    setPreferredGenders(defaultPreferredGenders(currentUser.preferredGenders));
     if (!isCityBeingEdited) {
       setCity(currentUser.city ?? '');
     }
@@ -290,20 +264,13 @@ export function AccountPage(): JSX.Element {
     setExcludeSmokers(Boolean(currentUser.excludeSmokers));
     setExcludeDrinkers(Boolean(currentUser.excludeDrinkers));
     setBio(currentUser.bio ?? '');
-    setAgeRangeMin(ageInputValue(currentUser.ageRangeMin ?? currentUser.minPreferredAge, 24));
-    setAgeRangeMax(ageInputValue(currentUser.ageRangeMax ?? currentUser.maxPreferredAge, 40));
+    setAgeRangeMin(ageInputValue(currentUser.minPreferredAge, 24));
+    setAgeRangeMax(ageInputValue(currentUser.maxPreferredAge, 40));
     setMaxDistanceKm(distanceInputValue(currentUser.maxDistanceKm));
     setIntent(currentUser.intent ?? 'relationship');
-    setHobbies(currentUser.hobbies ?? '');
-    setPassions(currentUser.passions ?? '');
-    setLookingFor(currentUser.lookingFor ?? '');
-    setInstagram(currentUser.instagram ?? '');
+    setInterests(currentUser.interests ?? '');
     setInstagramTag(currentUser.instagramTag ?? '');
-    setTelegram(currentUser.telegram ?? '');
     setSpotifyTag(currentUser.spotifyTag ?? '');
-    setWebsite(currentUser.website ?? '');
-    setFavoriteSong(currentUser.favoriteSong ?? '');
-    setFavoriteMovie(currentUser.favoriteMovie ?? '');
     accountAutosaveReadyRef.current = false;
     lastAccountAutosaveKeyRef.current = '';
   }, [city, currentUser, isCityFieldFocused]);
@@ -313,7 +280,6 @@ export function AccountPage(): JSX.Element {
       JSON.stringify({
         userEmail: currentUser?.email ?? null,
         orientation,
-        showMe,
         preferredGenders: [...preferredGenders].sort(),
         city,
         smokes,
@@ -325,21 +291,13 @@ export function AccountPage(): JSX.Element {
         ageRangeMax,
         maxDistanceKm,
         intent,
-        hobbies,
-        passions,
-        lookingFor,
-        instagram,
+        interests,
         instagramTag,
-        telegram,
-        spotifyTag,
-        website,
-        favoriteSong,
-        favoriteMovie
+        spotifyTag
       }),
     [
       currentUser?.email,
       orientation,
-      showMe,
       preferredGenders,
       city,
       smokes,
@@ -351,16 +309,9 @@ export function AccountPage(): JSX.Element {
       ageRangeMax,
       maxDistanceKm,
       intent,
-      hobbies,
-      passions,
-      lookingFor,
-      instagram,
+      interests,
       instagramTag,
-      telegram,
-      spotifyTag,
-      website,
-      favoriteSong,
-      favoriteMovie
+      spotifyTag
     ]
   );
 
@@ -394,30 +345,22 @@ export function AccountPage(): JSX.Element {
 
     const error = await updateAccountPreferences({
       city: shouldPersistCity ? resolvedCityValue : undefined,
-      cityLat: resolvedCityLat,
-      cityLng: resolvedCityLng,
+      latitude: resolvedCityLat,
+      longitude: resolvedCityLng,
       orientation,
-      showMe,
       preferredGenders,
       smokes,
       drinks,
       excludeSmokers,
       excludeDrinkers,
       bio,
-      ageRangeMin: parsedAgeRangeMin,
-      ageRangeMax: parsedAgeRangeMax,
+      minPreferredAge: parsedAgeRangeMin,
+      maxPreferredAge: parsedAgeRangeMax,
       maxDistanceKm: parsedMaxDistanceKm,
       intent,
-      hobbies,
-      passions,
-      lookingFor,
-      instagram,
+      interests,
       instagramTag,
-      telegram,
-      spotifyTag,
-      website,
-      favoriteSong,
-      favoriteMovie
+      spotifyTag
     });
     setProfileFeedback(
       error
@@ -440,27 +383,19 @@ export function AccountPage(): JSX.Element {
     drinks,
     excludeDrinkers,
     excludeSmokers,
-    favoriteMovie,
-    favoriteSong,
     city,
-    hobbies,
-    instagram,
+    interests,
     instagramTag,
     intent,
     isSelectedCityValue,
-    lookingFor,
     maxDistanceKm,
     orientation,
-    passions,
     preferredGenders,
     selectedCitySuggestion,
-    showMe,
     smokes,
     spotifyTag,
     t,
-    telegram,
     updateAccountPreferences,
-    website,
     willUserLoseEventRegistrations
   ]);
 
@@ -527,7 +462,6 @@ export function AccountPage(): JSX.Element {
       { value: 'preferences', label: t('account.tab.preferences') },
       { value: 'notifications', label: t('account.tab.notifications') },
       { value: 'appearance', label: t('account.tab.appearance') },
-      { value: 'security', label: t('account.tab.security') },
       { value: 'events', label: t('account.tab.events') }
     ],
     [t]
@@ -537,7 +471,6 @@ export function AccountPage(): JSX.Element {
     return <Navigate to="/" replace />;
   }
 
-  const currentEmail = currentUser.email;
   const swipePhotos = currentUser.profilePhotoDataItems ?? [];
   const remainingSwipePhotoSlots = MAX_PROFILE_PHOTOS - swipePhotos.length;
 
@@ -736,20 +669,6 @@ export function AccountPage(): JSX.Element {
     });
   }
 
-  function openSupportMail(subject: string, body: string): void {
-    const params = new URLSearchParams({ subject, body });
-    window.location.href = `mailto:support@example.test?${params.toString()}`;
-    setSecurityFeedback({ isError: false, message: 'App Mail aperta.' });
-  }
-
-  function openPasswordResetMail(): void {
-    openSupportMail('Password reset request', `Profile email: ${currentEmail}`);
-  }
-
-  function openEmailChangeMail(): void {
-    openSupportMail('Email change request', `Current profile email: ${currentEmail}\nNew email: `);
-  }
-
   return (
     <section className="account-page fade-in-up">
       <header className="section-header">
@@ -891,6 +810,11 @@ export function AccountPage(): JSX.Element {
                     </div>
                   )}
                 </div>
+                <small className="city-autocomplete__attribution">
+                  <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+                    {t('geocoding.attribution')}
+                  </a>
+                </small>
               </label>
 
               <label>
@@ -927,7 +851,7 @@ export function AccountPage(): JSX.Element {
 
               <label>
                 {t('account.interests')}
-                <textarea value={hobbies} onChange={(event) => setHobbies(event.target.value)} rows={2} />
+                <textarea value={interests} onChange={(event) => setInterests(event.target.value)} rows={2} />
               </label>
 
               <label>
@@ -948,17 +872,6 @@ export function AccountPage(): JSX.Element {
               <label>
                 {t('account.bio')}
                 <textarea value={bio} onChange={(event) => setBio(event.target.value)} rows={2} />
-              </label>
-
-              <label>
-                {t('account.showMe')}
-                <select value={showMe} onChange={(event) => setShowMe(event.target.value as UserShowMe)}>
-                  {(Object.keys(showMeLabelKeys) as UserShowMe[]).map((option) => (
-                    <option key={option} value={option}>
-                      {t(showMeLabelKeys[option])}
-                    </option>
-                  ))}
-                </select>
               </label>
 
               <label>
@@ -1020,7 +933,8 @@ export function AccountPage(): JSX.Element {
                 {t('account.maxDistance')}
                 <input
                   type="number"
-                  min={0}
+                  min={5}
+                  max={999}
                   value={maxDistanceKm}
                   placeholder={t('profileSetup.maxDistance.placeholder')}
                   onChange={(event) => setMaxDistanceKm(event.target.value)}
@@ -1297,35 +1211,6 @@ export function AccountPage(): JSX.Element {
                 />
               </label>
             </div>
-          </Card>
-        </div>
-      )}
-
-      {section === 'security' && (
-        <div className="account-stack">
-          <Card title={t('account.security.title')} subtitle={t('account.security.subtitle')}>
-            <dl className="account-details">
-              <div>
-                <dt>{t('account.email')}</dt>
-                <dd>{currentUser.email}</dd>
-              </div>
-            </dl>
-            <div className="account-inline-actions">
-              <Button onClick={openPasswordResetMail}>
-                {t('account.security.passwordReset')}
-              </Button>
-
-              <Button variant="secondary" onClick={openEmailChangeMail}>
-                {t('account.security.emailChange')}
-              </Button>
-
-            </div>
-
-            {securityFeedback && (
-              <p className={securityFeedback.isError ? 'form-feedback form-feedback--error' : 'form-feedback'}>
-                {securityFeedback.message}
-              </p>
-            )}
           </Card>
         </div>
       )}

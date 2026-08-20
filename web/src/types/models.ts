@@ -17,23 +17,18 @@ export type UserOrientation =
   | 'bisexual'
   | 'pansexual'
   | 'other';
-export type UserShowMe = 'men' | 'women' | 'everyone';
 
 export interface User {
   email: string;
-  password: string;
   appwriteUserId?: string;
   firstName?: string;
   lastName?: string;
   city?: string;
-  cityLat?: number;
-  cityLng?: number;
   latitude?: number;
   longitude?: number;
   birthDate?: string;
   gender?: UserGender;
   orientation?: UserOrientation;
-  showMe: UserShowMe;
   preferredGenders?: UserGender[];
   smokes?: boolean;
   drinks?: boolean;
@@ -42,20 +37,11 @@ export interface User {
   bio?: string;
   minPreferredAge?: number;
   maxPreferredAge?: number;
-  ageRangeMin?: number;
-  ageRangeMax?: number;
   maxDistanceKm?: number;
   intent?: MatchIntent;
-  hobbies?: string;
-  passions?: string;
-  lookingFor?: string;
-  instagram?: string;
+  interests?: string;
   instagramTag?: string;
-  telegram?: string;
   spotifyTag?: string;
-  website?: string;
-  favoriteSong?: string;
-  favoriteMovie?: string;
   avatarFileId?: string;
   photoFileIds?: string[];
   profileImageData?: string;
@@ -75,6 +61,8 @@ export interface DiscoverProfile {
   imageUrl?: string;
   photos?: string[];
   commonInterests?: string[];
+  instagramTag?: string;
+  spotifyTag?: string;
   relationshipState?: RelationshipState;
 }
 
@@ -128,11 +116,6 @@ export interface AppNotification {
   threadId?: string;
 }
 
-export interface EventParticipant {
-  email: string;
-  gender: UserGender;
-}
-
 export type EventHistoryStatus = 'confirmed' | 'waitlisted' | 'cancelled' | 'promoted';
 
 export interface EventHistoryItem {
@@ -142,12 +125,6 @@ export interface EventHistoryItem {
   eventDate: string;
   status: EventHistoryStatus;
   timestamp: string;
-}
-
-export interface MainEventState {
-  participants: EventParticipant[];
-  waitingList: EventParticipant[];
-  history: EventHistoryItem[];
 }
 
 export interface MainEventConfig {
@@ -166,6 +143,8 @@ export interface MainEventInfo {
   dressCode: string;
   description: string;
   rules: string[];
+  registrationClosesAt: string | null;
+  cancellationClosesAt: string | null;
 }
 
 export interface MainEventSnapshot {
@@ -183,6 +162,7 @@ export interface MainEventSnapshot {
 }
 
 export type EventAdminMutableStatus = 'confirmed' | 'waitlisted' | 'promoted';
+export type EventPublicationStatus = 'active' | 'draft' | 'cancelled' | 'completed' | 'archived';
 
 export interface EventAdminParticipant {
   registrationId: string;
@@ -198,28 +178,32 @@ export interface EventAdminParticipant {
 
 export interface EventAdminState {
   eventId: string;
+  status: EventPublicationStatus;
   title: string;
+  place: string;
+  description: string;
+  rules: string[];
   startsAt: string;
   maxParticipants: number;
   maleLimit: number;
   femaleLimit: number;
   registrationClosesAt: string | null;
   cancellationClosesAt: string | null;
-  adminUserIds: string;
-  adminEmails: string;
   participants: EventAdminParticipant[];
 }
 
 export interface EventAdminDraftInput {
+  status: EventPublicationStatus;
   title: string;
+  place: string;
+  description: string;
+  rules: string[];
   startsAt: string;
   maxParticipants: number;
   maleLimit: number;
   femaleLimit: number;
   registrationClosesAt: string | null;
   cancellationClosesAt: string | null;
-  adminUserIds: string;
-  adminEmails: string;
 }
 
 export interface AppSettings {
@@ -254,9 +238,6 @@ export interface PersistedAppState {
   currentUserEmail: string | null;
   realtimeState: RealtimeConnectionState;
   notifications: AppNotification[];
-  mainEventConfig: MainEventConfig;
-  mainEventInfo: MainEventInfo;
-  mainEventState: MainEventState;
   threads: ChatThread[];
   settings: AppSettings;
 }
@@ -272,32 +253,24 @@ export interface ProfileUpdateInput {
   firstName: string;
   lastName: string;
   city: string;
-  cityLat?: number;
-  cityLng?: number;
+  latitude?: number;
+  longitude?: number;
   birthDate: string;
   gender: UserGender;
   orientation: UserOrientation;
-  showMe: UserShowMe;
   preferredGenders: UserGender[];
   smokes: boolean;
   drinks: boolean;
   excludeSmokers: boolean;
   excludeDrinkers: boolean;
   bio: string;
-  ageRangeMin: number;
-  ageRangeMax: number;
+  minPreferredAge: number;
+  maxPreferredAge: number;
   maxDistanceKm?: number;
   intent: MatchIntent;
-  hobbies: string;
-  passions: string;
-  lookingFor: string;
-  instagram: string;
+  interests: string;
   instagramTag: string;
-  telegram: string;
   spotifyTag: string;
-  website: string;
-  favoriteSong: string;
-  favoriteMovie: string;
 }
 
 export const GENDER_OPTIONS: UserGender[] = ['male', 'female', 'nonBinary', 'other'];
@@ -309,7 +282,6 @@ export const ORIENTATION_OPTIONS: UserOrientation[] = [
   'pansexual',
   'other'
 ];
-export const SHOW_ME_OPTIONS: UserShowMe[] = ['men', 'women', 'everyone'];
 
 export function isValidEmail(email: string): boolean {
   const trimmed = email.trim();
@@ -324,103 +296,45 @@ export function isUserGender(value: unknown): value is UserGender {
   return value === 'male' || value === 'female' || value === 'nonBinary' || value === 'other';
 }
 
-export function preferredGendersFromShowMe(
-  showMe: UserShowMe,
-  preferredGenders?: UserGender[]
-): UserGender[] {
-  const sanitizedPreferredGenders = Array.isArray(preferredGenders)
-    ? preferredGenders.filter((gender): gender is UserGender => isUserGender(gender))
+export function normalizeUser(user: Pick<User, 'email'> & Partial<User>): User {
+  const preferredGenders = Array.isArray(user.preferredGenders)
+    ? user.preferredGenders.filter((gender): gender is UserGender => isUserGender(gender))
     : [];
-
-  if (sanitizedPreferredGenders.length > 0) {
-    return sanitizedPreferredGenders;
-  }
-
-  switch (showMe) {
-    case 'men':
-      return ['male'];
-    case 'women':
-      return ['female'];
-    default:
-      return [...GENDER_OPTIONS];
-  }
-}
-
-export function showMeFromPreferredGenders(preferredGenders?: UserGender[]): UserShowMe {
-  const sanitizedPreferredGenders = Array.isArray(preferredGenders)
-    ? preferredGenders.filter((gender): gender is UserGender => isUserGender(gender))
-    : [];
-
-  if (sanitizedPreferredGenders.length === 1 && sanitizedPreferredGenders[0] === 'male') {
-    return 'men';
-  }
-
-  if (sanitizedPreferredGenders.length === 1 && sanitizedPreferredGenders[0] === 'female') {
-    return 'women';
-  }
-
-  return 'everyone';
-}
-
-export function createEmptyUser(email: string, password: string): User {
-  return {
-    email: normalizeEmail(email),
-    password,
-    showMe: 'everyone',
-    preferredGenders: preferredGendersFromShowMe('everyone')
-  };
-}
-
-export function normalizeUser(user: Pick<User, 'email' | 'password'> & Partial<User>): User {
-  const preferredGenders = preferredGendersFromShowMe(
-    user.showMe ?? showMeFromPreferredGenders(user.preferredGenders),
-    user.preferredGenders
-  );
-  const showMe = showMeFromPreferredGenders(preferredGenders);
   const instagramTag = trimOptionalString(user.instagramTag);
   const spotifyTag = trimOptionalString(user.spotifyTag);
-  const cityLat = pickNumber(user.cityLat, user.latitude);
-  const cityLng = pickNumber(user.cityLng, user.longitude);
-  const ageRangeMin = pickInteger(user.ageRangeMin, user.minPreferredAge);
-  const ageRangeMax = pickInteger(user.ageRangeMax, user.maxPreferredAge);
 
   return {
-    ...user,
     email: normalizeEmail(user.email),
-    password: user.password,
+    appwriteUserId: user.appwriteUserId,
     firstName: trimOptionalString(user.firstName),
     lastName: trimOptionalString(user.lastName),
     city: trimOptionalString(user.city),
+    latitude: pickNumber(user.latitude),
+    longitude: pickNumber(user.longitude),
     birthDate: trimOptionalString(user.birthDate),
-    bio: trimOptionalString(user.bio),
-    hobbies: trimOptionalString(user.hobbies),
-    passions: trimOptionalString(user.passions),
-    lookingFor: trimOptionalString(user.lookingFor),
-    instagram: trimOptionalString(user.instagram),
-    instagramTag,
-    telegram: trimOptionalString(user.telegram),
-    spotifyTag,
-    website: trimOptionalString(user.website),
-    favoriteSong: trimOptionalString(user.favoriteSong),
-    favoriteMovie: trimOptionalString(user.favoriteMovie),
+    gender: user.gender,
+    orientation: user.orientation,
+    preferredGenders,
+    smokes: user.smokes,
+    drinks: user.drinks,
     excludeSmokers: typeof user.excludeSmokers === 'boolean' ? user.excludeSmokers : undefined,
     excludeDrinkers: typeof user.excludeDrinkers === 'boolean' ? user.excludeDrinkers : undefined,
+    bio: trimOptionalString(user.bio),
+    minPreferredAge: pickInteger(user.minPreferredAge),
+    maxPreferredAge: pickInteger(user.maxPreferredAge),
+    maxDistanceKm: user.maxDistanceKm,
+    intent: user.intent,
+    interests: trimOptionalString(user.interests),
+    instagramTag,
+    spotifyTag,
+    avatarFileId: user.avatarFileId,
     photoFileIds: Array.isArray(user.photoFileIds)
       ? user.photoFileIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
       : undefined,
+    profileImageData: user.profileImageData,
     profilePhotoDataItems: Array.isArray(user.profilePhotoDataItems)
       ? user.profilePhotoDataItems.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      : undefined,
-    showMe,
-    preferredGenders,
-    cityLat,
-    cityLng,
-    latitude: pickNumber(user.latitude, cityLat),
-    longitude: pickNumber(user.longitude, cityLng),
-    ageRangeMin,
-    ageRangeMax,
-    minPreferredAge: ageRangeMin,
-    maxPreferredAge: ageRangeMax
+      : undefined
   };
 }
 
@@ -463,25 +377,13 @@ export function isProfileComplete(user: User): boolean {
     calculateAge(user.birthDate ?? '') >= 18 &&
     Boolean(user.gender) &&
     Boolean(user.orientation) &&
-    typeof user.latitude === 'number' &&
-    typeof user.longitude === 'number' &&
-    preferredGendersFromShowMe(user.showMe, user.preferredGenders).length > 0
+    Array.isArray(user.preferredGenders) &&
+    user.preferredGenders.length > 0
   );
-}
-
-export function audienceMatches(showMe: UserShowMe, gender: UserGender): boolean {
-  if (showMe === 'everyone') {
-    return true;
-  }
-  if (showMe === 'men') {
-    return gender === 'male';
-  }
-  return gender === 'female';
 }
 
 export function preferredGenderMatches(
   preferredGenders: UserGender[] | undefined,
-  showMe: UserShowMe,
   gender: UserGender | undefined
 ): boolean {
   if (!gender) {
@@ -492,26 +394,7 @@ export function preferredGenderMatches(
     return preferredGenders.includes(gender);
   }
 
-  return audienceMatches(showMe, gender);
-}
-
-export function inferShowMeFromPreferredGenders(
-  preferredGenders: UserGender[] | undefined,
-  fallback: UserShowMe = 'everyone'
-): UserShowMe {
-  if (!preferredGenders || preferredGenders.length === 0) {
-    return fallback;
-  }
-
-  if (preferredGenders.length === 1 && preferredGenders[0] === 'male') {
-    return 'men';
-  }
-
-  if (preferredGenders.length === 1 && preferredGenders[0] === 'female') {
-    return 'women';
-  }
-
-  return 'everyone';
+  return true;
 }
 
 function trimOptionalString(value: string | null | undefined): string | undefined {

@@ -8,22 +8,41 @@ import {
   EventAdminMutableStatus,
   EventAdminParticipant,
   EventAdminState,
-  EventHistoryStatus
+  EventHistoryStatus,
+  EventPublicationStatus
 } from '../../types/models';
 
 interface AdminDraftFormState {
+  status: EventPublicationStatus;
   title: string;
+  place: string;
+  description: string;
+  rules: string;
   startsAt: string;
   maxParticipants: string;
   maleLimit: string;
   femaleLimit: string;
   registrationClosesAt: string;
   cancellationClosesAt: string;
-  adminUserIds: string;
-  adminEmails: string;
 }
 
 const ADMIN_STATUS_OPTIONS: EventAdminMutableStatus[] = ['confirmed', 'waitlisted', 'promoted'];
+const EVENT_STATUS_OPTIONS: EventPublicationStatus[] = [
+  'draft',
+  'active',
+  'cancelled',
+  'completed',
+  'archived'
+];
+const EVENT_STATUS_LABEL: Record<EventPublicationStatus, string> = {
+  active: 'Pubblicato',
+  draft: 'Bozza',
+  cancelled: 'Annullato',
+  completed: 'Concluso',
+  archived: 'Archiviato'
+};
+const MAX_EVENT_CAPACITY = 500;
+const MAX_EVENT_RULES = 50;
 const PARTICIPANT_STATUS_LABEL: Record<EventHistoryStatus, string> = {
   confirmed: 'Confermato',
   promoted: 'Promosso',
@@ -61,15 +80,17 @@ function toIsoString(value: string): string | null {
 
 function makeDraftFormState(state: EventAdminState): AdminDraftFormState {
   return {
+    status: state.status,
     title: state.title,
+    place: state.place,
+    description: state.description,
+    rules: state.rules.join('\n'),
     startsAt: toDateTimeLocal(state.startsAt),
     maxParticipants: String(state.maxParticipants),
     maleLimit: String(state.maleLimit),
     femaleLimit: String(state.femaleLimit),
     registrationClosesAt: toDateTimeLocal(state.registrationClosesAt),
-    cancellationClosesAt: toDateTimeLocal(state.cancellationClosesAt),
-    adminUserIds: state.adminUserIds,
-    adminEmails: state.adminEmails
+    cancellationClosesAt: toDateTimeLocal(state.cancellationClosesAt)
   };
 }
 
@@ -162,21 +183,47 @@ export function EventAdminPage(): JSX.Element {
       return;
     }
 
+    const rules = draft.rules.split('\n').map((rule) => rule.trim()).filter(Boolean);
     const payload: EventAdminDraftInput = {
+      status: draft.status,
       title: draft.title.trim(),
+      place: draft.place.trim(),
+      description: draft.description.trim(),
+      rules,
       startsAt,
       maxParticipants: Number(draft.maxParticipants),
       maleLimit: Number(draft.maleLimit),
       femaleLimit: Number(draft.femaleLimit),
       registrationClosesAt: toIsoString(draft.registrationClosesAt),
-      cancellationClosesAt: toIsoString(draft.cancellationClosesAt),
-      adminUserIds: draft.adminUserIds.trim(),
-      adminEmails: draft.adminEmails.trim()
+      cancellationClosesAt: toIsoString(draft.cancellationClosesAt)
     };
 
     if (!payload.title) {
       setFeedback({
         text: 'Il titolo evento non può essere vuoto.',
+        isError: true
+      });
+      return;
+    }
+
+    if (
+      payload.title.length > 200 ||
+      payload.place.length > 256 ||
+      payload.description.length > 4_000 ||
+      rules.length > MAX_EVENT_RULES ||
+      rules.some((rule) => rule.length > 500) ||
+      !Number.isInteger(payload.maxParticipants) ||
+      payload.maxParticipants < 2 ||
+      payload.maxParticipants > MAX_EVENT_CAPACITY ||
+      !Number.isInteger(payload.maleLimit) ||
+      payload.maleLimit < 0 ||
+      payload.maleLimit > MAX_EVENT_CAPACITY ||
+      !Number.isInteger(payload.femaleLimit) ||
+      payload.femaleLimit < 0 ||
+      payload.femaleLimit > MAX_EVENT_CAPACITY
+    ) {
+      setFeedback({
+        text: 'Controlla lunghezza dei testi, numero di regole e limiti partecipanti.',
         isError: true
       });
       return;
@@ -311,16 +358,69 @@ export function EventAdminPage(): JSX.Element {
 
       {!isLoading && hasState && draft && adminState && (
         <>
-          <Card title="Configurazione evento" subtitle="Aggiorna dettagli, limiti e scope admin.">
+          <Card title="Configurazione evento" subtitle="Aggiorna dettagli, limiti e scadenze.">
             <form className="event-admin-form" onSubmit={onSaveEvent}>
+              <label>
+                Stato di pubblicazione
+                <select
+                  value={draft.status}
+                  onChange={(event) => setDraft((prev) => (prev
+                    ? { ...prev, status: event.target.value as EventPublicationStatus }
+                    : prev))}
+                >
+                  {EVENT_STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {EVENT_STATUS_LABEL[status]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <label>
                 Titolo evento
                 <input
+                  maxLength={200}
                   value={draft.title}
                   onChange={(event) => setDraft((prev) => (prev
                     ? { ...prev, title: event.target.value }
                     : prev))}
                   placeholder="Titolo"
+                />
+              </label>
+
+              <label>
+                Luogo
+                <input
+                  maxLength={256}
+                  value={draft.place}
+                  onChange={(event) => setDraft((prev) => (prev
+                    ? { ...prev, place: event.target.value }
+                    : prev))}
+                  placeholder="Luogo dell'evento"
+                />
+              </label>
+
+              <label>
+                Descrizione
+                <textarea
+                  rows={4}
+                  maxLength={4_000}
+                  value={draft.description}
+                  onChange={(event) => setDraft((prev) => (prev
+                    ? { ...prev, description: event.target.value }
+                    : prev))}
+                />
+              </label>
+
+              <label>
+                Regole (una per riga)
+                <textarea
+                  rows={5}
+                  maxLength={MAX_EVENT_RULES * 501}
+                  value={draft.rules}
+                  onChange={(event) => setDraft((prev) => (prev
+                    ? { ...prev, rules: event.target.value }
+                    : prev))}
                 />
               </label>
 
@@ -341,6 +441,7 @@ export function EventAdminPage(): JSX.Element {
                   <input
                     type="number"
                     min={2}
+                    max={MAX_EVENT_CAPACITY}
                     value={draft.maxParticipants}
                     onChange={(event) => setDraft((prev) => (prev
                       ? { ...prev, maxParticipants: event.target.value }
@@ -353,6 +454,7 @@ export function EventAdminPage(): JSX.Element {
                   <input
                     type="number"
                     min={0}
+                    max={MAX_EVENT_CAPACITY}
                     value={draft.maleLimit}
                     onChange={(event) => setDraft((prev) => (prev
                       ? { ...prev, maleLimit: event.target.value }
@@ -365,6 +467,7 @@ export function EventAdminPage(): JSX.Element {
                   <input
                     type="number"
                     min={0}
+                    max={MAX_EVENT_CAPACITY}
                     value={draft.femaleLimit}
                     onChange={(event) => setDraft((prev) => (prev
                       ? { ...prev, femaleLimit: event.target.value }
@@ -394,28 +497,6 @@ export function EventAdminPage(): JSX.Element {
                   />
                 </label>
               </div>
-
-              <label>
-                Admin user IDs (CSV)
-                <input
-                  value={draft.adminUserIds}
-                  onChange={(event) => setDraft((prev) => (prev
-                    ? { ...prev, adminUserIds: event.target.value }
-                    : prev))}
-                  placeholder="user_1,user_2"
-                />
-              </label>
-
-              <label>
-                Admin emails (CSV)
-                <input
-                  value={draft.adminEmails}
-                  onChange={(event) => setDraft((prev) => (prev
-                    ? { ...prev, adminEmails: event.target.value }
-                    : prev))}
-                  placeholder="admin@email.it,other@email.it"
-                />
-              </label>
 
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? 'Salvataggio...' : 'Salva modifiche'}

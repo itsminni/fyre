@@ -14,13 +14,13 @@ export function SignUpPage(): JSX.Element {
   const { t } = useI18n();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [agree, setAgree] = useState(false);
+  const [hasReadDemoNotice, setHasReadDemoNotice] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isFormValid = useMemo(
-    () => isValidEmail(email) && password.length >= 8 && agree,
-    [agree, email, password]
+    () => isValidEmail(email) && password.length >= 8 && hasReadDemoNotice,
+    [email, hasReadDemoNotice, password]
   );
 
   if (currentUser && isProfileComplete(currentUser)) {
@@ -62,7 +62,7 @@ export function SignUpPage(): JSX.Element {
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="nome@email.com"
+                placeholder="nome@example.com"
                 autoComplete="email"
               />
             </label>
@@ -78,16 +78,16 @@ export function SignUpPage(): JSX.Element {
               />
             </label>
 
-            <div className="auth-form__terms">
+            <div className="auth-form__demo-notice">
               <input
-                id="signup-terms"
+                id="signup-demo-notice"
                 type="checkbox"
-                checked={agree}
-                onChange={(event) => setAgree(event.target.checked)}
+                checked={hasReadDemoNotice}
+                onChange={(event) => setHasReadDemoNotice(event.target.checked)}
               />
               <span>
-                <label htmlFor="signup-terms">{t('auth.termsPrefix')} </label>
-                <Link to="/auth/terms-privacy">{t('auth.termsLink')}</Link>
+                <label htmlFor="signup-demo-notice">{t('auth.demoNoticePrefix')} </label>
+                <Link to="/auth/demo-notice">{t('auth.demoNoticeLink')}</Link>
               </span>
             </div>
 

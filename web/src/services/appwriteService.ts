@@ -9,18 +9,17 @@ import {
   EventAdminState,
   EventHistoryItem,
   EventHistoryStatus,
+  EventPublicationStatus,
+  MainEventInfo,
   MainEventSnapshot,
   RelationshipState,
   User,
   UserGender,
   UserOrientation,
-  calculateAge,
-  isProfileComplete,
   normalizeEmail,
-  normalizeUser,
-  preferredGendersFromShowMe
+  normalizeUser
 } from '../types/models';
-import { formatTime } from '../data/mockData';
+import { formatTime } from '../utils/formatTime';
 import { AppwriteConfiguration } from './appwriteConfiguration';
 import { Client } from 'appwrite';
 import {
@@ -30,14 +29,25 @@ import {
 
 const RESPONSE_FORMAT = '1.8.0';
 const ACTIVE_EVENT_STATUSES = new Set<EventHistoryStatus>(['confirmed', 'promoted', 'waitlisted']);
-const CONFIRMED_EVENT_STATUSES = new Set<EventHistoryStatus>(['confirmed', 'promoted']);
-const DEFAULT_CITY = 'Reggio Emilia, Italy';
-const DEFAULT_LATITUDE = 44.6979;
-const DEFAULT_LONGITUDE = 10.6313;
+const EVENT_PUBLICATION_STATUSES = new Set<EventPublicationStatus>([
+  'active',
+  'draft',
+  'cancelled',
+  'completed',
+  'archived'
+]);
+const APPWRITE_ROWS_PAGE_SIZE = 100;
+const EVENT_ADMIN_PARTICIPANT_PAGE_SIZE = 100;
+const MAX_EVENT_ADMIN_PARTICIPANTS = 1_000;
+const MAX_DISCOVERY_WINDOWS = 4;
 
 export interface EventRemoteState {
   eventId: string;
   snapshot: MainEventSnapshot;
+  info: Pick<
+    MainEventInfo,
+    'venue' | 'description' | 'rules' | 'registrationClosesAt' | 'cancellationClosesAt'
+  >;
   currentStatus: EventHistoryStatus | null;
   history: EventHistoryItem[];
 }
@@ -55,6 +65,14 @@ interface AppwriteExecutionResponse {
   responseBody?: unknown;
   response?: unknown;
   logs?: unknown;
+}
+
+interface ChatPeerProjection {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  presenceUpdatedAt: string | null;
+  lastSeenAt: string | null;
 }
 
 export class AppwriteServiceError extends Error {
@@ -125,14 +143,20 @@ export class AppwriteService {
   }
 
   async logOut(): Promise<void> {
-    await this.sendJsonRequest('DELETE', '/account/sessions/current', {
-      expectedStatusCodes: [204]
-    });
+    this.cachedFunctionJwt = null;
+    try {
+      await this.sendJsonRequest('DELETE', '/account/sessions/current', {
+        // An expired/missing session is already logged out and must not leave
+        // the client permanently blocked behind its logout tombstone.
+        expectedStatusCodes: [204, 401]
+      });
+    } finally {
+      this.cachedFunctionJwt = null;
+    }
   }
 
   async updateProfile(user: User): Promise<User> {
     const accountId = await this.resolveRequiredAccountId(user);
-    const existingProfileRow = await this.fetchProfileRow(accountId);
 
     let nextAvatarFileId = user.avatarFileId ?? null;
     if (user.profileImageData && user.profileImageData.trim().length > 0 && !nextAvatarFileId) {
@@ -172,25 +196,10 @@ export class AppwriteService {
       photoFileIds: nextPhotoFileIds
     });
 
-    if (!existingProfileRow) {
-      await this.sendJsonRequest('POST', this.tableRowsPath(this.configuration.profilesTableId), {
-        body: {
-          rowId: accountId,
-          data: payload,
-          permissions: this.profilePermissions(accountId)
-        },
-        expectedStatusCodes: [201]
-      });
-    } else {
-      const existingRowId = this.stringValue(existingProfileRow.$id) ?? accountId;
-      await this.sendJsonRequest('PATCH', `${this.tableRowsPath(this.configuration.profilesTableId)}/${existingRowId}`, {
-        body: {
-          data: payload,
-          permissions: this.profilePermissions(accountId)
-        },
-        expectedStatusCodes: [200]
-      });
-    }
+    await this.executeUserFunction(this.configuration.manageProfileFunctionId, {
+      action: 'upsert',
+      ...payload
+    });
 
     const refreshed = await this.restoreCurrentUser();
     if (!refreshed) {
@@ -244,33 +253,40 @@ export class AppwriteService {
   }
 
   async fetchDiscoverProfiles(): Promise<DiscoverProfile[]> {
-    if (this.configuration.discoverProfilesFunctionId) {
-      const payload = await this.executeUserFunction(this.configuration.discoverProfilesFunctionId, {});
+    const usedCursors = new Set<string>();
+    let profileCursor: string | null = null;
+
+    for (let window = 0; window < MAX_DISCOVERY_WINDOWS; window += 1) {
+      const payload = await this.executeUserFunction(
+        this.configuration.discoverProfilesFunctionId,
+        profileCursor ? { profileCursor } : {}
+      );
       if (!Array.isArray(payload.profiles)) {
         throw new AppwriteServiceError('Invalid discover profiles response', 500, null, payload);
       }
 
-      return parseDiscoverProfilesPayload(payload.profiles)
+      const profiles = parseDiscoverProfilesPayload(payload.profiles)
         .map((profile) => this.mapContractDiscoverProfile(profile));
+      if (payload.profiles.length > 0) {
+        return profiles;
+      }
+
+      if (payload.nextCursor == null) {
+        return [];
+      }
+      const nextCursor = this.stringValue(payload.nextCursor);
+      if (!nextCursor) {
+        throw new AppwriteServiceError('Invalid discover profiles cursor', 500, null, payload);
+      }
+      if (usedCursors.has(nextCursor)) {
+        return [];
+      }
+
+      usedCursors.add(nextCursor);
+      profileCursor = nextCursor;
     }
 
-    const currentAccountId = await this.fetchCurrentAccountId(false);
-    const excludedUserIds = await this.excludedDiscoverUserIds(currentAccountId);
-    const rows = await this.listRows(this.configuration.profilesTableId, []);
-
-    return rows
-      .map((row) => this.makeDiscoverProfile(row))
-      .filter((profile): profile is DiscoverProfile => {
-        if (!profile) {
-          return false;
-        }
-
-        if (profile.id === currentAccountId) {
-          return false;
-        }
-
-        return !excludedUserIds.has(profile.id);
-      });
+    return [];
   }
 
   async fetchThreads(): Promise<ChatThread[]> {
@@ -394,36 +410,13 @@ export class AppwriteService {
   }
 
   async markThreadRead(threadId: string): Promise<void> {
-    const currentAccountId = await this.fetchCurrentAccountId(false);
-    if (!currentAccountId) {
+    if (!(await this.fetchCurrentAccountId(false))) {
       return;
     }
-
-    const participantRows = await this.listRows(this.configuration.threadParticipantsTableId, [
-      appwriteQueryEqual('threadId', [threadId]),
-      appwriteQueryEqual('userId', [currentAccountId])
-    ]);
-
-    const participantRow = participantRows[0];
-    const participantRowId = this.stringValue(participantRow?.$id);
-    if (!participantRowId) {
-      return;
-    }
-
-    const now = new Date().toISOString();
-    await this.sendJsonRequest('PATCH', `${this.tableRowsPath(this.configuration.threadParticipantsTableId)}/${participantRowId}`, {
-      body: {
-        data: {
-          threadId,
-          userId: currentAccountId,
-          role: this.stringValue(participantRow.role) ?? 'participant',
-          lastReadAt: now,
-          muted: this.booleanValue(participantRow.muted) ?? false,
-          pinned: this.booleanValue(participantRow.pinned) ?? false,
-          notificationsEnabled: this.booleanValue(participantRow.notificationsEnabled) ?? true
-        }
-      },
-      expectedStatusCodes: [200]
+    await this.executeUserFunction(this.configuration.sendMessageFunctionId, {
+      action: 'updateParticipant',
+      threadId,
+      markRead: true
     });
   }
 
@@ -433,63 +426,20 @@ export class AppwriteService {
       throw new AppwriteServiceError('Missing current Appwrite account id', 401);
     }
 
-    const participantRows = await this.listRows(this.configuration.threadParticipantsTableId, [
-      appwriteQueryEqual('threadId', [threadId]),
-      appwriteQueryEqual('userId', [currentAccountId])
-    ]);
-
-    const participantRow = participantRows[0];
-    const participantRowId = this.stringValue(participantRow?.$id);
-    if (!participantRowId) {
-      throw new AppwriteServiceError('Thread participant not found', 404);
-    }
-
-    const payload: Record<string, unknown> = {
+    await this.executeUserFunction(this.configuration.sendMessageFunctionId, {
+      action: 'updateParticipant',
       threadId,
-      userId: currentAccountId,
-      role: this.stringValue(participantRow.role) ?? 'participant',
-      muted: !enabled,
-      pinned: this.booleanValue(participantRow.pinned) ?? false,
       notificationsEnabled: enabled
-    };
-    const lastReadAt = this.dateValue(participantRow.lastReadAt);
-    if (lastReadAt) {
-      payload.lastReadAt = lastReadAt.toISOString();
-    }
-
-    await this.sendJsonRequest('PATCH', `${this.tableRowsPath(this.configuration.threadParticipantsTableId)}/${participantRowId}`, {
-      body: {
-        data: payload
-      },
-      expectedStatusCodes: [200]
     });
   }
 
   async markCurrentUserPresence(isOnline: boolean): Promise<void> {
-    const accountId = await this.fetchCurrentAccountId(false);
-    if (!accountId) {
+    if (!(await this.fetchCurrentAccountId(false))) {
       return;
     }
-
-    const profileRow = await this.fetchProfileRow(accountId);
-    const profileRowId = this.stringValue(profileRow?.$id) ?? this.stringValue(profileRow?.userId);
-    if (!profileRowId) {
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const payload: Record<string, unknown> = {
-      presenceUpdatedAt: now
-    };
-    if (!isOnline) {
-      payload.lastSeenAt = now;
-    }
-
-    await this.sendJsonRequest('PATCH', `${this.tableRowsPath(this.configuration.profilesTableId)}/${profileRowId}`, {
-      body: {
-        data: payload
-      },
-      expectedStatusCodes: [200]
+    await this.executeUserFunction(this.configuration.manageProfileFunctionId, {
+      action: 'presence',
+      online: isOnline
     });
   }
 
@@ -517,22 +467,15 @@ export class AppwriteService {
     };
   }
 
-  async createOrGetThread(otherUserId: string, otherUserName: string | null): Promise<ChatThread> {
-    const payload: Record<string, unknown> = {
-      otherUserId
-    };
-
-    if (otherUserName && otherUserName.trim().length > 0) {
-      payload.otherUserName = otherUserName.trim();
-    }
-
-    const response = await this.executeUserFunction(this.configuration.createOrGetThreadFunctionId, payload);
+  async createOrGetThread(otherUserId: string, _otherUserName: string | null): Promise<ChatThread> {
+    const response = await this.executeUserFunction(this.configuration.createOrGetThreadFunctionId, { otherUserId });
     const threadId = this.stringValue(response.threadId);
     if (!threadId) {
       throw new AppwriteServiceError('Invalid create/get thread response', 500);
     }
 
-    return this.fetchThreadAfterWrite(threadId, otherUserId, otherUserName, 'matched');
+    const peer = this.chatPeerProjection(response.peer, otherUserId);
+    return this.fetchThreadAfterWrite(threadId, otherUserId, 'matched', peer ?? undefined);
   }
 
   async submitSwipe(otherUserId: string, otherUserName: string | null, decision: 'liked' | 'passed'): Promise<ChatThread | null> {
@@ -550,18 +493,10 @@ export class AppwriteService {
     const matched = this.booleanValue(response.matched) ?? false;
     const threadId = this.stringValue(response.threadId);
     if (threadId) {
-      return this.fetchThreadAfterWrite(threadId, otherUserId, otherUserName, 'matched');
+      return this.fetchThreadAfterWrite(threadId, otherUserId, 'matched');
     }
 
     if (!matched) {
-      const relationshipState = this.relationshipStateValue(this.stringValue(response.relationshipState));
-      if (
-        decision === 'liked' &&
-        (Object.keys(response).length === 0 || relationshipState === 'matched')
-      ) {
-        return this.fetchMatchedThreadAfterSwipe(otherUserId, otherUserName);
-      }
-
       return null;
     }
 
@@ -583,19 +518,60 @@ export class AppwriteService {
 
   async fetchEventAdminState(eventId?: string): Promise<EventAdminState> {
     const functionId = this.eventAdminFunctionId();
-    const payload: Record<string, unknown> = { action: 'fetch' };
+    let resolvedEventId = eventId?.trim() || null;
+    let participantCursor: string | null = null;
+    let rawParticipantCount = 0;
+    let firstState: EventAdminState | null = null;
+    const participants: EventAdminParticipant[] = [];
+    const seenCursors = new Set<string>();
+    const maximumPages = Math.ceil(MAX_EVENT_ADMIN_PARTICIPANTS / EVENT_ADMIN_PARTICIPANT_PAGE_SIZE);
 
-    if (eventId && eventId.trim().length > 0) {
-      payload.eventId = eventId.trim();
+    for (let page = 0; page < maximumPages; page += 1) {
+      const payload: Record<string, unknown> = {
+        action: 'fetch',
+        participantLimit: EVENT_ADMIN_PARTICIPANT_PAGE_SIZE
+      };
+      if (resolvedEventId) {
+        payload.eventId = resolvedEventId;
+      }
+      if (participantCursor) {
+        payload.participantCursor = participantCursor;
+      }
+
+      const response = await this.executeUserFunction(functionId, payload);
+      const state = this.makeEventAdminState(response);
+      if (!state || (resolvedEventId && state.eventId !== resolvedEventId)) {
+        throw new AppwriteServiceError('Invalid event admin response', 500);
+      }
+
+      firstState ??= state;
+      resolvedEventId = state.eventId;
+      rawParticipantCount += this.arrayOfDictionaries(response.participants).length;
+      if (rawParticipantCount > MAX_EVENT_ADMIN_PARTICIPANTS) {
+        throw new AppwriteServiceError('Event admin participant limit exceeded', 500);
+      }
+      participants.push(...state.participants);
+
+      const nextCursor = this.eventAdminNextCursor(response);
+      if (!nextCursor) {
+        return {
+          ...firstState,
+          participants: this.sortEventAdminParticipants(participants)
+        };
+      }
+      if (
+        rawParticipantCount >= MAX_EVENT_ADMIN_PARTICIPANTS
+        || page + 1 >= maximumPages
+        || seenCursors.has(nextCursor)
+      ) {
+        throw new AppwriteServiceError('Invalid event admin pagination', 500);
+      }
+
+      seenCursors.add(nextCursor);
+      participantCursor = nextCursor;
     }
 
-    const response = await this.executeUserFunction(functionId, payload);
-    const state = this.makeEventAdminState(response);
-    if (!state) {
-      throw new AppwriteServiceError('Invalid event admin response', 500);
-    }
-
-    return state;
+    throw new AppwriteServiceError('Invalid event admin pagination', 500);
   }
 
   async updateMainEventAsAdmin(eventId: string, draft: EventAdminDraftInput): Promise<EventAdminState> {
@@ -603,24 +579,22 @@ export class AppwriteService {
     const payload: Record<string, unknown> = {
       action: 'updateEvent',
       eventId,
+      status: draft.status,
       title: draft.title.trim(),
+      place: draft.place.trim(),
+      description: draft.description.trim(),
+      rules: draft.rules.map((rule) => rule.trim()).filter(Boolean),
       startsAt: draft.startsAt,
       maxParticipants: Math.max(2, Math.trunc(draft.maxParticipants)),
       maleLimit: Math.max(0, Math.trunc(draft.maleLimit)),
       femaleLimit: Math.max(0, Math.trunc(draft.femaleLimit)),
-      adminUserIds: draft.adminUserIds.trim(),
-      adminEmails: draft.adminEmails.trim(),
       registrationClosesAt: draft.registrationClosesAt,
-      cancellationClosesAt: draft.cancellationClosesAt
+      cancellationClosesAt: draft.cancellationClosesAt,
+      participantLimit: EVENT_ADMIN_PARTICIPANT_PAGE_SIZE
     };
 
     const response = await this.executeUserFunction(functionId, payload);
-    const state = this.makeEventAdminState(response);
-    if (!state) {
-      throw new AppwriteServiceError('Invalid event admin response', 500);
-    }
-
-    return state;
+    return this.completeEventAdminStateAfterMutation(response, eventId);
   }
 
   async addMainEventParticipantAsAdmin(
@@ -633,15 +607,11 @@ export class AppwriteService {
       action: 'addParticipant',
       eventId,
       userLookup: userLookup.trim(),
-      status
+      status,
+      participantLimit: EVENT_ADMIN_PARTICIPANT_PAGE_SIZE
     });
 
-    const state = this.makeEventAdminState(response);
-    if (!state) {
-      throw new AppwriteServiceError('Invalid event admin response', 500);
-    }
-
-    return state;
+    return this.completeEventAdminStateAfterMutation(response, eventId);
   }
 
   async removeMainEventParticipantAsAdmin(eventId: string, registrationId: string): Promise<EventAdminState> {
@@ -649,19 +619,32 @@ export class AppwriteService {
     const response = await this.executeUserFunction(functionId, {
       action: 'removeParticipant',
       eventId,
-      registrationId
+      registrationId,
+      participantLimit: EVENT_ADMIN_PARTICIPANT_PAGE_SIZE
     });
 
+    return this.completeEventAdminStateAfterMutation(response, eventId);
+  }
+
+  private async completeEventAdminStateAfterMutation(
+    response: Record<string, unknown>,
+    eventId: string
+  ): Promise<EventAdminState> {
     const state = this.makeEventAdminState(response);
-    if (!state) {
+    if (!state || state.eventId !== eventId) {
       throw new AppwriteServiceError('Invalid event admin response', 500);
     }
 
-    return state;
+    // Never repeat a mutation to collect subsequent roster pages. If its single
+    // response is incomplete, reload only through the read-only fetch action.
+    return this.eventAdminNextCursor(response)
+      ? this.fetchEventAdminState(eventId)
+      : state;
   }
 
   async fetchMainEventState(user: User | null): Promise<EventRemoteState | null> {
-    const upcomingEvents = await this.fetchUpcomingEventRows();
+    const allEvents = await this.fetchAllEventRows();
+    const upcomingEvents = this.upcomingEventRows(allEvents);
     const mainEvent = upcomingEvents[0] ?? null;
     if (!mainEvent) {
       return null;
@@ -672,7 +655,7 @@ export class AppwriteService {
       appwriteQueryEqual('eventId', [eventId])
     ]);
 
-    const snapshot = this.makeMainEventSnapshot(mainEvent, eventRegistrations);
+    const snapshot = this.makeMainEventSnapshot(mainEvent);
     const accountId = await this.resolveAccountId(user);
 
     let currentStatus: EventHistoryStatus | null = null;
@@ -690,11 +673,18 @@ export class AppwriteService {
       currentStatus = this.eventHistoryStatus(this.stringValue(preferredRegistration?.status));
     }
 
-    const history = await this.makeEventHistory(accountId, user, upcomingEvents);
+    const history = await this.makeEventHistory(accountId, user, allEvents);
 
     return {
       eventId,
       snapshot,
+      info: {
+        venue: this.stringValue(mainEvent.place) ?? '',
+        description: this.stringValue(mainEvent.description) ?? '',
+        rules: this.stringArrayValue(mainEvent.rules),
+        registrationClosesAt: this.dateValue(mainEvent.registrationClosesAt)?.toISOString() ?? null,
+        cancellationClosesAt: this.dateValue(mainEvent.cancellationClosesAt)?.toISOString() ?? null
+      },
       currentStatus,
       history
     };
@@ -720,15 +710,13 @@ export class AppwriteService {
     return status;
   }
 
-  async cancelMainEventRegistration(user: User, eventId?: string, force = false): Promise<void> {
+  async cancelMainEventRegistration(user: User, eventId?: string): Promise<void> {
     const accountId = await this.resolveRequiredAccountId(user);
     if (!accountId) {
       throw new AppwriteServiceError('Missing account id', 500);
     }
 
-    const payload: Record<string, unknown> = {
-      force
-    };
+    const payload: Record<string, unknown> = {};
     if (eventId && eventId.trim().length > 0) {
       payload.eventId = eventId;
     }
@@ -736,7 +724,11 @@ export class AppwriteService {
     await this.executeFunction(this.configuration.cancelEventRegistrationFunctionId, payload);
   }
 
-  private async fetchThread(threadId: string, currentAccountId?: string): Promise<ChatThread | null> {
+  private async fetchThread(
+    threadId: string,
+    currentAccountId?: string,
+    knownPeer?: ChatPeerProjection | null
+  ): Promise<ChatThread | null> {
     const resolvedCurrentAccountId = currentAccountId ?? (await this.fetchCurrentAccountId(false));
     if (!resolvedCurrentAccountId) {
       return null;
@@ -751,7 +743,12 @@ export class AppwriteService {
     const participantUserIds = participantRows
       .map((row) => this.stringValue(row.userId))
       .filter((value): value is string => Boolean(value));
-    if (!participantUserIds.includes(resolvedCurrentAccountId)) {
+    const uniqueParticipantUserIds = [...new Set(participantUserIds)];
+    if (
+      participantRows.length !== 2
+      || uniqueParticipantUserIds.length !== 2
+      || !uniqueParticipantUserIds.includes(resolvedCurrentAccountId)
+    ) {
       return null;
     }
 
@@ -759,7 +756,10 @@ export class AppwriteService {
       participantRows.find((row) => this.stringValue(row.userId) === resolvedCurrentAccountId) ?? null;
     const currentUserReadAt = this.dateValue(currentParticipantRow?.lastReadAt);
 
-    const otherUserId = participantUserIds.find((userId) => userId !== resolvedCurrentAccountId) ?? null;
+    const otherUserId = uniqueParticipantUserIds.find((userId) => userId !== resolvedCurrentAccountId) ?? null;
+    if (!otherUserId) {
+      return null;
+    }
     const relationshipState = await this.fetchRelationshipState(resolvedCurrentAccountId, otherUserId);
     if (!this.isRelationshipVisibleInInbox(relationshipState)) {
       return null;
@@ -767,7 +767,17 @@ export class AppwriteService {
     const otherParticipantReadAt = this.dateValue(
       participantRows.find((row) => this.stringValue(row.userId) === otherUserId)?.lastReadAt
     );
-    const profileRow = otherUserId ? await this.fetchProfileRow(otherUserId) : null;
+    let peer = knownPeer;
+    if (peer === undefined) {
+      try {
+        peer = await this.fetchThreadPeerProjection(threadId, otherUserId);
+      } catch {
+        return null;
+      }
+      if (!peer) {
+        return null;
+      }
+    }
 
     const messageRows = await this.listRows(this.configuration.messagesTableId, [
       appwriteQueryEqual('threadId', [threadId]),
@@ -789,23 +799,18 @@ export class AppwriteService {
       return Date.parse(message.createdAt) > currentUserReadAt.getTime();
     }).length;
 
-    const threadName = this.displayName(
-      this.stringValue(profileRow?.firstName),
-      this.stringValue(profileRow?.lastName),
-      this.stringValue(profileRow?.email),
-      this.stringValue(threadRow?.subject) ?? 'Match'
-    );
+    const threadName = peer?.displayName ?? 'Match';
 
-    const presenceUpdatedAt = this.dateValue(profileRow?.presenceUpdatedAt);
+    const presenceUpdatedAt = this.dateValue(peer?.presenceUpdatedAt);
     const isOnline = presenceUpdatedAt ? Date.now() - presenceUpdatedAt.getTime() <= 70_000 : false;
-    const lastSeenAt = this.dateValue(profileRow?.lastSeenAt);
+    const lastSeenAt = this.dateValue(peer?.lastSeenAt);
     const threadCreatedAt =
       this.dateValue(threadRow?.createdAt) ?? this.dateValue(threadRow?.$createdAt) ?? new Date();
 
     return {
       id: threadId,
       name: threadName,
-      avatar: this.avatarUrl(this.stringValue(profileRow?.avatarFileId)) ?? threadName.slice(0, 1).toUpperCase(),
+      avatar: peer?.avatarUrl ?? threadName.slice(0, 1).toUpperCase(),
       isOnline,
       unreadCount,
       createdAt: threadCreatedAt.toISOString(),
@@ -823,15 +828,12 @@ export class AppwriteService {
     otherUserId: string | null
   ): Promise<RelationshipState> {
     if (!otherUserId) {
-      return 'matched';
+      return 'none';
     }
 
     const relationshipRow = await this.fetchRelationshipRow(currentAccountId, otherUserId);
     if (!relationshipRow) {
-      if (await this.hasLegacyMatch(currentAccountId, otherUserId)) {
-        return 'matched';
-      }
-      return this.configuration.relationshipsTableId ? 'none' : 'matched';
+      return 'none';
     }
 
     const isCurrentUserA = this.stringValue(relationshipRow.userAId) === currentAccountId;
@@ -869,31 +871,12 @@ export class AppwriteService {
     currentAccountId: string,
     otherUserId: string
   ): Promise<Record<string, unknown> | null> {
-    if (!this.configuration.relationshipsTableId) {
-      return null;
-    }
-
     const pairKey = [currentAccountId, otherUserId].sort().join(':');
     const rows = await this.listRows(this.configuration.relationshipsTableId, [
-      appwriteQueryEqual('pairKey', [pairKey]),
-      appwriteQueryLimit(1)
-    ]);
+      appwriteQueryEqual('pairKey', [pairKey])
+    ], 1);
 
     return rows[0] ?? null;
-  }
-
-  private async hasLegacyMatch(currentAccountId: string, otherUserId: string): Promise<boolean> {
-    if (!this.configuration.matchesTableId) {
-      return false;
-    }
-
-    const pairKey = [currentAccountId, otherUserId].sort().join(':');
-    const rows = await this.listRows(this.configuration.matchesTableId, [
-      appwriteQueryEqual('matchKey', [pairKey]),
-      appwriteQueryLimit(1)
-    ]);
-
-    return rows.length > 0;
   }
 
   private async recoverThreadFromReference(
@@ -927,89 +910,8 @@ export class AppwriteService {
         return otherParticipant;
       }
     } catch {
-      // Fall back to relationship/match rows below.
-    }
-
-    const fromRelationship = await this.resolveOtherUserIdFromPairTable(
-      this.configuration.relationshipsTableId,
-      currentAccountId,
-      threadId
-    );
-    if (fromRelationship) {
-      return fromRelationship;
-    }
-
-    return this.resolveOtherUserIdFromPairTable(
-      this.configuration.matchesTableId,
-      currentAccountId,
-      threadId
-    );
-  }
-
-  private async resolveOtherUserIdFromPairTable(
-    tableId: string | null,
-    currentAccountId: string,
-    threadId: string
-  ): Promise<string | null> {
-    if (!tableId) {
       return null;
     }
-
-    try {
-      const rows = await this.listRows(tableId, [
-        appwriteQueryEqual('threadId', [threadId]),
-        appwriteQueryLimit(10)
-      ]);
-
-      for (const row of rows) {
-        const userAId = this.stringValue(row.userAId);
-        const userBId = this.stringValue(row.userBId);
-        if (userAId === currentAccountId && userBId) {
-          return userBId;
-        }
-        if (userBId === currentAccountId && userAId) {
-          return userAId;
-        }
-      }
-    } catch {
-      return null;
-    }
-
-    return null;
-  }
-
-  private async hasMatchedRelationshipWithCurrentUser(otherUserId: string): Promise<boolean> {
-    const currentAccountId = await this.fetchCurrentAccountId(false);
-    if (!currentAccountId) {
-      return false;
-    }
-
-    const relationshipState = await this.fetchRelationshipState(currentAccountId, otherUserId);
-    if (relationshipState === 'matched') {
-      return true;
-    }
-
-    return this.hasLegacyMatch(currentAccountId, otherUserId);
-  }
-
-  private async fetchMatchedThreadAfterSwipe(
-    otherUserId: string,
-    otherUserName: string | null
-  ): Promise<ChatThread | null> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      try {
-        if (await this.hasMatchedRelationshipWithCurrentUser(otherUserId)) {
-          return this.createOrGetThread(otherUserId, otherUserName);
-        }
-      } catch {
-        // A transient relationship read failure should not fail the swipe flow.
-      }
-
-      if (attempt < 4) {
-        await wait(250);
-      }
-    }
-
     return null;
   }
 
@@ -1020,14 +922,16 @@ export class AppwriteService {
   private async fetchThreadAfterWrite(
     threadId: string,
     otherUserId: string,
-    otherUserName: string | null,
-    fallbackRelationshipState: RelationshipState
+    fallbackRelationshipState: RelationshipState,
+    knownPeer?: ChatPeerProjection
   ): Promise<ChatThread> {
     let lastError: unknown = null;
+    const peer = knownPeer
+      ?? await this.fetchThreadPeerProjection(threadId, otherUserId).catch(() => null);
 
     for (let attempt = 0; attempt < 6; attempt += 1) {
       try {
-        const thread = await this.fetchThread(threadId);
+        const thread = await this.fetchThread(threadId, undefined, peer);
         if (thread) {
           return thread;
         }
@@ -1042,23 +946,17 @@ export class AppwriteService {
 
     const currentAccountId = await this.fetchCurrentAccountId(false);
     if (currentAccountId) {
-      const profileRow = await this.fetchProfileRow(otherUserId);
-      const fallbackName = this.displayName(
-        this.stringValue(profileRow?.firstName),
-        this.stringValue(profileRow?.lastName),
-        this.stringValue(profileRow?.email),
-        otherUserName ?? 'Match'
-      );
-      const presenceUpdatedAt = this.dateValue(profileRow?.presenceUpdatedAt);
+      const fallbackName = peer?.displayName ?? 'Match';
+      const presenceUpdatedAt = this.dateValue(peer?.presenceUpdatedAt);
 
       return {
         id: threadId,
         name: fallbackName,
-        avatar: this.avatarUrl(this.stringValue(profileRow?.avatarFileId)) ?? fallbackName.slice(0, 1).toUpperCase(),
+        avatar: peer?.avatarUrl ?? fallbackName.slice(0, 1).toUpperCase(),
         isOnline: presenceUpdatedAt ? Date.now() - presenceUpdatedAt.getTime() <= 70_000 : false,
         unreadCount: 0,
         createdAt: new Date().toISOString(),
-        lastSeenAt: this.dateValue(profileRow?.lastSeenAt)?.toISOString() ?? undefined,
+        lastSeenAt: this.dateValue(peer?.lastSeenAt)?.toISOString() ?? presenceUpdatedAt?.toISOString() ?? undefined,
         notificationsEnabled: true,
         relationshipState: fallbackRelationshipState,
         messages: []
@@ -1070,6 +968,68 @@ export class AppwriteService {
     }
 
     throw new AppwriteServiceError('Invalid thread response', 500);
+  }
+
+  private async fetchThreadPeerProjection(
+    threadId: string,
+    otherUserId: string
+  ): Promise<ChatPeerProjection | null> {
+    const response = await this.executeUserFunction(
+      this.configuration.createOrGetThreadFunctionId,
+      { action: 'peerProjection', otherUserId }
+    );
+    if (this.stringValue(response.threadId) !== threadId) {
+      throw new AppwriteServiceError('Invalid create/get thread response', 500);
+    }
+
+    return this.chatPeerProjection(response.peer, otherUserId);
+  }
+
+  private chatPeerProjection(value: unknown, expectedUserId: string): ChatPeerProjection | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const row = value as Record<string, unknown>;
+    const userId = this.stringValue(row.userId);
+    const displayName = this.stringValue(row.displayName);
+    if (userId !== expectedUserId || !displayName) {
+      return null;
+    }
+
+    return {
+      userId,
+      displayName,
+      avatarUrl: this.tokenizedRemoteFileUrl(row.avatarUrl),
+      presenceUpdatedAt: this.dateValue(row.presenceUpdatedAt)?.toISOString() ?? null,
+      lastSeenAt: this.dateValue(row.lastSeenAt)?.toISOString() ?? null
+    };
+  }
+
+  private tokenizedRemoteFileUrl(value: unknown): string | null {
+    const text = this.stringValue(value);
+    if (!text) {
+      return null;
+    }
+
+    try {
+      const url = new URL(text);
+      const normalizedHost = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+      const octets = normalizedHost.split('.');
+      const loopback = normalizedHost === 'localhost'
+        || normalizedHost === '::1'
+        || (octets.length === 4
+          && octets[0] === '127'
+          && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255));
+      const secureTransport = url.protocol === 'https:' || (url.protocol === 'http:' && loopback);
+      const token = url.searchParams.get('token');
+      if (!secureTransport || url.username || url.password || url.hash || !token) {
+        return null;
+      }
+      return url.toString();
+    } catch {
+      return null;
+    }
   }
 
   private makeChatMessage(
@@ -1195,23 +1155,16 @@ export class AppwriteService {
 
     return normalizeUser({
       email: this.stringValue(account.email) ?? '',
-      password: '',
       appwriteUserId: accountId,
       firstName: this.stringValue(profileRow?.firstName) ?? undefined,
       lastName: this.stringValue(profileRow?.lastName) ?? undefined,
       birthDate: this.toInputDate(this.dateValue(profileRow?.birthDate)),
       gender: gender ?? undefined,
       orientation: this.userOrientationValue(this.stringValue(profileRow?.orientation)) ?? undefined,
-      showMe: 'everyone',
       smokes: this.booleanValue(profileRow?.smokes) ?? undefined,
       drinks: this.booleanValue(profileRow?.drinks) ?? undefined,
       excludeSmokers: this.booleanValue(profileRow?.excludeSmokers) ?? undefined,
       excludeDrinkers: this.booleanValue(profileRow?.excludeDrinkers) ?? undefined,
-      hobbies: this.stringValue(profileRow?.interests) ?? '',
-      passions: this.stringValue(profileRow?.bio) ?? '',
-      lookingFor: this.intentToText(this.stringValue(profileRow?.intent)),
-      favoriteSong: this.stringValue(profileRow?.spotifyTag) ?? '',
-      favoriteMovie: this.stringValue(profileRow?.instagramTag) ?? '',
       profileImageData: avatarDataUrl ?? undefined,
       profilePhotoDataItems,
       avatarFileId: avatarFileId ?? undefined,
@@ -1225,6 +1178,7 @@ export class AppwriteService {
       maxDistanceKm: this.integerValue(profileRow?.maxDistanceKm) ?? undefined,
       bio: this.stringValue(profileRow?.bio) ?? undefined,
       intent: this.intentValue(this.stringValue(profileRow?.intent)) ?? undefined,
+      interests: this.stringValue(profileRow?.interests) ?? undefined,
       instagramTag: this.stringValue(profileRow?.instagramTag) ?? undefined,
       spotifyTag: this.stringValue(profileRow?.spotifyTag) ?? undefined
     });
@@ -1232,26 +1186,23 @@ export class AppwriteService {
 
   private makeProfilePayload(user: User): Record<string, unknown> {
     const normalizedUser = normalizeUser(user);
-    const accountId = this.stringValue(normalizedUser.appwriteUserId) ?? '';
-    const city = this.stringValue(normalizedUser.city) ?? DEFAULT_CITY;
     const latitude =
-      typeof normalizedUser.latitude === 'number' ? normalizedUser.latitude : DEFAULT_LATITUDE;
+      typeof normalizedUser.latitude === 'number' && Number.isFinite(normalizedUser.latitude)
+        ? normalizedUser.latitude
+        : null;
     const longitude =
-      typeof normalizedUser.longitude === 'number' ? normalizedUser.longitude : DEFAULT_LONGITUDE;
+      typeof normalizedUser.longitude === 'number' && Number.isFinite(normalizedUser.longitude)
+        ? normalizedUser.longitude
+        : null;
 
     return {
-      userId: accountId,
-      email: normalizedUser.email,
       firstName: this.nullOrString(normalizedUser.firstName),
       lastName: this.nullOrString(normalizedUser.lastName),
-      city: this.nullOrString(city),
+      city: this.nullOrString(normalizedUser.city),
       birthDate: this.nullOrDateString(normalizedUser.birthDate),
       gender: this.nullOrString(this.genderToBackendValue(normalizedUser.gender)),
       orientation: this.nullOrString(normalizedUser.orientation ?? null),
-      preferredGenders: preferredGendersFromShowMe(
-        normalizedUser.showMe,
-        normalizedUser.preferredGenders
-      )
+      preferredGenders: (normalizedUser.preferredGenders ?? [])
         .map((gender) => this.genderToBackendValue(gender))
         .filter((gender): gender is string => Boolean(gender)),
       minPreferredAge: normalizedUser.minPreferredAge ?? 18,
@@ -1263,26 +1214,26 @@ export class AppwriteService {
       drinks: typeof normalizedUser.drinks === 'boolean' ? normalizedUser.drinks : null,
       excludeSmokers: typeof normalizedUser.excludeSmokers === 'boolean' ? normalizedUser.excludeSmokers : null,
       excludeDrinkers: typeof normalizedUser.excludeDrinkers === 'boolean' ? normalizedUser.excludeDrinkers : null,
-      bio: this.nullOrString(this.userBio(normalizedUser)),
-      intent: this.nullOrString(
-        normalizedUser.intent ?? this.intentFromText(normalizedUser.lookingFor, normalizedUser.intent)
-      ),
-      interests: this.nullOrString(normalizedUser.hobbies),
+      bio: this.nullOrString(normalizedUser.bio),
+      intent: this.nullOrString(normalizedUser.intent),
+      interests: this.nullOrString(normalizedUser.interests),
       instagramTag: this.nullOrString(normalizedUser.instagramTag),
       spotifyTag: this.nullOrString(normalizedUser.spotifyTag),
       photoFileIds: normalizedUser.photoFileIds ?? [],
-      profileReady: isProfileComplete(normalizedUser),
       avatarFileId: this.nullOrString(normalizedUser.avatarFileId)
     };
   }
 
-  private async fetchMainEventRows(): Promise<Record<string, unknown>[]> {
-    const rows = await this.listRows(this.configuration.eventsTableId, [appwriteQueryOrderAsc('startsAt')]);
+  private async fetchAllEventRows(): Promise<Record<string, unknown>[]> {
+    return this.listRows(this.configuration.eventsTableId, [appwriteQueryOrderAsc('startsAt')]);
+  }
+
+  private upcomingEventRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
     const now = Date.now();
 
     return rows.filter((row) => {
       const status = this.stringValue(row.status)?.toLowerCase();
-      if (status === 'cancelled') {
+      if (status && status !== 'active') {
         return false;
       }
 
@@ -1291,19 +1242,10 @@ export class AppwriteService {
     });
   }
 
-  private async fetchUpcomingEventRows(): Promise<Record<string, unknown>[]> {
-    return this.fetchMainEventRows();
-  }
-
-  private makeMainEventSnapshot(eventRow: Record<string, unknown>, registrations: Record<string, unknown>[]): MainEventSnapshot {
-    const confirmedRows = registrations.filter((row) => {
-      const status = this.eventHistoryStatus(this.stringValue(row.status));
-      return status ? CONFIRMED_EVENT_STATUSES.has(status) : false;
-    });
-
-    const maleCount = confirmedRows.filter((row) => this.stringValue(row.gender) === 'male').length;
-    const femaleCount = confirmedRows.filter((row) => this.stringValue(row.gender) === 'female').length;
-    const waitingListCount = registrations.filter((row) => this.eventHistoryStatus(this.stringValue(row.status)) === 'waitlisted').length;
+  private makeMainEventSnapshot(eventRow: Record<string, unknown>): MainEventSnapshot {
+    const maleCount = Math.max(0, this.integerValue(eventRow.maleCount) ?? 0);
+    const femaleCount = Math.max(0, this.integerValue(eventRow.femaleCount) ?? 0);
+    const waitingListCount = Math.max(0, this.integerValue(eventRow.waitingListCount) ?? 0);
 
     const maxParticipants = this.integerValue(eventRow.maxParticipants) ?? 48;
     const maleLimit = this.integerValue(eventRow.maleLimit) ?? 24;
@@ -1338,15 +1280,35 @@ export class AppwriteService {
     const event = eventRaw as Record<string, unknown>;
     const eventId = this.stringValue(event.$id) ?? this.stringValue(event.eventId);
     const startsAt = this.dateValue(event.startsAt);
+    const statusValue = this.stringValue(event.status)?.toLowerCase() as EventPublicationStatus | undefined;
 
-    if (!eventId || !startsAt) {
+    if (!eventId || !startsAt || !statusValue || !EVENT_PUBLICATION_STATUSES.has(statusValue)) {
       return null;
     }
 
-    const participants = this.arrayOfDictionaries(payload.participants)
+    const participants = this.sortEventAdminParticipants(this.arrayOfDictionaries(payload.participants)
       .map((row) => this.makeEventAdminParticipant(row))
-      .filter((participant): participant is EventAdminParticipant => participant !== null)
-      .sort((left, right) => {
+      .filter((participant): participant is EventAdminParticipant => participant !== null));
+
+    return {
+      eventId,
+      status: statusValue,
+      title: this.stringValue(event.title) ?? 'Evento principale',
+      place: this.stringValue(event.place) ?? '',
+      description: this.stringValue(event.description) ?? '',
+      rules: this.stringArrayValue(event.rules),
+      startsAt: startsAt.toISOString(),
+      maxParticipants: this.integerValue(event.maxParticipants) ?? 48,
+      maleLimit: this.integerValue(event.maleLimit) ?? 24,
+      femaleLimit: this.integerValue(event.femaleLimit) ?? 24,
+      registrationClosesAt: this.dateValue(event.registrationClosesAt)?.toISOString() ?? null,
+      cancellationClosesAt: this.dateValue(event.cancellationClosesAt)?.toISOString() ?? null,
+      participants
+    };
+  }
+
+  private sortEventAdminParticipants(participants: EventAdminParticipant[]): EventAdminParticipant[] {
+    return [...participants].sort((left, right) => {
         const leftOrder = this.eventHistorySortOrder(left.status);
         const rightOrder = this.eventHistorySortOrder(right.status);
 
@@ -1358,20 +1320,26 @@ export class AppwriteService {
 
         return leftOrder - rightOrder;
       });
+  }
 
-    return {
-      eventId,
-      title: this.stringValue(event.title) ?? 'Evento principale',
-      startsAt: startsAt.toISOString(),
-      maxParticipants: this.integerValue(event.maxParticipants) ?? 48,
-      maleLimit: this.integerValue(event.maleLimit) ?? 24,
-      femaleLimit: this.integerValue(event.femaleLimit) ?? 24,
-      registrationClosesAt: this.dateValue(event.registrationClosesAt)?.toISOString() ?? null,
-      cancellationClosesAt: this.dateValue(event.cancellationClosesAt)?.toISOString() ?? null,
-      adminUserIds: this.stringValue(event.adminUserIds) ?? '',
-      adminEmails: this.stringValue(event.adminEmails) ?? '',
-      participants
-    };
+  private eventAdminNextCursor(payload: Record<string, unknown>): string | null {
+    const pageRaw = payload.participantPage;
+    if (pageRaw == null) {
+      return null;
+    }
+    if (typeof pageRaw !== 'object' || Array.isArray(pageRaw)) {
+      throw new AppwriteServiceError('Invalid event admin pagination', 500);
+    }
+
+    const nextCursorRaw = (pageRaw as Record<string, unknown>).nextCursor;
+    if (nextCursorRaw == null) {
+      return null;
+    }
+    const nextCursor = this.stringValue(nextCursorRaw);
+    if (!nextCursor) {
+      throw new AppwriteServiceError('Invalid event admin pagination', 500);
+    }
+    return nextCursor;
   }
 
   private makeEventAdminParticipant(row: Record<string, unknown>): EventAdminParticipant | null {
@@ -1527,6 +1495,7 @@ export class AppwriteService {
       this.configuration.createOrGetThreadFunctionId === functionId ||
       this.configuration.sendMessageFunctionId === functionId ||
       this.configuration.eventAdminFunctionId === functionId ||
+      this.configuration.manageProfileFunctionId === functionId ||
       this.configuration.manageRelationshipFunctionId === functionId
     );
   }
@@ -1818,100 +1787,76 @@ export class AppwriteService {
     }
   }
 
-  private async listRows(tableId: string, queries: string[]): Promise<Record<string, unknown>[]> {
-    const response = await this.sendJsonRequest('GET', this.tableRowsPath(tableId), {
-      queryItems: queries.map((query) => ({ name: 'queries[]', value: query }))
-    });
-
-    return this.arrayOfDictionaries(response.rows);
-  }
-
-  private async excludedDiscoverUserIds(currentAccountId: string | null): Promise<Set<string>> {
-    if (!currentAccountId) {
-      return new Set<string>();
+  private async listRows(
+    tableId: string,
+    queries: string[],
+    maximumRows?: number
+  ): Promise<Record<string, unknown>[]> {
+    const rowLimit = maximumRows == null
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, Math.trunc(maximumRows));
+    if (rowLimit === 0) {
+      return [];
     }
 
-    const excludedUserIds = new Set<string>();
+    const collectedRows: Record<string, unknown>[] = [];
+    const usedCursors = new Set<string>();
+    let cursorAfter: string | null = null;
+    let offset = 0;
 
-    if (this.configuration.swipesTableId) {
-      const swipeRows = await this.listRows(this.configuration.swipesTableId, [
-        appwriteQueryEqual('fromUserId', [currentAccountId])
-      ]);
+    while (collectedRows.length < rowLimit) {
+      const remainingRows = rowLimit - collectedRows.length;
+      const pageSize = Math.min(APPWRITE_ROWS_PAGE_SIZE, remainingRows);
+      const paginationQuery = cursorAfter
+        ? appwriteQueryCursorAfter(cursorAfter)
+        : offset > 0
+          ? appwriteQueryOffset(offset)
+          : null;
+      const pageQueries = [
+        ...queries,
+        appwriteQueryLimit(pageSize),
+        ...(paginationQuery ? [paginationQuery] : [])
+      ];
+      const response = await this.sendJsonRequest('GET', this.tableRowsPath(tableId), {
+        queryItems: pageQueries.map((query) => ({ name: 'queries[]', value: query }))
+      });
+      const pageRows = this.arrayOfDictionaries(response.rows);
+      if (pageRows.length === 0) {
+        break;
+      }
 
-      for (const row of swipeRows) {
-        const userId = this.stringValue(row.toUserId);
-        if (userId) {
-          excludedUserIds.add(userId);
-        }
+      collectedRows.push(...pageRows.slice(0, remainingRows));
+
+      const totalRows = this.integerValue(response.total);
+      if (
+        collectedRows.length >= rowLimit ||
+        (totalRows !== null && collectedRows.length >= totalRows) ||
+        pageRows.length < pageSize
+      ) {
+        break;
+      }
+
+      const nextCursor = this.stringValue(pageRows[pageRows.length - 1]?.$id);
+      if (nextCursor && !usedCursors.has(nextCursor)) {
+        usedCursors.add(nextCursor);
+        cursorAfter = nextCursor;
+        offset = 0;
+      } else {
+        cursorAfter = null;
+        offset = collectedRows.length;
       }
     }
 
-    if (this.configuration.matchesTableId) {
-      const matchRows = await this.listRows(this.configuration.matchesTableId, []);
-      for (const row of matchRows) {
-        const userAId = this.stringValue(row.userAId);
-        const userBId = this.stringValue(row.userBId);
-
-        if (userAId === currentAccountId && userBId) {
-          excludedUserIds.add(userBId);
-        } else if (userBId === currentAccountId && userAId) {
-          excludedUserIds.add(userAId);
-        }
-      }
-    }
-
-    return excludedUserIds;
-  }
-
-  private makeDiscoverProfile(row: Record<string, unknown>): DiscoverProfile | null {
-    const userId = this.stringValue(row.id) ?? this.stringValue(row.userId);
-    const directRelationshipState = this.relationshipStateValue(this.stringValue(row.relationshipState));
-    const gender = this.userGenderValue(this.stringValue(row.gender));
-
-    if (!userId) {
-      return null;
-    }
-
-    const firstName = this.stringValue(row.firstName) ?? '';
-    const lastName = this.stringValue(row.lastName) ?? '';
-    const fullName = `${firstName} ${lastName}`.trim();
-    const email = this.stringValue(row.email) ?? '';
-    const fallbackName = email.includes('@') ? email.split('@')[0] : 'Match';
-    const photos = this.discoverPhotoUrls(row);
-    const imageUrl = this.stringValue(row.imageUrl) ?? photos[0] ?? undefined;
-    const compatibilityScore = this.integerValue(row.compatibilityScore);
-    const age =
-      this.integerValue(row.age) ??
-      Math.max(18, calculateAge(this.toInputDate(this.dateValue(row.birthDate)) ?? ''));
-    const commonInterests = this.stringArrayValue(row.commonInterests);
-    const interestsFallback = this.stringArrayValue(row.interests);
-    const distance =
-      this.integerValue(row.distance) ?? this.integerValue(row.distanceKm) ?? undefined;
-
-    return {
-      id: userId,
-      name: this.stringValue(row.name) ?? (fullName || fallbackName),
-      age,
-      gender: gender ?? undefined,
-      city: this.stringValue(row.city) ?? undefined,
-      distanceKm: distance,
-      intent: this.intentValue(this.stringValue(row.intent)) ?? undefined,
-      bio: this.stringValue(row.bio) ?? 'Say hi and start the conversation.',
-      imageUrl,
-      photos: photos.length > 0 ? photos : imageUrl ? [imageUrl] : undefined,
-      compatibilityScore: compatibilityScore == null ? undefined : Math.min(100, Math.max(0, compatibilityScore)),
-      commonInterests: commonInterests.length > 0 ? commonInterests : interestsFallback.slice(0, 4),
-      relationshipState: directRelationshipState ?? 'none'
-    };
+    return collectedRows;
   }
 
   private mapContractDiscoverProfile(
     profile: ReturnType<typeof parseDiscoverProfilesPayload>[number]
   ): DiscoverProfile {
-    const photos = profile.photos.length > 0
-      ? profile.photos
-      : this.discoverContractPhotoUrls(profile);
-    const imageUrl = profile.imageUrl ?? photos[0] ?? undefined;
+    const photos = profile.photos
+      .map((photo) => this.tokenizedRemoteFileUrl(photo))
+      .filter((photo): photo is string => Boolean(photo));
+    const imageUrl = this.tokenizedRemoteFileUrl(profile.imageUrl) ?? photos[0] ?? undefined;
 
     return {
       id: profile.id,
@@ -1921,36 +1866,15 @@ export class AppwriteService {
       city: profile.city,
       distanceKm: profile.distanceKm,
       compatibilityScore: profile.compatibilityScore,
-      intent: profile.intent === 'networking' ? 'notSure' : profile.intent,
+      intent: profile.intent,
       bio: profile.bio,
       imageUrl,
       photos: photos.length > 0 ? photos : imageUrl ? [imageUrl] : undefined,
       commonInterests: profile.commonInterests,
+      instagramTag: profile.instagramTag,
+      spotifyTag: profile.spotifyTag,
       relationshipState: profile.relationshipState
     };
-  }
-
-  private discoverContractPhotoUrls(
-    profile: ReturnType<typeof parseDiscoverProfilesPayload>[number]
-  ): string[] {
-    if (profile.photoFileIds && profile.photoFileIds.length > 0) {
-      return profile.photoFileIds
-        .map((fileId) => this.storageFileUrl(this.configuration.avatarsBucketId, fileId))
-        .filter((value): value is string => Boolean(value));
-    }
-
-    const avatar = this.avatarUrl(profile.avatarFileId ?? null);
-    return avatar ? [avatar] : [];
-  }
-
-  private avatarUrl(fileId: string | null): string | null {
-    if (!fileId) {
-      return null;
-    }
-
-    const url = new URL(`${this.endpoint}/storage/buckets/${this.configuration.avatarsBucketId}/files/${fileId}/view`);
-    url.searchParams.set('project', this.projectId);
-    return url.toString();
   }
 
   private storageFileUrl(bucketId: string | null, fileId: string | null): string | null {
@@ -1972,26 +1896,6 @@ export class AppwriteService {
     const url = new URL(`${this.endpoint}/storage/buckets/${this.configuration.chatAttachmentsBucketId}/files/${fileId}/view`);
     url.searchParams.set('project', this.projectId);
     return url.toString();
-  }
-
-  private discoverPhotoUrls(row: Record<string, unknown>): string[] {
-    const directPhotos = this.stringArrayValue(row.photos)
-      .map((value) => this.stringValue(value))
-      .filter((value): value is string => Boolean(value));
-
-    if (directPhotos.length > 0) {
-      return directPhotos;
-    }
-
-    const fileIds = this.stringArrayValue(row.photoFileIds);
-    if (fileIds.length > 0) {
-      return fileIds
-        .map((fileId) => this.storageFileUrl(this.configuration.avatarsBucketId, fileId))
-        .filter((value): value is string => Boolean(value));
-    }
-
-    const avatar = this.avatarUrl(this.stringValue(row.avatarFileId));
-    return avatar ? [avatar] : [];
   }
 
   private async uploadChatAttachment(attachment: ChatAttachment): Promise<{
@@ -2090,7 +1994,7 @@ export class AppwriteService {
     const formData = new FormData();
     formData.append('fileId', fileId);
     formData.append('file', file);
-    for (const permission of this.ownerFilePermissions(ownerUserId)) {
+    for (const permission of this.avatarFilePermissions(ownerUserId)) {
       formData.append('permissions[]', permission);
     }
 
@@ -2145,51 +2049,6 @@ export class AppwriteService {
     }
   }
 
-  private userBio(user: User): string {
-    const candidates = [user.bio, user.passions, user.lookingFor]
-      .map((value) => this.stringValue(value))
-      .filter((value): value is string => Boolean(value));
-
-    return candidates[0] ?? 'Profilo Fyre';
-  }
-
-  private intentFromText(text: string | undefined, fallbackIntent: User['intent'] | undefined): string {
-    const normalized = this.stringValue(text)?.toLowerCase() ?? '';
-
-    if (normalized.includes('relazione')) {
-      return 'relationship';
-    }
-
-    if (normalized.includes('casual')) {
-      return 'casual';
-    }
-
-    if (normalized.includes('amic')) {
-      return 'friendship';
-    }
-
-    if (fallbackIntent) {
-      return fallbackIntent;
-    }
-
-    return 'friendship';
-  }
-
-  private intentToText(intent: string | null): string {
-    switch (intent) {
-      case 'relationship':
-        return 'Relazione seria';
-      case 'casual':
-        return 'Connessioni casual';
-      case 'friendship':
-        return 'Nuove amicizie';
-      case 'notSure':
-        return 'Sto ancora esplorando';
-      default:
-        return '';
-    }
-  }
-
   private intentValue(value: string | null): User['intent'] | null {
     switch (value) {
       case 'relationship':
@@ -2225,19 +2084,6 @@ export class AppwriteService {
       case 'bisexual':
       case 'pansexual':
       case 'other':
-        return value;
-      default:
-        return null;
-    }
-  }
-
-  private relationshipStateValue(value: string | null): RelationshipState | null {
-    switch (value) {
-      case 'none':
-      case 'liked':
-      case 'matched':
-      case 'archived':
-      case 'blocked':
         return value;
       default:
         return null;
@@ -2327,7 +2173,7 @@ export class AppwriteService {
     return true;
   }
 
-  private profilePermissions(ownerUserId: string): string[] {
+  private ownerFilePermissions(ownerUserId: string): string[] {
     return [
       `read("user:${ownerUserId}")`,
       `update("user:${ownerUserId}")`,
@@ -2335,12 +2181,8 @@ export class AppwriteService {
     ];
   }
 
-  private ownerFilePermissions(ownerUserId: string): string[] {
-    return [
-      `read("user:${ownerUserId}")`,
-      `update("user:${ownerUserId}")`,
-      `delete("user:${ownerUserId}")`
-    ];
+  private avatarFilePermissions(ownerUserId: string): string[] {
+    return this.ownerFilePermissions(ownerUserId);
   }
 
   private toInputDate(value: Date | null): string | undefined {
@@ -2594,6 +2436,14 @@ function appwriteQueryOrderAsc(field: string): string {
 
 function appwriteQueryLimit(value: number): string {
   return JSON.stringify({ method: 'limit', values: [Math.max(1, Math.trunc(value))] });
+}
+
+function appwriteQueryCursorAfter(rowId: string): string {
+  return JSON.stringify({ method: 'cursorAfter', values: [rowId] });
+}
+
+function appwriteQueryOffset(value: number): string {
+  return JSON.stringify({ method: 'offset', values: [Math.max(0, Math.trunc(value))] });
 }
 
 function wait(milliseconds: number): Promise<void> {

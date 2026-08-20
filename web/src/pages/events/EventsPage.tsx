@@ -3,7 +3,7 @@ import { useAppStore } from '../../hooks/useAppStore';
 import { useI18n } from '../../i18n';
 
 export function EventsPage(): JSX.Element {
-  const { mainEventFlags, mainEventSnapshot } = useAppStore();
+  const { hasMainEvent, mainEventFlags, mainEventInfo, mainEventSnapshot } = useAppStore();
   const { t } = useI18n();
 
   const registrationBadge = mainEventFlags.isRegistered
@@ -18,7 +18,15 @@ export function EventsPage(): JSX.Element {
         <h2>{t('events.title')}</h2>
       </header>
 
-      <EventPreviewCard snapshot={mainEventSnapshot} registrationBadge={registrationBadge} />
+      {hasMainEvent ? (
+        <EventPreviewCard
+          snapshot={mainEventSnapshot}
+          venue={mainEventInfo.venue || undefined}
+          registrationBadge={registrationBadge}
+        />
+      ) : (
+        <p className="empty-state">{t('events.unavailable')}</p>
+      )}
     </section>
   );
 }

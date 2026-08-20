@@ -4,11 +4,13 @@ import { MainEventSnapshot } from '../../types/models';
 
 interface EventPreviewCardProps {
   snapshot: MainEventSnapshot;
+  venue?: string;
   registrationBadge?: string;
 }
 
 export function EventPreviewCard({
   snapshot,
+  venue,
   registrationBadge
 }: EventPreviewCardProps): JSX.Element {
   const { language, t } = useI18n();
@@ -32,7 +34,7 @@ export function EventPreviewCard({
       </Link>
 
       <div className="event-preview-card__body">
-        <p className="event-preview-card__meta">EVENT_VENUE_REDACTED</p>
+        {venue && <p className="event-preview-card__meta">{venue}</p>}
         <p className="event-preview-card__meta">
           {t('events.preview.remainingSlots', {
             male: snapshot.remainingMaleSlots,

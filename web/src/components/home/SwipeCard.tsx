@@ -9,6 +9,8 @@ interface SwipeCardProps {
   showDistance?: boolean;
   showIntent?: boolean;
   showInterests?: boolean;
+  showInstagramTag?: boolean;
+  showSpotifyTag?: boolean;
 }
 
 const intentLabelKeys: Record<NonNullable<DiscoverProfile['intent']>, TranslationKey> = {
@@ -24,7 +26,9 @@ export function SwipeCard({
   showAge = true,
   showDistance = true,
   showIntent = true,
-  showInterests = true
+  showInterests = true,
+  showInstagramTag = true,
+  showSpotifyTag = true
 }: SwipeCardProps): JSX.Element {
   const { t } = useI18n();
   const photos = useMemo(() => {
@@ -142,6 +146,17 @@ export function SwipeCard({
                 {interest}
               </span>
             ))}
+          </div>
+        ) : null}
+
+        {(showInstagramTag && profile.instagramTag) || (showSpotifyTag && profile.spotifyTag) ? (
+          <div className="swipe-card__interest-list">
+            {showInstagramTag && profile.instagramTag ? (
+              <span className="swipe-card__interest-pill">Instagram: @{profile.instagramTag}</span>
+            ) : null}
+            {showSpotifyTag && profile.spotifyTag ? (
+              <span className="swipe-card__interest-pill">Spotify: {profile.spotifyTag}</span>
+            ) : null}
           </div>
         ) : null}
       </div>
