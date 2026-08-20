@@ -1,90 +1,59 @@
 const ACTIVE_STATUSES = new Set(["confirmed", "promoted", "waitlisted"]);
 const CONFIRMED_STATUSES = new Set(["confirmed", "promoted"]);
+const INACTIVE_EVENT_STATUSES = new Set(["cancelled", "canceled", "inactive", "archived", "draft", "completed"]);
+const MAX_TRANSACTION_ATTEMPTS = 4;
+const TRANSACTION_TTL_SECONDS = 30;
+const APPWRITE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/;
 
 export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
     const body = parseBody(req);
-    const currentUserId = requiredHeader(req, "x-appwrite-user-id");
-    const force = body.force === true;
+    const currentUserId = await resolveCurrentUserId(config, req, body);
 
-    const event = body.eventId
-      ? await getRow(config, config.eventsTableId, body.eventId)
+    const rawRequestedEventId = asString(body.eventId);
+    const requestedEventId = appwriteIdentifier(rawRequestedEventId);
+    if (body.eventId != null && body.eventId !== "" && !requestedEventId) {
+      return res.json({ messageKey: "events.error.requestFailed" }, 400);
+    }
+    const event = requestedEventId
+      ? await getRow(config, config.eventsTableId, requestedEventId)
       : await getUpcomingEvent(config);
 
-    if (!event) {
+    const eventId = appwriteIdentifier(event?.$id);
+    if (!eventId || !isActiveFutureEvent(event)) {
       return res.json({ messageKey: "events.error.notRegistered" }, 404);
     }
 
-    const registrations = await listAllRows(config, config.eventRegistrationsTableId, [
-      equal("eventId", [event.$id])
-    ]);
-
-    const currentRegistration = registrations.find((row) => {
-      const rowUserId = resolveUserId(row);
-      return rowUserId === currentUserId && ACTIVE_STATUSES.has(normalizeStatus(row.status));
-    });
-    if (!currentRegistration) {
-      return res.json({ messageKey: "events.error.notRegistered" }, 404);
-    }
-
-    const cancellationClosesAt = parseDate(event.cancellationClosesAt);
-    if (!force && cancellationClosesAt && Date.now() >= cancellationClosesAt.getTime()) {
-      return res.json({ messageKey: "events.error.cancellationClosed" }, 409);
-    }
-
-    const now = new Date().toISOString();
-    await updateRow(config, config.eventRegistrationsTableId, currentRegistration.$id, {
-      status: "cancelled",
-      cancelledAt: now
-    });
-
-    if (CONFIRMED_STATUSES.has(normalizeStatus(currentRegistration.status))) {
-      // Promote the oldest waitlisted person of the same gender to preserve the event balance rules.
-      const candidate = selectPromotionCandidate(registrations, currentRegistration);
-
-      if (candidate) {
-        try {
-          await updateRow(config, config.eventRegistrationsTableId, candidate.$id, {
-            status: "promoted",
-            cancelledAt: null,
-            promotedAt: now
-          });
-        } catch (promotionError) {
-          const detail = `Waitlist promotion skipped: ${String(promotionError?.message ?? promotionError)}`;
-          if (typeof error === "function") {
-            error(detail);
-          } else {
-            console.warn(detail);
-          }
-        }
-      }
-    }
-
-    return res.json({ status: "cancelled", eventId: event.$id }, 200);
+    const result = await cancelWithTransaction(config, eventId, currentUserId);
+    return res.json(result.payload, result.statusCode);
   } catch (err) {
-    const detail = String(err?.stack ?? err);
+    const detail = JSON.stringify({
+      event: "canceleventregistration.failed",
+      statusCode: err?.statusCode ?? 500,
+      type: asString(err?.type) ?? "internal_error"
+    });
     if (typeof error === "function") {
       error(detail);
     } else {
       console.error(detail);
     }
-    return res.json({
-      messageKey: "events.error.requestFailed",
-      message: String(err?.message ?? err)
-    }, 500);
+    const statusCode = err?.statusCode === 401 || err?.statusCode === 403
+      ? err.statusCode
+      : 500;
+    return res.json({ messageKey: "events.error.requestFailed" }, statusCode);
   }
 };
 
 function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
-    projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
+    projectId: requiredIdentifierEnv("APPWRITE_FUNCTION_PROJECT_ID"),
     apiKey: resolveApiKey(req),
     userJwt: optionalHeader(req, "x-appwrite-user-jwt"),
-    databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
-    eventsTableId: requiredEnv("APPWRITE_EVENTS_TABLE_ID"),
-    eventRegistrationsTableId: requiredEnv("APPWRITE_EVENT_REGISTRATIONS_TABLE_ID")
+    databaseId: requiredIdentifierEnv("APPWRITE_DATABASE_ID"),
+    eventsTableId: requiredIdentifierEnv("APPWRITE_EVENTS_TABLE_ID"),
+    eventRegistrationsTableId: requiredIdentifierEnv("APPWRITE_EVENT_REGISTRATIONS_TABLE_ID")
   };
 }
 
@@ -112,12 +81,12 @@ function requiredEnv(name) {
   return value;
 }
 
-function requiredHeader(req, name) {
-  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
-  if (!value) {
-    throw new Error(`Missing header ${name}`);
+function requiredIdentifierEnv(name) {
+  const value = requiredEnv(name);
+  if (!appwriteIdentifier(value)) {
+    throw new Error(`Invalid environment variable ${name}`);
   }
-  return Array.isArray(value) ? value[0] : value;
+  return value;
 }
 
 function optionalHeader(req, name) {
@@ -129,42 +98,194 @@ function optionalHeader(req, name) {
 }
 
 function resolveApiKey(req) {
-  const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
+  const runtimeKey = optionalHeader(req, "x-appwrite-key");
   if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
     return runtimeKey.trim();
   }
-  return optionalHeader(req, "x-appwrite-key");
+  throw new Error("Missing Appwrite function runtime key");
+}
+
+async function resolveCurrentUserId(config, req, body) {
+  const userId = await fetchUserIdFromJwt(config);
+  const headerUserId = asString(optionalHeader(req, "x-appwrite-user-id"));
+  const bodyUserId = asString(body.currentUserId);
+
+  if ((headerUserId && headerUserId !== userId) || (bodyUserId && bodyUserId !== userId)) {
+    throw authError("Authenticated user mismatch");
+  }
+  return userId;
+}
+
+async function fetchUserIdFromJwt(config) {
+  if (!config.userJwt) {
+    throw authError("Missing user JWT", 401);
+  }
+
+  const response = await fetch(`${config.endpoint}/account`, {
+    headers: {
+      "X-Appwrite-Project": config.projectId,
+      "X-Appwrite-JWT": config.userJwt,
+      "X-Appwrite-Response-Format": "1.8.0"
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw authError("Invalid user JWT", 401);
+  }
+  const userId = appwriteIdentifier(payload.$id);
+  if (!userId) {
+    throw authError("Invalid user JWT", 401);
+  }
+  return userId;
+}
+
+function authError(message, statusCode = 403) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+async function cancelWithTransaction(config, eventId, currentUserId) {
+  for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
+    let transactionId = null;
+
+    try {
+      transactionId = await createTransaction(config);
+      const event = await getRow(config, config.eventsTableId, eventId, transactionId);
+      if (!isActiveFutureEvent(event)) {
+        await rollbackTransaction(config, transactionId);
+        return { payload: { messageKey: "events.error.notRegistered" }, statusCode: 404 };
+      }
+
+      const registrations = await listAllRows(
+        config,
+        config.eventRegistrationsTableId,
+        [equal("eventId", [eventId])],
+        100,
+        transactionId
+      );
+      const currentRegistration = registrations.find((row) => (
+        resolveUserId(row) === currentUserId
+        && ACTIVE_STATUSES.has(normalizeStatus(row.status))
+      ));
+      if (!currentRegistration) {
+        await rollbackTransaction(config, transactionId);
+        return { payload: { messageKey: "events.error.notRegistered" }, statusCode: 404 };
+      }
+
+      // Deliberately ignore body.force: only server state decides whether cancellation is open.
+      const cancellationClosesAt = parseDate(event.cancellationClosesAt);
+      if (cancellationClosesAt && Date.now() >= cancellationClosesAt.getTime()) {
+        await rollbackTransaction(config, transactionId);
+        return { payload: { messageKey: "events.error.cancellationClosed" }, statusCode: 409 };
+      }
+
+      const now = new Date().toISOString();
+      const candidate = CONFIRMED_STATUSES.has(normalizeStatus(currentRegistration.status))
+        ? selectPromotionCandidate(registrations, currentRegistration)
+        : null;
+      const projectedRegistrations = registrations.map((registration) => {
+        if (registration.$id === currentRegistration.$id) {
+          return { ...registration, status: "cancelled" };
+        }
+        if (candidate?.$id && registration.$id === candidate.$id) {
+          return { ...registration, status: "promoted" };
+        }
+        return registration;
+      });
+      const counters = eventCounters(projectedRegistrations);
+      await updateRow(
+        config,
+        config.eventsTableId,
+        eventId,
+        counters,
+        transactionId
+      );
+      await updateRow(config, config.eventRegistrationsTableId, currentRegistration.$id, {
+        status: "cancelled",
+        cancelledAt: now
+      }, transactionId);
+
+      if (candidate?.$id) {
+        await updateRow(config, config.eventRegistrationsTableId, candidate.$id, {
+          status: "promoted",
+          cancelledAt: null,
+          promotedAt: now
+        }, transactionId);
+      }
+
+      await commitTransaction(config, transactionId);
+      return { payload: { status: "cancelled", eventId, counters }, statusCode: 200 };
+    } catch (err) {
+      if (transactionId) {
+        await rollbackTransaction(config, transactionId);
+      }
+      if (isConflictError(err) && attempt < MAX_TRANSACTION_ATTEMPTS) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error("Unable to commit cancellation transaction");
 }
 
 async function getUpcomingEvent(config) {
-  const rows = await listRows(config, config.eventsTableId, [orderAsc("startsAt")]);
-  const now = Date.now();
+  const rows = await listRows(config, config.eventsTableId, [
+    equal("status", ["active"]),
+    greaterThanEqual("startsAt", [new Date().toISOString()]),
+    orderAsc("startsAt"),
+    limit(1)
+  ]);
+  return rows.find((row) => isActiveFutureEvent(row)) ?? null;
+}
 
-  return rows.find((row) => {
-    if (String(row.status).toLowerCase() === "cancelled") {
-      return false;
+export function eventCounters(registrations) {
+  let maleCount = 0;
+  let femaleCount = 0;
+  let waitingListCount = 0;
+  for (const registration of registrations) {
+    const status = normalizeStatus(registration.status);
+    if (status === "waitlisted") {
+      waitingListCount += 1;
+      continue;
     }
-    const startsAt = parseDate(row.startsAt);
-    return !startsAt || startsAt.getTime() >= now;
-  }) ?? null;
+    if (!CONFIRMED_STATUSES.has(status)) {
+      continue;
+    }
+    if (asString(registration.gender) === "male") {
+      maleCount += 1;
+    } else if (asString(registration.gender) === "female") {
+      femaleCount += 1;
+    }
+  }
+  return { maleCount, femaleCount, waitingListCount };
 }
 
-async function getRow(config, tableId, rowId) {
-  return request(config, "GET", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`);
+async function getRow(config, tableId, rowId, transactionId = null) {
+  return request(
+    config,
+    "GET",
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`,
+    undefined,
+    [],
+    transactionId ? { transactionId } : {}
+  );
 }
 
-async function listRows(config, tableId, queries) {
+async function listRows(config, tableId, queries, transactionId = null) {
   const payload = await request(
     config,
     "GET",
-    `/tablesdb/${config.databaseId}/tables/${tableId}/rows`,
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows`,
     undefined,
-    queries
+    queries,
+    transactionId ? { transactionId, ttl: 0 } : { ttl: 0 }
   );
   return Array.isArray(payload.rows) ? payload.rows : [];
 }
 
-async function listAllRows(config, tableId, baseQueries, pageSize = 100) {
+async function listAllRows(config, tableId, baseQueries, pageSize = 100, transactionId = null) {
   const rows = [];
   let page = 0;
 
@@ -173,7 +294,7 @@ async function listAllRows(config, tableId, baseQueries, pageSize = 100) {
       ...baseQueries,
       limit(pageSize),
       offset(page * pageSize)
-    ]);
+    ], transactionId);
     rows.push(...batch);
 
     if (batch.length < pageSize) {
@@ -184,64 +305,69 @@ async function listAllRows(config, tableId, baseQueries, pageSize = 100) {
   }
 }
 
-async function updateRow(config, tableId, rowId, data) {
-  return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
-    data
+async function updateRow(config, tableId, rowId, data, transactionId = null) {
+  return request(config, "PATCH", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`, {
+    data,
+    ...(transactionId ? { transactionId } : {})
   });
 }
 
-async function request(config, method, path, body, queries = []) {
+async function createTransaction(config) {
+  const transaction = await request(config, "POST", "/tablesdb/transactions", {
+    ttl: TRANSACTION_TTL_SECONDS
+  });
+  const transactionId = appwriteIdentifier(transaction.$id);
+  if (!transactionId) {
+    throw new Error("Appwrite did not return a transaction id");
+  }
+  return transactionId;
+}
+
+async function commitTransaction(config, transactionId) {
+  await request(config, "PATCH", `/tablesdb/transactions/${pathSegment(transactionId)}`, { commit: true });
+}
+
+async function rollbackTransaction(config, transactionId) {
+  try {
+    await request(config, "PATCH", `/tablesdb/transactions/${pathSegment(transactionId)}`, { rollback: true });
+  } catch {
+    // A committed, expired, or conflict-aborted transaction needs no further cleanup.
+  }
+}
+
+async function request(config, method, path, body, queries = [], queryParameters = {}) {
   const url = new URL(`${config.endpoint}${path}`);
   for (const query of queries) {
     url.searchParams.append("queries[]", query);
   }
-
-  const authModes = [];
-  if (config.userJwt) {
-    authModes.push("jwt");
-  }
-  if (config.apiKey) {
-    authModes.push("key");
+  for (const [key, value] of Object.entries(queryParameters)) {
+    url.searchParams.set(key, String(value));
   }
 
-  if (authModes.length === 0) {
-    throw new Error("Missing Appwrite auth context (user JWT or API key)");
+  if (!config.apiKey) {
+    throw new Error("Missing Appwrite server API key");
   }
 
-  let lastStatus = 500;
-  let lastPayload = {};
-
-  for (const authMode of authModes) {
-    const headers = {
+  const response = await fetch(url, {
+    method,
+    headers: {
       "Content-Type": "application/json",
       "X-Appwrite-Project": config.projectId,
+      "X-Appwrite-Key": config.apiKey,
       "X-Appwrite-Response-Format": "1.8.0"
-    };
-
-    if (authMode === "jwt") {
-      headers["X-Appwrite-JWT"] = config.userJwt;
-    } else {
-      headers["X-Appwrite-Key"] = config.apiKey;
-    }
-
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined
-    });
-
-    const text = await response.text();
-    const payload = parseJSONSafely(text);
-
-    if (response.ok) {
-      return payload;
-    }
-
-    lastStatus = response.status;
-    lastPayload = payload;
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await response.text();
+  const payload = parseJSONSafely(text);
+  if (response.ok) {
+    return payload;
   }
 
-  throw new Error(lastPayload.message ?? `Request failed with status ${lastStatus}`);
+  const err = new Error(payload.message ?? `Request failed with status ${response.status}`);
+  err.statusCode = response.status;
+  err.type = asString(payload.type);
+  throw err;
 }
 
 function parseJSONSafely(text) {
@@ -259,6 +385,10 @@ function equal(field, values) {
   return JSON.stringify({ method: "equal", attribute: field, values });
 }
 
+function greaterThanEqual(field, values) {
+  return JSON.stringify({ method: "greaterThanEqual", attribute: field, values });
+}
+
 function orderAsc(field) {
   return JSON.stringify({ method: "orderAsc", attribute: field });
 }
@@ -269,6 +399,19 @@ function limit(value) {
 
 function offset(value) {
   return JSON.stringify({ method: "offset", values: [value] });
+}
+
+function isConflictError(err) {
+  const type = String(err?.type ?? "").toLowerCase();
+  return err?.statusCode === 409 || type.includes("conflict");
+}
+
+function isActiveFutureEvent(event, now = Date.now()) {
+  if (!event || INACTIVE_EVENT_STATUSES.has(normalizeStatus(event.status))) {
+    return false;
+  }
+  const startsAt = parseDate(event.startsAt);
+  return Boolean(startsAt && startsAt.getTime() > now);
 }
 
 function normalizeStatus(value) {
@@ -294,6 +437,15 @@ function resolveUserId(row) {
 
 function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+export function appwriteIdentifier(value) {
+  const identifier = asString(value);
+  return identifier && APPWRITE_IDENTIFIER_PATTERN.test(identifier) ? identifier : null;
+}
+
+export function pathSegment(value) {
+  return encodeURIComponent(String(value));
 }
 
 function parseDate(value) {

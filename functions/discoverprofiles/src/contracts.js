@@ -27,7 +27,6 @@ export function makeDiscoverProfileContract(input) {
   }
 
   const photos = toStringArray(input.photos);
-  const photoFileIds = toStringArray(input.photoFileIds);
   const distanceKm = normalizeNullableInteger(input.distanceKm ?? input.distance);
   const compatibilityScore = normalizeNullableInteger(input.compatibilityScore);
   const imageUrl = asString(input.imageUrl) ?? photos[0];
@@ -41,10 +40,10 @@ export function makeDiscoverProfileContract(input) {
     city: asString(input.city) ?? undefined,
     intent: normalizeMatchIntent(input.intent),
     bio,
+    instagramTag: normalizeSocialTag(input.instagramTag),
+    spotifyTag: normalizeSocialTag(input.spotifyTag),
     imageUrl: imageUrl ?? undefined,
     photos,
-    photoFileIds,
-    avatarFileId: asString(input.avatarFileId) ?? undefined,
     compatibilityScore: compatibilityScore ?? undefined,
     distanceKm: distanceKm ?? undefined,
     distance: distanceKm,
@@ -55,7 +54,7 @@ export function makeDiscoverProfileContract(input) {
 
 const RELATIONSHIP_STATES = ["none", "liked", "matched", "archived", "blocked"];
 const USER_GENDERS = ["male", "female", "nonBinary", "other"];
-const MATCH_INTENTS = ["relationship", "friendship", "casual", "networking", "notSure"];
+const MATCH_INTENTS = ["relationship", "friendship", "casual", "notSure"];
 
 function normalizeRelationshipState(value) {
   const normalized = asString(value);
@@ -80,6 +79,11 @@ function normalizeUserGender(value) {
 function normalizeMatchIntent(value) {
   const normalized = asString(value);
   return MATCH_INTENTS.includes(normalized) ? normalized : undefined;
+}
+
+function normalizeSocialTag(value) {
+  const normalized = typeof value === "string" ? value.replace(/[@\s]+/g, "") : "";
+  return normalized ? normalized.slice(0, 64) : undefined;
 }
 
 function isRecord(value) {

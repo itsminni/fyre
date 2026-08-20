@@ -2,8 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MATCH_INTENTS,
   makeChatMessageContract,
   makeDiscoverProfileContract,
+  normalizeMatchIntent,
+  parseDiscoverProfilesPayload,
   seededIntegerFromString
 } from "./index.js";
 
@@ -13,8 +16,13 @@ test("makeDiscoverProfileContract normalizes rich payloads", () => {
     name: "Alex",
     age: 29,
     gender: "nonbinary",
+    intent: "relationship",
     bio: "Ciao",
+    instagramTag: " @ alex gram ",
+    spotifyTag: `@${"s".repeat(70)}`,
     photos: ["https://cdn.example.test/a.jpg"],
+    photoFileIds: ["must-not-cross-the-boundary"],
+    avatarFileId: "must-not-cross-the-boundary",
     compatibilityScore: 88,
     distance: 14,
     commonInterests: ["music", "travel"],
@@ -27,18 +35,34 @@ test("makeDiscoverProfileContract normalizes rich payloads", () => {
     age: 29,
     gender: "nonBinary",
     city: undefined,
-    intent: undefined,
+    intent: "relationship",
     bio: "Ciao",
+    instagramTag: "alexgram",
+    spotifyTag: "s".repeat(64),
     imageUrl: "https://cdn.example.test/a.jpg",
     photos: ["https://cdn.example.test/a.jpg"],
-    photoFileIds: [],
-    avatarFileId: undefined,
     compatibilityScore: 88,
     distanceKm: 14,
     distance: 14,
     commonInterests: ["music", "travel"],
     relationshipState: "matched"
   });
+  assert.equal("photoFileIds" in profile, false);
+  assert.equal("avatarFileId" in profile, false);
+});
+
+test("parseDiscoverProfilesPayload keeps optional normalized social tags", () => {
+  const [profile] = parseDiscoverProfilesPayload([{
+    id: "user_456",
+    name: "Bea",
+    instagramTag: " @ bea profile ",
+    spotifyTag: null
+  }]);
+
+  assert.equal(profile.instagramTag, "beaprofile");
+  assert.equal(profile.spotifyTag, undefined);
+  assert.deepEqual(MATCH_INTENTS, ["relationship", "friendship", "casual", "notSure"]);
+  assert.equal(normalizeMatchIntent("unsupported"), undefined);
 });
 
 test("makeChatMessageContract normalizes function payloads", () => {

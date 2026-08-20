@@ -1,0 +1,201 @@
+[
+  {
+    "$id": "registerforevent",
+    "name": "Register for event",
+    "runtime": "node-22",
+    "path": "../functions/registerforevent",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_PROFILES_TABLE_ID": "profiles",
+      "APPWRITE_EVENTS_TABLE_ID": "events",
+      "APPWRITE_EVENT_REGISTRATIONS_TABLE_ID": "eventregistrations"
+    }
+  },
+  {
+    "$id": "canceleventregistration",
+    "name": "Cancel event registration",
+    "runtime": "node-22",
+    "path": "../functions/canceleventregistration",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_EVENTS_TABLE_ID": "events",
+      "APPWRITE_EVENT_REGISTRATIONS_TABLE_ID": "eventregistrations"
+    }
+  },
+  {
+    "$id": "manageeventadmin",
+    "name": "Manage event admin",
+    "runtime": "node-22",
+    "path": "../functions/manageeventadmin",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write", "users.read"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_PROFILES_TABLE_ID": "profiles",
+      "APPWRITE_EVENTS_TABLE_ID": "events",
+      "APPWRITE_EVENT_REGISTRATIONS_TABLE_ID": "eventregistrations",
+      "APPWRITE_EVENT_ADMIN_USER_IDS": "",
+      "APPWRITE_EVENT_ADMIN_EMAILS": ""
+    }
+  },
+  {
+    "$id": "createorgetthread",
+    "name": "Create or get thread",
+    "runtime": "node-22",
+    "path": "../functions/createorgetthread",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write", "tokens.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_PROFILES_TABLE_ID": "profiles",
+      "APPWRITE_THREADS_TABLE_ID": "threads",
+      "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID": "threadparticipants",
+      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships",
+      "APPWRITE_AVATARS_BUCKET_ID": "avatars",
+      "APPWRITE_AVATAR_TOKEN_TTL_SECONDS": "300"
+    }
+  },
+  {
+    "$id": "sendmessage",
+    "name": "Send message",
+    "runtime": "node-22",
+    "path": "../functions/sendmessage",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write", "files.read", "files.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_THREADS_TABLE_ID": "threads",
+      "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID": "threadparticipants",
+      "APPWRITE_MESSAGES_TABLE_ID": "messages",
+      "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID": "chat-attachments",
+      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships"
+    }
+  },
+  {
+    "$id": "recordswipe",
+    "name": "Record swipe",
+    "runtime": "node-22",
+    "path": "../functions/recordswipe",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_PROFILES_TABLE_ID": "profiles",
+      "APPWRITE_SWIPES_TABLE_ID": "swipe",
+      "APPWRITE_MATCHES_TABLE_ID": "matches",
+      "APPWRITE_THREADS_TABLE_ID": "threads",
+      "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID": "threadparticipants",
+      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships"
+    }
+  },
+  {
+    "$id": "discoverprofiles",
+    "name": "Discover profiles",
+    "runtime": "node-22",
+    "path": "../functions/discoverprofiles",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "tokens.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_PROFILES_TABLE_ID": "profiles",
+      "APPWRITE_SWIPES_TABLE_ID": "swipe",
+      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships",
+      "APPWRITE_AVATARS_BUCKET_ID": "avatars",
+      "APPWRITE_AVATAR_TOKEN_TTL_SECONDS": "300"
+    }
+  },
+  {
+    "$id": "manageprofile",
+    "name": "Manage profile",
+    "runtime": "node-22",
+    "path": "../functions/manageprofile",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write", "files.read", "files.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_PROFILES_TABLE_ID": "profiles",
+      "APPWRITE_AVATARS_BUCKET_ID": "avatars"
+    }
+  },
+  {
+    "$id": "managerelationship",
+    "name": "Manage relationship",
+    "runtime": "node-22",
+    "path": "../functions/managerelationship",
+    "entrypoint": "src/main.js",
+    "commands": "",
+    "execute": ["users"],
+    "events": [],
+    "schedule": "",
+    "timeout": 15,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID": "threadparticipants",
+      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships",
+      "APPWRITE_MATCHES_TABLE_ID": "matches"
+    }
+  }
+]

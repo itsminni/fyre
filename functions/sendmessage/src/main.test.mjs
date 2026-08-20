@@ -1,40 +1,49 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
-import handler from "./main.js";
+import handler, {
+  canonicalAttachmentMetadata,
+  hasFileOwnership,
+  isReplyInThread,
+  relationshipAllowsMessaging,
+  validateParticipantRows
+} from "./main.js";
 
 const ENV_KEYS = [
   "APPWRITE_FUNCTION_API_ENDPOINT",
   "APPWRITE_FUNCTION_PROJECT_ID",
-  "APPWRITE_FUNCTION_API_KEY",
   "APPWRITE_DATABASE_ID",
   "APPWRITE_THREADS_TABLE_ID",
   "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID",
   "APPWRITE_MESSAGES_TABLE_ID",
   "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID",
-  "APPWRITE_RELATIONSHIPS_TABLE_ID",
-  "APPWRITE_MATCHES_TABLE_ID"
+  "APPWRITE_RELATIONSHIPS_TABLE_ID"
 ];
 
 test("sendmessage recreates a missing thread row from existing participant rows", async () => {
   const originalEnv = snapshotEnv();
   const originalFetch = globalThis.fetch;
+  const originalConsoleLog = console.log;
   const requests = [];
+  const logs = [];
 
   Object.assign(process.env, {
     APPWRITE_FUNCTION_API_ENDPOINT: "https://appwrite.test/v1",
     APPWRITE_FUNCTION_PROJECT_ID: "project",
-    APPWRITE_FUNCTION_API_KEY: "key",
     APPWRITE_DATABASE_ID: "db",
     APPWRITE_THREADS_TABLE_ID: "threads",
     APPWRITE_THREAD_PARTICIPANTS_TABLE_ID: "participants",
-    APPWRITE_MESSAGES_TABLE_ID: "messages"
+    APPWRITE_MESSAGES_TABLE_ID: "messages",
+    APPWRITE_RELATIONSHIPS_TABLE_ID: "relationships"
   });
-  delete process.env.APPWRITE_RELATIONSHIPS_TABLE_ID;
-  delete process.env.APPWRITE_MATCHES_TABLE_ID;
+  console.log = (...values) => logs.push(values.join(" "));
 
   globalThis.fetch = async (url, options = {}) => {
     const parsed = new URL(String(url));
+    if (parsed.pathname === "/v1/account") {
+      return jsonResponse(200, { $id: "user-a" });
+    }
     const request = {
       method: options.method,
       path: parsed.pathname,
@@ -45,10 +54,14 @@ test("sendmessage recreates a missing thread row from existing participant rows"
     if (request.method === "GET" && request.path.endsWith("/tables/participants/rows")) {
       return jsonResponse(200, {
         rows: [
-          { $id: "participant-current", threadId: "thread-1", userId: "user-a" },
-          { $id: "participant-other", threadId: "thread-1", userId: "user-b" }
+          { $id: participantRowId("thread-1", "user-a"), threadId: "thread-1", userId: "user-a" },
+          { $id: participantRowId("thread-1", "user-b"), threadId: "thread-1", userId: "user-b" }
         ]
       });
+    }
+
+    if (request.method === "GET" && request.path.includes("/tables/relationships/rows/")) {
+      return jsonResponse(200, matchedRelationship("user-a", "user-b", "thread-1"));
     }
 
     if (request.method === "GET" && request.path.endsWith("/tables/threads/rows/thread-1")) {
@@ -97,22 +110,311 @@ test("sendmessage recreates a missing thread row from existing participant rows"
     ));
     assert.ok(threadCreate);
     assert.equal(threadCreate.body.rowId, "thread-1");
-    assert.equal(threadCreate.body.data.subject, "Fyre match");
+    assert.equal(threadCreate.body.data.subject, "Match");
     assert.deepEqual(threadCreate.body.permissions.sort(), [
-      'delete("user:user-a")',
-      'delete("user:user-b")',
       'read("user:user-a")',
-      'read("user:user-b")',
-      'update("user:user-a")',
-      'update("user:user-b")'
+      'read("user:user-b")'
     ]);
+    const messageCreate = requests.find((request) => (
+      request.method === "POST" && request.path.endsWith("/tables/messages/rows")
+    ));
+    assert.deepEqual(messageCreate.body.permissions.sort(), [
+      'read("user:user-a")',
+      'read("user:user-b")'
+    ]);
+    assert.equal(logs.some((entry) => entry.includes("ciao")), false);
+  } finally {
+    restoreEnv(originalEnv);
+    globalThis.fetch = originalFetch;
+    console.log = originalConsoleLog;
+  }
+});
+
+test("participant rows must be canonical and unique", () => {
+  const valid = [
+    { $id: participantRowId("thread-1", "user-a"), threadId: "thread-1", userId: "user-a" },
+    { $id: participantRowId("thread-1", "user-b"), threadId: "thread-1", userId: "user-b" }
+  ];
+  assert.deepEqual(validateParticipantRows("thread-1", valid)?.userIds, ["user-a", "user-b"]);
+  assert.equal(validateParticipantRows("thread-1", [valid[0], { ...valid[1], userId: "user-a" }]), null);
+  assert.equal(validateParticipantRows("thread-1", [valid[0], { ...valid[1], $id: "forged" }]), null);
+});
+
+test("attachment sharing rejects a file not owned by the authenticated sender", async () => {
+  const originalEnv = snapshotEnv();
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  Object.assign(process.env, {
+    APPWRITE_FUNCTION_API_ENDPOINT: "https://appwrite.test/v1",
+    APPWRITE_FUNCTION_PROJECT_ID: "project",
+    APPWRITE_DATABASE_ID: "db",
+    APPWRITE_THREADS_TABLE_ID: "threads",
+    APPWRITE_THREAD_PARTICIPANTS_TABLE_ID: "participants",
+    APPWRITE_MESSAGES_TABLE_ID: "messages",
+    APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID: "attachments",
+    APPWRITE_RELATIONSHIPS_TABLE_ID: "relationships"
+  });
+
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(String(input));
+    const method = options.method ?? "GET";
+    const body = options.body ? JSON.parse(options.body) : null;
+    requests.push({ method, path: url.pathname, body });
+    if (url.pathname === "/v1/account") {
+      return jsonResponse(200, { $id: "user-a" });
+    }
+    if (method === "GET" && url.pathname.endsWith("/tables/participants/rows")) {
+      return jsonResponse(200, { rows: participantRows("thread-1") });
+    }
+    if (method === "GET" && url.pathname.includes("/tables/relationships/rows/")) {
+      return jsonResponse(200, matchedRelationship("user-a", "user-b", "thread-1"));
+    }
+    if (method === "GET" && url.pathname.endsWith("/tables/threads/rows/thread-1")) {
+      return jsonResponse(200, { $id: "thread-1", status: "active" });
+    }
+    if (method === "PATCH" && url.pathname.includes("/tables/")) {
+      return jsonResponse(200, { $id: url.pathname.split("/").at(-1), ...body.data });
+    }
+    if (method === "GET" && url.pathname.endsWith("/storage/buckets/attachments/files/file-b")) {
+      return jsonResponse(200, {
+        $id: "file-b",
+        name: "private.jpg",
+        $permissions: [
+          'read("user:user-b")',
+          'update("user:user-b")',
+          'delete("user:user-b")'
+        ]
+      });
+    }
+    return jsonResponse(500, { message: `Unexpected ${method} ${url.pathname}` });
+  };
+
+  try {
+    const result = await invokeHandler({
+      threadId: "thread-1",
+      attachmentFileId: "file-b",
+      attachmentName: "private.jpg",
+      currentUserId: "user-a"
+    });
+    assert.equal(result.status, 403);
+    assert.equal(hasFileOwnership({
+      $permissions: ['update("user:user-b")', 'delete("user:user-b")']
+    }, "user-a"), false);
+    assert.equal(requests.some((request) => request.method === "PUT"), false);
+    assert.equal(requests.some((request) => (
+      request.method === "POST" && request.path.endsWith("/tables/messages/rows")
+    )), false);
   } finally {
     restoreEnv(originalEnv);
     globalThis.fetch = originalFetch;
   }
 });
 
-async function invokeHandler(body, headers = { "x-appwrite-user-id": "user-a" }) {
+test("attachment metadata is derived from Appwrite and bounded", () => {
+  assert.deepEqual(canonicalAttachmentMetadata({
+    name: "folder/photo.JPG",
+    mimeType: "image/jpeg",
+    sizeOriginal: 1234
+  }, {
+    messageType: "file",
+    attachmentName: "spoof.exe",
+    attachmentMimeType: "application/x-msdownload",
+    attachmentSize: 1,
+    attachmentWidth: 640,
+    attachmentHeight: 480
+  }), {
+    messageType: "image",
+    attachmentName: "photo.JPG",
+    attachmentMimeType: "image/jpeg",
+    attachmentSize: 1234,
+    attachmentWidth: 640,
+    attachmentHeight: 480,
+    attachmentDuration: null
+  });
+
+  assert.equal(canonicalAttachmentMetadata({
+    name: "photo.jpg",
+    mimeType: "application/pdf",
+    sizeOriginal: 1234
+  }, {}), null);
+  assert.equal(canonicalAttachmentMetadata({
+    name: "video.mp4",
+    mimeType: "video/mp4",
+    sizeOriginal: 20 * 1024 * 1024 + 1
+  }, {}), null);
+  assert.equal(canonicalAttachmentMetadata({
+    name: "photo.jpg",
+    mimeType: "image/jpeg",
+    sizeOriginal: 1234
+  }, { attachmentWidth: 640 }), null);
+});
+
+test("sendmessage persists server attachment metadata instead of client claims", async () => {
+  const originalEnv = snapshotEnv();
+  const originalFetch = globalThis.fetch;
+  let createdMessage = null;
+  Object.assign(process.env, {
+    APPWRITE_FUNCTION_API_ENDPOINT: "https://appwrite.test/v1",
+    APPWRITE_FUNCTION_PROJECT_ID: "project",
+    APPWRITE_DATABASE_ID: "db",
+    APPWRITE_THREADS_TABLE_ID: "threads",
+    APPWRITE_THREAD_PARTICIPANTS_TABLE_ID: "participants",
+    APPWRITE_MESSAGES_TABLE_ID: "messages",
+    APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID: "attachments",
+    APPWRITE_RELATIONSHIPS_TABLE_ID: "relationships"
+  });
+
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(String(input));
+    const method = options.method ?? "GET";
+    const body = options.body ? JSON.parse(options.body) : null;
+    if (url.pathname === "/v1/account") return jsonResponse(200, { $id: "user-a" });
+    if (method === "GET" && url.pathname.endsWith("/tables/participants/rows")) {
+      return jsonResponse(200, { rows: participantRows("thread-1") });
+    }
+    if (method === "GET" && url.pathname.includes("/tables/relationships/rows/")) {
+      return jsonResponse(200, matchedRelationship("user-a", "user-b", "thread-1"));
+    }
+    if (method === "GET" && url.pathname.endsWith("/tables/threads/rows/thread-1")) {
+      return jsonResponse(200, { $id: "thread-1", createdByUserId: "user-a", status: "active" });
+    }
+    if (method === "GET" && url.pathname.endsWith("/storage/buckets/attachments/files/file-a")) {
+      return jsonResponse(200, {
+        $id: "file-a",
+        name: "photo.jpg",
+        mimeType: "image/jpeg",
+        sizeOriginal: 2048,
+        $permissions: [
+          'read("user:user-a")',
+          'update("user:user-a")',
+          'delete("user:user-a")'
+        ]
+      });
+    }
+    if (method === "PUT" && url.pathname.endsWith("/storage/buckets/attachments/files/file-a")) {
+      return jsonResponse(200, { $id: "file-a" });
+    }
+    if (method === "POST" && url.pathname.endsWith("/tables/messages/rows")) {
+      createdMessage = body;
+      return jsonResponse(201, { $id: body.rowId, ...body.data });
+    }
+    if (method === "PATCH" && url.pathname.includes("/tables/")) {
+      return jsonResponse(200, { $id: url.pathname.split("/").at(-1), ...body.data });
+    }
+    return jsonResponse(500, { message: `Unexpected ${method} ${url.pathname}` });
+  };
+
+  try {
+    const result = await invokeHandler({
+      threadId: "thread-1",
+      attachmentFileId: "file-a",
+      messageType: "file",
+      attachmentName: "malware.exe",
+      attachmentMimeType: "application/x-msdownload",
+      attachmentSize: 1,
+      attachmentWidth: 320,
+      attachmentHeight: 200,
+      currentUserId: "user-a"
+    });
+    assert.equal(result.status, 200);
+    assert.equal(createdMessage.data.messageType, "image");
+    assert.equal(createdMessage.data.attachmentName, "photo.jpg");
+    assert.equal(createdMessage.data.attachmentMimeType, "image/jpeg");
+    assert.equal(createdMessage.data.attachmentSize, 2048);
+    assert.equal(createdMessage.data.attachmentWidth, 320);
+    assert.equal(createdMessage.data.attachmentHeight, 200);
+  } finally {
+    restoreEnv(originalEnv);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("message authorization requires a reciprocal match and the canonical thread", () => {
+  const relationship = matchedRelationship("user-a", "user-b", "thread-1");
+  assert.equal(relationshipAllowsMessaging(relationship, "user-a", "user-b", "thread-1"), true);
+  assert.equal(relationshipAllowsMessaging({ ...relationship, userBState: "none" }, "user-a", "user-b", "thread-1"), false);
+  assert.equal(relationshipAllowsMessaging(relationship, "user-a", "user-b", "thread-2"), false);
+});
+
+test("reply references are confined to the same thread", () => {
+  assert.equal(isReplyInThread({ $id: "message-1", threadId: "thread-1" }, "message-1", "thread-1"), true);
+  assert.equal(isReplyInThread({ $id: "message-1", threadId: "thread-2" }, "message-1", "thread-1"), false);
+  assert.equal(isReplyInThread(null, "message-1", "thread-1"), false);
+});
+
+test("updateParticipant changes only allowed preferences through the server", async () => {
+  const originalEnv = snapshotEnv();
+  const originalFetch = globalThis.fetch;
+  const patches = [];
+  Object.assign(process.env, {
+    APPWRITE_FUNCTION_API_ENDPOINT: "https://appwrite.test/v1",
+    APPWRITE_FUNCTION_PROJECT_ID: "project",
+    APPWRITE_DATABASE_ID: "db",
+    APPWRITE_THREADS_TABLE_ID: "threads",
+    APPWRITE_THREAD_PARTICIPANTS_TABLE_ID: "participants",
+    APPWRITE_MESSAGES_TABLE_ID: "messages",
+    APPWRITE_RELATIONSHIPS_TABLE_ID: "relationships"
+  });
+
+  globalThis.fetch = async (input, options = {}) => {
+    const url = new URL(String(input));
+    const method = options.method ?? "GET";
+    const body = options.body ? JSON.parse(options.body) : null;
+    if (url.pathname === "/v1/account") {
+      return jsonResponse(200, { $id: "user-a" });
+    }
+    if (method === "GET" && url.pathname.endsWith("/tables/participants/rows")) {
+      return jsonResponse(200, { rows: participantRows("thread-1") });
+    }
+    if (method === "PATCH" && url.pathname.includes("/tables/participants/rows/")) {
+      patches.push(body);
+      return jsonResponse(200, { $id: url.pathname.split("/").at(-1), ...body.data });
+    }
+    return jsonResponse(500, { message: `Unexpected ${method} ${url.pathname}` });
+  };
+
+  try {
+    const result = await invokeHandler({
+      action: "updateParticipant",
+      threadId: "thread-1",
+      currentUserId: "user-a",
+      markRead: true,
+      pinned: true,
+      notificationsEnabled: false
+    });
+    assert.equal(result.status, 200);
+    assert.equal(patches.length, 1);
+    assert.deepEqual(patches[0].permissions.sort(), [
+      'read("user:user-a")',
+      'read("user:user-b")'
+    ]);
+    assert.equal(patches[0].data.threadId, "thread-1");
+    assert.equal(patches[0].data.userId, "user-a");
+    assert.equal(patches[0].data.role, "participant");
+    assert.equal(patches[0].data.pinned, true);
+    assert.equal(patches[0].data.notificationsEnabled, false);
+    assert.ok(patches[0].data.lastReadAt);
+
+    const rejected = await invokeHandler({
+      action: "updateParticipant",
+      threadId: "thread-1",
+      currentUserId: "user-a",
+      userId: "user-b",
+      pinned: true
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(patches.length, 1);
+  } finally {
+    restoreEnv(originalEnv);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+async function invokeHandler(body, headers = {
+  "x-appwrite-key": "server-key",
+  "x-appwrite-user-jwt": "valid-jwt",
+  "x-appwrite-user-id": "user-a"
+}) {
   let responsePayload = null;
   let responseStatus = null;
 
@@ -128,9 +430,7 @@ async function invokeHandler(body, headers = { "x-appwrite-user-id": "user-a" })
         return { payload, status };
       }
     },
-    error(message) {
-      throw new Error(message);
-    }
+    error() {}
   });
 
   return {
@@ -143,10 +443,58 @@ function jsonResponse(status, payload) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    async json() {
+      return payload;
+    },
     async text() {
       return JSON.stringify(payload);
     }
   };
+}
+
+function participantRowId(threadId, userId) {
+  return `tp_${createHash("sha256").update(`${threadId}:${userId}`).digest("hex").slice(0, 32)}`;
+}
+
+function participantRows(threadId) {
+  return [
+    {
+      $id: participantRowId(threadId, "user-a"),
+      threadId,
+      userId: "user-a",
+      role: "member",
+      muted: false,
+      pinned: false,
+      notificationsEnabled: true
+    },
+    {
+      $id: participantRowId(threadId, "user-b"),
+      threadId,
+      userId: "user-b",
+      role: "member",
+      muted: false,
+      pinned: false,
+      notificationsEnabled: true
+    }
+  ];
+}
+
+function matchedRelationship(userAId, userBId, threadId) {
+  const userIds = [userAId, userBId].sort();
+  return {
+    $id: relationshipRowId(userIds),
+    pairKey: userIds.join(":"),
+    userAId: userIds[0],
+    userBId: userIds[1],
+    userAState: "matched",
+    userBState: "matched",
+    threadId,
+    matchedAt: "2026-07-21T00:00:00.000Z"
+  };
+}
+
+function relationshipRowId(userIds) {
+  return `rl_${createHash("sha256").update(userIds.join(":")).digest("hex").slice(0, 32)}`;
 }
 
 function snapshotEnv() {

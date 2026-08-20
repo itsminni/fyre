@@ -4,7 +4,6 @@ export type MatchIntentContract =
   | "relationship"
   | "friendship"
   | "casual"
-  | "networking"
   | "notSure";
 export type ChatMessageTypeContract = "text" | "image" | "video" | "audio" | "file";
 
@@ -16,10 +15,10 @@ export interface DiscoverProfileContract {
   city?: string;
   intent?: MatchIntentContract;
   bio: string;
+  instagramTag?: string;
+  spotifyTag?: string;
   imageUrl?: string;
   photos: string[];
-  photoFileIds?: string[];
-  avatarFileId?: string;
   compatibilityScore?: number;
   distanceKm?: number;
   distance: number | null;

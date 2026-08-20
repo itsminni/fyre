@@ -8,6 +8,21 @@ docs/
 .env
 .env.*
 !.env.example
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+keystore.properties
+key.properties
+secrets.properties
+google-services.json
+GoogleService-Info.plist
+
+# Appwrite live deployment configuration generated from .env
+appwrite.config.json
+appwrite/*.local.json
+functions/*/.env
 
 # Logs and temporary files
 *.log
@@ -26,9 +41,15 @@ docs/
 node_modules/
 dist/
 build/
+coverage/
+out/
+tmp/
 .build/
 .kotlin/
 __pycache__/
+.eslintcache
+*.apk
+*.aab
 
 # Ignore Xcode user workspace state (local)
 ios/Fyre/Fyre.xcodeproj/project.xcworkspace/xcuserdata/

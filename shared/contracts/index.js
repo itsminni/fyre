@@ -1,6 +1,6 @@
 export const RELATIONSHIP_STATES = ["none", "liked", "matched", "archived", "blocked"];
 export const USER_GENDERS = ["male", "female", "nonBinary", "other"];
-export const MATCH_INTENTS = ["relationship", "friendship", "casual", "networking", "notSure"];
+export const MATCH_INTENTS = ["relationship", "friendship", "casual", "notSure"];
 export const CHAT_MESSAGE_TYPES = ["text", "image", "video", "audio", "file"];
 
 export function normalizeRelationshipState(value) {
@@ -62,7 +62,6 @@ export function makeDiscoverProfileContract(input) {
   }
 
   const photos = toStringArray(input.photos);
-  const photoFileIds = toStringArray(input.photoFileIds);
   const distanceKm = normalizeNullableInteger(input.distanceKm ?? input.distance);
   const compatibilityScore = normalizeNullableInteger(input.compatibilityScore);
   const imageUrl = asString(input.imageUrl) ?? photos[0];
@@ -76,10 +75,10 @@ export function makeDiscoverProfileContract(input) {
     city: asString(input.city) ?? undefined,
     intent: normalizeMatchIntent(input.intent),
     bio,
+    instagramTag: normalizeSocialTag(input.instagramTag),
+    spotifyTag: normalizeSocialTag(input.spotifyTag),
     imageUrl: imageUrl ?? undefined,
     photos,
-    photoFileIds,
-    avatarFileId: asString(input.avatarFileId) ?? undefined,
     compatibilityScore: compatibilityScore ?? undefined,
     distanceKm: distanceKm ?? undefined,
     distance: distanceKm,
@@ -139,6 +138,11 @@ function isRecord(value) {
 
 function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeSocialTag(value) {
+  const normalized = typeof value === "string" ? value.replace(/[@\s]+/g, "") : "";
+  return normalized ? normalized.slice(0, 64) : undefined;
 }
 
 function toStringArray(value) {

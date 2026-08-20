@@ -1,64 +1,81 @@
 import { createHash } from "node:crypto";
 
-const DEFAULT_MATCH_SUBJECT = "Fyre match";
-const PLACEHOLDER_MATCH_SUBJECTS = new Set(["Match", DEFAULT_MATCH_SUBJECT]);
+const DEFAULT_MATCH_SUBJECT = "Match";
+const AVATAR_TOKEN_CACHE_LIMIT = 256;
+const AVATAR_TOKEN_CACHE_SAFETY_MS = 30_000;
+const APPWRITE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/;
+const avatarTokenCache = new Map();
 
 export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
     const body = parseBody(req);
     const currentUserId = await resolveCurrentUserId(config, req, body);
-    const otherUserId = asString(body.otherUserId);
-    const otherUserName = asString(body.otherUserName);
+    const otherUserId = appwriteIdentifier(body.otherUserId);
+    const action = body.action == null ? "createOrGet" : asString(body.action);
 
-    if (!otherUserId || otherUserId === currentUserId) {
+    if (
+      !otherUserId
+      || otherUserId === currentUserId
+      || (action !== "createOrGet" && action !== "peerProjection")
+    ) {
       return json(res, { message: "Invalid participant" }, 400);
     }
 
-    let knownThreadId = null;
-    if (config.relationshipsTableId) {
-      const relationship = await findRelationshipRow(config, currentUserId, otherUserId);
-      if (!relationship) {
-        const hasLegacyMatch = await findLegacyMatch(config, currentUserId, otherUserId);
-        if (!hasLegacyMatch) {
-          return json(res, { message: "Relationship unavailable" }, 403);
-        }
-        knownThreadId = asString(hasLegacyMatch.threadId);
-      } else if (!relationshipAllowsThread(relationship, currentUserId, otherUserId)) {
-        return json(res, { message: "Relationship unavailable" }, 403);
-      } else {
-        knownThreadId = asString(relationship.threadId);
-      }
+    const participantIds = [currentUserId, otherUserId].sort();
+    const expectedThreadId = stableThreadRowId(participantIds);
+    const relationship = await findRelationshipRow(config, participantIds);
+    if (
+      !isCanonicalRelationshipRow(relationship, participantIds)
+      || !relationshipAllowsThread(relationship, currentUserId, otherUserId)
+    ) {
+      return json(res, { message: "Relationship unavailable" }, 403);
     }
 
-    const participantIds = [currentUserId, otherUserId].sort();
-    const threadId = knownThreadId ?? stableThreadRowId(participantIds);
-    await ensureThreadAccess(config, threadId, currentUserId, otherUserId, otherUserName);
+    const threadId = expectedThreadId;
+    if (action === "peerProjection") {
+      const participantRows = await listRows(config, config.threadParticipantsTableId, [
+        equal("threadId", [threadId]),
+        limit(3)
+      ]);
+      if (!isCanonicalParticipantSet(participantRows, threadId, participantIds)) {
+        return json(res, { message: "Forbidden" }, 403);
+      }
+    } else {
+      await ensureThreadAccess(config, threadId, currentUserId, otherUserId);
+    }
+    const peer = await fetchPeerProjection(config, otherUserId);
 
-    return json(res, { threadId }, 200);
+    return json(res, { threadId, peer }, 200);
   } catch (err) {
-    error(String(err?.stack ?? err));
-    return json(res, { message: err?.statusCode === 403 ? "Forbidden" : "Unable to create thread" }, err?.statusCode ?? 500);
+    error(`createorgetthread failed (${err?.statusCode ?? 500})`);
+    const message = err?.statusCode === 401
+      ? "Unauthorized"
+      : err?.statusCode === 403
+        ? "Forbidden"
+        : "Unable to create thread";
+    return json(res, { message }, err?.statusCode ?? 500);
   }
 };
 
 function json(res, payload, status) {
-  console.log(`RESULT_JSON:${JSON.stringify(payload)}`);
+  console.log(JSON.stringify({ event: "createorgetthread.response", status }));
   return res.json(payload, status);
 }
 
 function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
-    projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
+    projectId: requiredIdentifierEnv("APPWRITE_FUNCTION_PROJECT_ID"),
     apiKey: resolveApiKey(req),
     userJwt: optionalHeader(req, "x-appwrite-user-jwt"),
-    databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
-    threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
-    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
-    relationshipsTableId: optionalEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
-    matchesTableId: optionalEnv("APPWRITE_MATCHES_TABLE_ID"),
-    allowBodyUserIdFallback: optionalEnv("APPWRITE_ALLOW_BODY_USER_ID_FALLBACK") === "true"
+    databaseId: requiredIdentifierEnv("APPWRITE_DATABASE_ID"),
+    profilesTableId: requiredIdentifierEnv("APPWRITE_PROFILES_TABLE_ID"),
+    threadsTableId: requiredIdentifierEnv("APPWRITE_THREADS_TABLE_ID"),
+    threadParticipantsTableId: requiredIdentifierEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
+    relationshipsTableId: requiredIdentifierEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
+    avatarsBucketId: requiredIdentifierEnv("APPWRITE_AVATARS_BUCKET_ID"),
+    avatarTokenTtlSeconds: requiredIntegerEnv("APPWRITE_AVATAR_TOKEN_TTL_SECONDS", 300, 900)
   };
 }
 
@@ -86,17 +103,24 @@ function requiredEnv(name) {
   return value;
 }
 
-function optionalEnv(name) {
-  const value = process.env[name];
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+function requiredIdentifierEnv(name) {
+  const value = requiredEnv(name);
+  if (!appwriteIdentifier(value)) {
+    throw new Error(`Invalid environment variable ${name}`);
+  }
+  return value;
 }
 
-function requiredHeader(req, name) {
-  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
-  if (!value) {
-    throw new Error(`Missing header ${name}`);
+function requiredIntegerEnv(name, minimum, maximum) {
+  const rawValue = requiredEnv(name);
+  if (!/^\d+$/.test(rawValue)) {
+    throw new Error(`Invalid environment variable ${name}`);
   }
-  return Array.isArray(value) ? value[0] : value;
+  const value = Number(rawValue);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`Invalid environment variable ${name}`);
+  }
+  return value;
 }
 
 function optionalHeader(req, name) {
@@ -108,32 +132,24 @@ function optionalHeader(req, name) {
 }
 
 async function resolveCurrentUserId(config, req, body) {
+  const jwtUserId = await fetchUserIdFromJwt(config);
   const headerValue = optionalHeader(req, "x-appwrite-user-id");
   const bodyValue = asString(body.currentUserId);
-  const jwtUserId = await fetchUserIdFromJwt(config);
-  const authenticatedUserId = jwtUserId ?? asString(headerValue);
 
-  if (jwtUserId && headerValue && asString(headerValue) !== jwtUserId) {
+  if (headerValue && asString(headerValue) !== jwtUserId) {
     throw authError("Authenticated user mismatch");
   }
 
-  if (authenticatedUserId) {
-    if (bodyValue && bodyValue !== authenticatedUserId) {
-      throw authError("Authenticated user mismatch");
-    }
-    return authenticatedUserId;
+  if (bodyValue && bodyValue !== jwtUserId) {
+    throw authError("Authenticated user mismatch");
   }
 
-  if (bodyValue && config.allowBodyUserIdFallback) {
-    return bodyValue;
-  }
-
-  throw authError("Missing authenticated user id");
+  return jwtUserId;
 }
 
 async function fetchUserIdFromJwt(config) {
   if (!config.userJwt) {
-    return null;
+    throw authError("Missing user JWT", 401);
   }
 
   const response = await fetch(`${config.endpoint}/account`, {
@@ -145,39 +161,42 @@ async function fetchUserIdFromJwt(config) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw authError(payload.message ?? "Invalid user JWT");
+    throw authError("Invalid user JWT", 401);
   }
-  return asString(payload.$id);
+  const userId = appwriteIdentifier(payload.$id);
+  if (!userId) {
+    throw authError("Invalid user JWT", 401);
+  }
+  return userId;
 }
 
-function authError(message) {
+function authError(message, statusCode = 403) {
   const err = new Error(message);
-  err.statusCode = 403;
+  err.statusCode = statusCode;
   return err;
 }
 
 function resolveApiKey(req) {
-  const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
+  const runtimeKey = optionalHeader(req, "x-appwrite-key");
   if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
     return runtimeKey.trim();
   }
-  return requiredHeader(req, "x-appwrite-key");
+  throw new Error("Missing Appwrite function runtime key");
 }
 
-function participantPermissions(userIds) {
-  // Mirror permissions on the thread and participant rows so both users can read the conversation metadata.
-  return userIds.flatMap((userId) => [
-    `read("user:${userId}")`,
-    `update("user:${userId}")`,
-    `delete("user:${userId}")`
-  ]);
+export function sharedConversationPermissions(userIds) {
+  return userIds.map((userId) => `read("user:${userId}")`);
+}
+
+export function participantRowPermissions(userIds) {
+  return sharedConversationPermissions(userIds);
 }
 
 async function listRows(config, tableId, queries) {
   const payload = await request(
     config,
     "GET",
-    `/tablesdb/${config.databaseId}/tables/${tableId}/rows`,
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows`,
     undefined,
     queries
   );
@@ -185,7 +204,7 @@ async function listRows(config, tableId, queries) {
 }
 
 async function createRow(config, tableId, rowId, data, permissions) {
-  return request(config, "POST", `/tablesdb/${config.databaseId}/tables/${tableId}/rows`, {
+  return request(config, "POST", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows`, {
     rowId,
     data,
     permissions
@@ -193,31 +212,48 @@ async function createRow(config, tableId, rowId, data, permissions) {
 }
 
 async function updateRow(config, tableId, rowId, data, permissions) {
-  return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
+  return request(config, "PATCH", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`, {
     data,
     permissions
   });
 }
 
-async function ensureThreadAccess(config, threadId, currentUserId, otherUserId, otherUserName) {
+async function ensureThreadAccess(config, threadId, currentUserId, otherUserId) {
   const participantIds = [currentUserId, otherUserId].sort();
-  const permissions = participantPermissions(participantIds);
-
-  await createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions);
-  await Promise.all([
-    ensureThreadParticipant(config, threadId, currentUserId, permissions),
-    ensureThreadParticipant(config, threadId, otherUserId, permissions)
+  if (threadId !== stableThreadRowId(participantIds)) {
+    throw authError("Invalid thread id");
+  }
+  const permissions = sharedConversationPermissions(participantIds);
+  const existingParticipantRows = await listRows(config, config.threadParticipantsTableId, [
+    equal("threadId", [threadId]),
+    limit(3)
   ]);
+  if (!isCanonicalParticipantSubset(existingParticipantRows, threadId, participantIds)) {
+    throw authError("Invalid thread participants");
+  }
+  await createOrReuseThreadRow(config, threadId, currentUserId, permissions);
+  await Promise.all([
+    ensureThreadParticipant(config, threadId, currentUserId, participantIds),
+    ensureThreadParticipant(config, threadId, otherUserId, participantIds)
+  ]);
+
+  const participantRows = await listRows(config, config.threadParticipantsTableId, [
+    equal("threadId", [threadId]),
+    limit(3)
+  ]);
+  if (!isCanonicalParticipantSet(participantRows, threadId, participantIds)) {
+    throw authError("Invalid thread participants");
+  }
 }
 
-async function createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions) {
+async function createOrReuseThreadRow(config, threadId, currentUserId, permissions) {
   const existingThread = await getRowIfExists(config, config.threadsTableId, threadId);
   if (existingThread?.$id) {
     await updateRow(
       config,
       config.threadsTableId,
       threadId,
-      threadPayloadFromExisting(existingThread, threadId, currentUserId, otherUserName),
+      threadPayloadFromExisting(existingThread, threadId, currentUserId),
       permissions
     );
     return threadId;
@@ -228,7 +264,7 @@ async function createOrReuseThreadRow(config, threadId, currentUserId, otherUser
       config,
       config.threadsTableId,
       threadId,
-      threadPayloadFromExisting(null, threadId, currentUserId, otherUserName),
+      threadPayloadFromExisting(null, threadId, currentUserId),
       permissions
     );
   } catch (err) {
@@ -240,8 +276,9 @@ async function createOrReuseThreadRow(config, threadId, currentUserId, otherUser
   return threadId;
 }
 
-async function ensureThreadParticipant(config, threadId, userId, permissions) {
+async function ensureThreadParticipant(config, threadId, userId, participantIds) {
   const participantRowId = stableParticipantRowId(threadId, userId);
+  const permissions = participantRowPermissions(participantIds);
   const existingParticipant = await getRowIfExists(config, config.threadParticipantsTableId, participantRowId);
 
   if (existingParticipant?.$id) {
@@ -272,17 +309,7 @@ async function ensureThreadParticipant(config, threadId, userId, permissions) {
   }
 }
 
-async function findSingleRow(config, tableId, queries) {
-  const rows = await listRows(config, tableId, queries);
-  return rows[0] ?? null;
-}
-
-async function findRelationshipRow(config, currentUserId, otherUserId) {
-  if (!config.relationshipsTableId) {
-    return null;
-  }
-
-  const userIds = [currentUserId, otherUserId].sort();
+async function findRelationshipRow(config, userIds) {
   const stableRelationship = await getRowIfExists(
     config,
     config.relationshipsTableId,
@@ -292,38 +319,35 @@ async function findRelationshipRow(config, currentUserId, otherUserId) {
     return stableRelationship;
   }
 
-  return findSingleRow(config, config.relationshipsTableId, [
-    equal("pairKey", [userIds.join(":")]),
-    limit(1)
-  ]);
+  return null;
 }
 
-async function findLegacyMatch(config, currentUserId, otherUserId) {
-  if (!config.matchesTableId) {
-    return null;
+export function isCanonicalRelationshipRow(relationship, userIds) {
+  if (
+    !relationship
+    || typeof relationship !== "object"
+    || !Array.isArray(userIds)
+    || userIds.length !== 2
+    || userIds[0] === userIds[1]
+  ) {
+    return false;
   }
 
-  const userIds = [currentUserId, otherUserId].sort();
-  const stableMatch = await getRowIfExists(config, config.matchesTableId, stableMatchRowId(userIds));
-  if (stableMatch?.$id) {
-    return stableMatch;
-  }
-
-  return findSingleRow(config, config.matchesTableId, [
-    equal("matchKey", [userIds.join(":")]),
-    limit(1)
-  ]);
+  const pairKey = userIds.join(":");
+  const expectedThreadId = stableThreadRowId(userIds);
+  return asString(relationship.$id) === stableRelationshipRowId(userIds)
+    && asString(relationship.pairKey) === pairKey
+    && asString(relationship.userAId) === userIds[0]
+    && asString(relationship.userBId) === userIds[1]
+    && (relationship.threadId == null || asString(relationship.threadId) === expectedThreadId);
 }
 
 function relationshipAllowsThread(relationship, currentUserId, otherUserId) {
   const currentState = relationshipStateForUser(relationship, currentUserId);
   const otherState = relationshipStateForUser(relationship, otherUserId);
 
-  if (currentState === "blocked" || otherState === "blocked") {
-    return false;
-  }
-
-  return currentState === "matched" || otherState === "matched" || Boolean(relationship.matchedAt);
+  return currentState === "matched"
+    && otherState === "matched";
 }
 
 function relationshipStateForUser(relationship, userId) {
@@ -338,7 +362,7 @@ function relationshipStateForUser(relationship, userId) {
 
 async function getRowIfExists(config, tableId, rowId) {
   try {
-    return await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`);
+    return await request(config, "GET", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`);
   } catch (err) {
     if (isNotFoundError(err)) {
       return null;
@@ -347,16 +371,11 @@ async function getRowIfExists(config, tableId, rowId) {
   }
 }
 
-function threadPayloadFromExisting(threadRow, threadId, currentUserId, otherUserName) {
-  const currentSubject = asString(threadRow?.subject);
-  const nextSubject = currentSubject && !PLACEHOLDER_MATCH_SUBJECTS.has(currentSubject)
-    ? currentSubject
-    : (asString(otherUserName) ?? currentSubject ?? DEFAULT_MATCH_SUBJECT);
-
+export function threadPayloadFromExisting(threadRow, threadId, currentUserId) {
   return {
     threadId,
     createdByUserId: asString(threadRow?.createdByUserId) ?? currentUserId,
-    subject: nextSubject,
+    subject: DEFAULT_MATCH_SUBJECT,
     status: asString(threadRow?.status) ?? "active",
     lastMessageText: threadRow?.lastMessageText ?? null,
     lastMessageAt: threadRow?.lastMessageAt ?? null
@@ -367,7 +386,7 @@ function participantPayloadFromExisting(participantRow, threadId, userId) {
   return {
     threadId,
     userId,
-    role: asString(participantRow?.role) ?? "participant",
+    role: "participant",
     lastReadAt: participantRow?.lastReadAt ?? null,
     muted: typeof participantRow?.muted === "boolean" ? participantRow.muted : false,
     pinned: typeof participantRow?.pinned === "boolean" ? participantRow.pinned : false,
@@ -375,6 +394,157 @@ function participantPayloadFromExisting(participantRow, threadId, userId) {
       ? participantRow.notificationsEnabled
       : true
   };
+}
+
+export function isCanonicalParticipantSubset(rows, threadId, userIds) {
+  if (
+    !Array.isArray(rows)
+    || !Array.isArray(userIds)
+    || rows.length > userIds.length
+    || userIds.length !== 2
+    || new Set(userIds).size !== 2
+  ) {
+    return false;
+  }
+
+  const seenUserIds = new Set();
+  for (const row of rows) {
+    const userId = asString(row?.userId);
+    if (
+      !userId
+      || !userIds.includes(userId)
+      || seenUserIds.has(userId)
+      || asString(row?.threadId) !== threadId
+      || asString(row?.$id) !== stableParticipantRowId(threadId, userId)
+    ) {
+      return false;
+    }
+    seenUserIds.add(userId);
+  }
+
+  return true;
+}
+
+export function isCanonicalParticipantSet(rows, threadId, userIds) {
+  return Array.isArray(rows)
+    && Array.isArray(userIds)
+    && rows.length === userIds.length
+    && isCanonicalParticipantSubset(rows, threadId, userIds);
+}
+
+async function fetchPeerProjection(config, userId) {
+  let profile = await getRowIfExists(config, config.profilesTableId, userId);
+  if (!isProfileForUser(profile, userId)) {
+    const rows = await listRows(config, config.profilesTableId, [
+      equal("userId", [userId]),
+      limit(2)
+    ]);
+    const matchingRows = rows.filter((row) => isProfileForUser(row, userId));
+    profile = matchingRows.length === 1 ? matchingRows[0] : null;
+  }
+
+  const projection = peerProjectionFromProfile(profile, userId);
+  const avatarFileId = normalizedAvatarFileId(profile?.avatarFileId);
+  if (!avatarFileId) {
+    return projection;
+  }
+
+  try {
+    return {
+      ...projection,
+      avatarUrl: await temporaryAvatarURL(config, avatarFileId)
+    };
+  } catch {
+    return projection;
+  }
+}
+
+function isProfileForUser(profile, userId) {
+  return profile && typeof profile === "object" && asString(profile.userId) === userId;
+}
+
+export function peerProjectionFromProfile(profile, userId) {
+  const validProfile = isProfileForUser(profile, userId) ? profile : null;
+  const firstName = displayNamePart(validProfile?.firstName);
+  const lastName = displayNamePart(validProfile?.lastName);
+  const displayName = [firstName, lastName].filter(Boolean).join(" ") || DEFAULT_MATCH_SUBJECT;
+
+  return {
+    userId,
+    displayName,
+    avatarUrl: null,
+    presenceUpdatedAt: asIsoDate(validProfile?.presenceUpdatedAt),
+    lastSeenAt: asIsoDate(validProfile?.lastSeenAt)
+  };
+}
+
+function displayNamePart(value) {
+  const text = asString(value);
+  return text ? text.replace(/\s+/g, " ").slice(0, 100) : null;
+}
+
+function asIsoDate(value) {
+  const text = asString(value);
+  if (!text) {
+    return null;
+  }
+  const timestamp = Date.parse(text);
+  return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
+}
+
+function normalizedAvatarFileId(value) {
+  const fileId = asString(value);
+  return fileId && /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/.test(fileId) ? fileId : null;
+}
+
+async function temporaryAvatarURL(config, fileId) {
+  const now = Date.now();
+  pruneAvatarTokenCache(now);
+  const cacheKey = `${config.endpoint}\u0000${config.projectId}\u0000${config.avatarsBucketId}\u0000${fileId}`;
+  const cached = avatarTokenCache.get(cacheKey);
+  if (cached && cached.usableUntil > now) {
+    avatarTokenCache.delete(cacheKey);
+    avatarTokenCache.set(cacheKey, cached);
+    return cached.url;
+  }
+
+  const requestedExpiry = new Date(now + config.avatarTokenTtlSeconds * 1000).toISOString();
+  const token = await request(
+    config,
+    "POST",
+    `/tokens/buckets/${pathSegment(config.avatarsBucketId)}/files/${pathSegment(fileId)}`,
+    { expire: requestedExpiry }
+  );
+  const secret = asString(token.secret);
+  if (!secret) {
+    throw new Error("Appwrite returned an invalid avatar file token");
+  }
+
+  const parsedResponseExpiry = Date.parse(asString(token.expire) ?? requestedExpiry);
+  const responseExpiry = Number.isFinite(parsedResponseExpiry)
+    ? parsedResponseExpiry
+    : now + config.avatarTokenTtlSeconds * 1000;
+  const usableUntil = Math.max(
+    now,
+    Math.min(now + config.avatarTokenTtlSeconds * 1000, responseExpiry) - AVATAR_TOKEN_CACHE_SAFETY_MS
+  );
+  const url = new URL(`${config.endpoint}/storage/buckets/${pathSegment(config.avatarsBucketId)}/files/${pathSegment(fileId)}/view`);
+  url.searchParams.set("project", config.projectId);
+  url.searchParams.set("token", secret);
+  const cachedValue = { url: url.toString(), usableUntil };
+  if (avatarTokenCache.size >= AVATAR_TOKEN_CACHE_LIMIT) {
+    avatarTokenCache.delete(avatarTokenCache.keys().next().value);
+  }
+  avatarTokenCache.set(cacheKey, cachedValue);
+  return cachedValue.url;
+}
+
+function pruneAvatarTokenCache(now) {
+  for (const [cacheKey, entry] of avatarTokenCache) {
+    if (entry.usableUntil <= now) {
+      avatarTokenCache.delete(cacheKey);
+    }
+  }
 }
 
 async function request(config, method, path, body, queries = []) {
@@ -425,6 +595,15 @@ function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+export function appwriteIdentifier(value) {
+  const identifier = asString(value);
+  return identifier && APPWRITE_IDENTIFIER_PATTERN.test(identifier) ? identifier : null;
+}
+
+export function pathSegment(value) {
+  return encodeURIComponent(String(value));
+}
+
 function isAlreadyExistsError(err) {
   const message = String(err?.message ?? err ?? "").toLowerCase();
   return message.includes("already exists");
@@ -439,39 +618,18 @@ function isNotFoundError(err) {
   return message.includes("not found") || message.includes("could not be found");
 }
 
-function stableThreadRowId(userIds) {
+export function stableThreadRowId(userIds) {
   return stableRowId("th", userIds.join(":"));
 }
 
-function stableParticipantRowId(threadId, userId) {
+export function stableParticipantRowId(threadId, userId) {
   return stableRowId("tp", `${threadId}:${userId}`);
 }
 
-function stableMatchRowId(userIds) {
-  return stableRowId("mt", userIds.join(":"));
-}
-
-function stableRelationshipRowId(userIds) {
+export function stableRelationshipRowId(userIds) {
   return stableRowId("rl", userIds.join(":"));
 }
 
 function stableRowId(prefix, seed) {
   return `${prefix}_${createHash("sha256").update(seed).digest("hex").slice(0, 32)}`;
-}
-
-export function sharedThreadIdFromParticipantRows(firstRows, secondRows) {
-  const firstThreadIds = new Set(
-    firstRows
-      .map((row) => asString(row.threadId))
-      .filter(Boolean)
-  );
-
-  for (const row of secondRows) {
-    const threadId = asString(row.threadId);
-    if (threadId && firstThreadIds.has(threadId)) {
-      return threadId;
-    }
-  }
-
-  return null;
 }

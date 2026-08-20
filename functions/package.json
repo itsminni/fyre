@@ -1,0 +1,9 @@
+{
+  "name": "fyre-appwrite-functions",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test *.test.mjs */src/*.test.mjs"
+  }
+}

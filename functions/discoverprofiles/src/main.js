@@ -10,6 +10,14 @@ const RECENT_PRESENCE_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_SHARED_INTERESTS = 4;
 const MIN_COMPATIBILITY_SCORE = 24;
 const MAX_COMPATIBILITY_SCORE = 96;
+const AVATAR_TOKEN_CACHE_LIMIT = 256;
+const AVATAR_TOKEN_CACHE_SAFETY_MS = 30_000;
+const AVATAR_TOKEN_ISSUE_CONCURRENCY = 4;
+const PROFILE_SCAN_PAGE_SIZE = 100;
+const MAX_PROFILE_SCAN_ROWS = 400;
+const EXCLUSION_QUERY_CHUNK_SIZE = 100;
+const APPWRITE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/;
+const avatarTokenCache = new Map();
 
 export default async ({ req, res, error }) => {
   try {
@@ -18,51 +26,48 @@ export default async ({ req, res, error }) => {
     const currentUserId = await resolveCurrentUserId(config, req, body);
     const currentProfile = await fetchProfile(config, currentUserId);
 
-    if (!currentProfile) {
-      console.log("RESULT_JSON:{\"profiles\":[]}");
-      return res.json({ profiles: [] }, 200);
+    if (!currentProfile || asString(currentProfile.userId) !== currentUserId) {
+      console.log(JSON.stringify({ event: "discoverprofiles.complete", profileCount: 0 }));
+      return res.json({ profiles: [], nextCursor: null }, 200);
     }
 
     const currentUserContext = makeUserContext(currentProfile);
+    const profileCursor = optionalCursor(body.profileCursor);
     const profileQueries =
       currentUserContext.preferredGenders.length > 0 && currentUserContext.preferredGenders.length < 4
         ? [equal("gender", currentUserContext.preferredGenders.map(storedGenderValue))]
         : [];
-
-    const [
-      profiles,
-      swipes,
-      matchesByUserA,
-      matchesByUserB,
-      relationshipsByUserA,
-      relationshipsByUserB
-    ] = await Promise.all([
-      listAllRows(config, config.profilesTableId, profileQueries),
-      listAllRows(config, config.swipesTableId, [
-        equal("fromUserId", [currentUserId])
-      ]),
-      listAllRows(config, config.matchesTableId, [
-        equal("userAId", [currentUserId])
-      ]),
-      listAllRows(config, config.matchesTableId, [
-        equal("userBId", [currentUserId])
-      ]),
-      config.relationshipsTableId
-        ? listAllRows(config, config.relationshipsTableId, [
-            equal("userAId", [currentUserId])
-          ])
-        : Promise.resolve([]),
-      config.relationshipsTableId
-        ? listAllRows(config, config.relationshipsTableId, [
-            equal("userBId", [currentUserId])
-          ])
-        : Promise.resolve([])
+    const profileWindow = await listRowsWindow(
+      config,
+      config.profilesTableId,
+      profileQueries,
+      profileCursor,
+      MAX_PROFILE_SCAN_ROWS,
+      PROFILE_SCAN_PAGE_SIZE
+    );
+    const profiles = profileWindow.rows;
+    const candidateUserIds = Array.from(new Set(
+      profiles
+        .map((row) => appwriteIdentifier(row.userId))
+        .filter((userId) => userId && userId !== currentUserId)
+    ));
+    const [swipes, relationships] = await Promise.all([
+      listRowsByExactValues(
+        config,
+        config.swipesTableId,
+        "swipeKey",
+        candidateUserIds.map((userId) => `${currentUserId}:${userId}`)
+      ),
+      listRowsByExactValues(
+        config,
+        config.relationshipsTableId,
+        "pairKey",
+        candidateUserIds.map((userId) => [currentUserId, userId].sort().join(":"))
+      )
     ]);
-    const matches = dedupeRowsById([...matchesByUserA, ...matchesByUserB]);
-    const relationships = dedupeRowsById([...relationshipsByUserA, ...relationshipsByUserB]);
-    const excludedUserIds = buildExcludedUserIds(currentUserId, swipes, matches, relationships);
+    const excludedUserIds = buildExcludedUserIds(currentUserId, swipes, relationships);
 
-    const discoverProfiles = profiles
+    const selectedEntries = profiles
       .map((row) => buildCandidateEntry(row, currentUserId, currentUserContext, excludedUserIds))
       .filter(Boolean)
       .map((entry) => ({
@@ -84,8 +89,11 @@ export default async ({ req, res, error }) => {
         const rhsPresence = timestampValue(rhs.row.presenceUpdatedAt);
         return rhsPresence - lhsPresence;
       })
-      .slice(0, MAX_RESULTS)
-      .map(({ row, candidate, distanceKm, score }) => projectDiscoverProfile(
+      .slice(0, MAX_RESULTS);
+    const discoverProfiles = (await mapWithConcurrency(
+      selectedEntries,
+      AVATAR_TOKEN_ISSUE_CONCURRENCY,
+      ({ row, candidate, distanceKm, score }) => projectDiscoverProfile(
         config,
         row,
         candidate,
@@ -93,47 +101,49 @@ export default async ({ req, res, error }) => {
         distanceKm,
         score,
         relationshipStateForPair(currentUserId, asString(row.userId), relationships)
-      ))
+      )
+    ))
       .filter(Boolean);
 
-    console.log(`RESULT_JSON:${JSON.stringify({ profiles: discoverProfiles })}`);
-    return res.json({ profiles: discoverProfiles }, 200);
+    console.log(JSON.stringify({
+      event: "discoverprofiles.complete",
+      profileCount: discoverProfiles.length,
+      scannedProfileCount: profiles.length,
+      hasNextPage: profileWindow.nextCursor !== null
+    }));
+    return res.json({ profiles: discoverProfiles, nextCursor: profileWindow.nextCursor }, 200);
   } catch (err) {
-    error(String(err?.stack ?? err));
-    return res.json({ message: err?.statusCode === 403 ? "Forbidden" : "Unable to fetch discover profiles" }, err?.statusCode ?? 500);
+    error(`discoverprofiles failed (${err?.statusCode ?? 500})`);
+    const message = err?.statusCode === 401
+      ? "Unauthorized"
+      : err?.statusCode === 403
+        ? "Forbidden"
+        : "Unable to fetch discover profiles";
+    return res.json({ message }, err?.statusCode ?? 500);
   }
 };
 
 function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
-    projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
+    projectId: requiredIdentifierEnv("APPWRITE_FUNCTION_PROJECT_ID"),
     apiKey: resolveApiKey(req),
     userJwt: optionalHeader(req, "x-appwrite-user-jwt"),
-    databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
-    profilesTableId: requiredEnv("APPWRITE_PROFILES_TABLE_ID"),
-    swipesTableId: requiredEnv("APPWRITE_SWIPES_TABLE_ID"),
-    matchesTableId: requiredEnv("APPWRITE_MATCHES_TABLE_ID"),
-    relationshipsTableId: optionalEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
-    avatarsBucketId: optionalEnv("APPWRITE_AVATARS_BUCKET_ID"),
-    allowBodyUserIdFallback: optionalEnv("APPWRITE_ALLOW_BODY_USER_ID_FALLBACK") === "true"
+    databaseId: requiredIdentifierEnv("APPWRITE_DATABASE_ID"),
+    profilesTableId: requiredIdentifierEnv("APPWRITE_PROFILES_TABLE_ID"),
+    swipesTableId: requiredIdentifierEnv("APPWRITE_SWIPES_TABLE_ID"),
+    relationshipsTableId: requiredIdentifierEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
+    avatarsBucketId: requiredIdentifierEnv("APPWRITE_AVATARS_BUCKET_ID"),
+    avatarTokenTtlSeconds: requiredIntegerEnv("APPWRITE_AVATAR_TOKEN_TTL_SECONDS", 300, 900)
   };
 }
 
-function buildExcludedUserIds(currentUserId, swipes, matches, relationships) {
+function buildExcludedUserIds(currentUserId, swipes, relationships) {
   const excludedUserIds = new Set();
 
   for (const swipe of swipes) {
     if (typeof swipe.toUserId === "string" && swipe.toUserId.length > 0) {
       excludedUserIds.add(swipe.toUserId);
-    }
-  }
-
-  for (const match of matches) {
-    if (match.userAId === currentUserId && typeof match.userBId === "string") {
-      excludedUserIds.add(match.userBId);
-    } else if (match.userBId === currentUserId && typeof match.userAId === "string") {
-      excludedUserIds.add(match.userAId);
     }
   }
 
@@ -144,7 +154,14 @@ function buildExcludedUserIds(currentUserId, swipes, matches, relationships) {
     }
 
     const state = relationshipStateForUser(relationship, currentUserId);
-    if (state === "archived" || state === "blocked" || state === "liked" || state === "matched") {
+    const relatedState = relationshipStateForUser(relationship, relatedUserId);
+    if (
+      state === "archived"
+      || state === "blocked"
+      || state === "liked"
+      || state === "matched"
+      || relatedState === "blocked"
+    ) {
       excludedUserIds.add(relatedUserId);
     }
   }
@@ -153,7 +170,7 @@ function buildExcludedUserIds(currentUserId, swipes, matches, relationships) {
 }
 
 export function buildCandidateEntry(row, currentUserId, currentUser, excludedUserIds) {
-  const candidateUserId = asString(row.userId);
+  const candidateUserId = appwriteIdentifier(row.userId);
   if (!candidateUserId || candidateUserId === currentUserId || excludedUserIds.has(candidateUserId)) {
     return null;
   }
@@ -234,9 +251,9 @@ function candidateScore(row, candidate, currentUser, distanceKm) {
   );
 }
 
-function projectDiscoverProfile(config, row, candidate, currentUser, distanceKm, score, relationshipState) {
+async function projectDiscoverProfile(config, row, candidate, currentUser, distanceKm, score, relationshipState) {
   const commonInterests = candidate.interests.filter((interest) => currentUser.interests.includes(interest));
-  const photos = discoverPhotoURLs(config, row);
+  const photos = await discoverPhotoURLs(config, row);
 
   return makeDiscoverProfileContract({
     id: row.userId,
@@ -246,10 +263,10 @@ function projectDiscoverProfile(config, row, candidate, currentUser, distanceKm,
     city: asString(row.city),
     intent: candidate.intent,
     bio: discoverBio(row, commonInterests),
+    instagramTag: normalizeSocialTag(row.instagramTag),
+    spotifyTag: normalizeSocialTag(row.spotifyTag),
     imageUrl: photos[0] ?? null,
     photos,
-    photoFileIds: discoverPhotoFileIds(row),
-    avatarFileId: asString(row.avatarFileId),
     compatibilityScore: clamp(score, MIN_COMPATIBILITY_SCORE, MAX_COMPATIBILITY_SCORE),
     distanceKm: roundedDistance(distanceKm),
     distance: roundedDistance(distanceKm),
@@ -258,7 +275,7 @@ function projectDiscoverProfile(config, row, candidate, currentUser, distanceKm,
   });
 }
 
-function makeUserContext(row) {
+export function makeUserContext(row) {
   const gender = normalizeGender(row.gender);
   return {
     gender,
@@ -280,22 +297,20 @@ function makeUserContext(row) {
 }
 
 export function isProfileReady(row) {
-  if (asBool(row.profileReady)) {
-    return true;
-  }
-
   return Boolean(
     asString(row.firstName)
     && normalizeCity(row.city)
     && normalizeGender(row.gender)
     && ageFromBirthDate(row.birthDate) >= 18
+    && normalizeOrientation(row.orientation)
     && firstNonEmpty([row.bio])
+    && parsePreferredGenders(row.preferredGenders).length > 0
   );
 }
 
 async function fetchProfile(config, userId) {
   try {
-    return await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${config.profilesTableId}/rows/${userId}`);
+    return await request(config, "GET", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(config.profilesTableId)}/rows/${pathSegment(userId)}`);
   } catch (err) {
     const rows = await listRows(config, config.profilesTableId, [
       equal("userId", [userId]),
@@ -320,6 +335,20 @@ function normalizeGender(value) {
   }
 }
 
+function normalizeOrientation(value) {
+  switch (asString(value)) {
+    case "straight":
+    case "gay":
+    case "lesbian":
+    case "bisexual":
+    case "pansexual":
+    case "other":
+      return value.trim();
+    default:
+      return null;
+  }
+}
+
 function storedGenderValue(value) {
   return value === "nonbinary" ? "nonBinary" : value;
 }
@@ -339,16 +368,9 @@ function normalizeIntent(value) {
 function parsePreferredGenders(rawValue) {
   const explicit = Array.isArray(rawValue)
     ? rawValue.map((item) => normalizeGender(item)).filter(Boolean)
-    : asString(rawValue)
-      ?.split(",")
-      .map((item) => normalizeGender(item))
-      .filter(Boolean);
+    : [];
 
-  if (explicit?.length) {
-    return Array.from(new Set(explicit));
-  }
-
-  return ["male", "female", "nonbinary", "other"];
+  return explicit?.length ? Array.from(new Set(explicit)) : [];
 }
 
 function interestTokens(rawValue) {
@@ -368,12 +390,12 @@ function interestTokens(rawValue) {
 }
 
 function ageFromBirthDate(value) {
-  const timestamp = timestampValue(value);
-  if (!timestamp) {
+  const normalized = asString(value);
+  if (!normalized) {
     return 0;
   }
 
-  const birthDate = new Date(timestamp);
+  const birthDate = new Date(normalized);
   if (Number.isNaN(birthDate.getTime())) {
     return 0;
   }
@@ -417,7 +439,7 @@ function normalizeDistanceKm(value) {
   if (numeric <= 0) {
     return null;
   }
-  return Math.max(5, Math.trunc(numeric));
+  return Math.min(999, Math.max(5, Math.trunc(numeric)));
 }
 
 function normalizeCity(value) {
@@ -665,17 +687,24 @@ function requiredEnv(name) {
   return value;
 }
 
-function optionalEnv(name) {
-  const value = process.env[name];
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+function requiredIdentifierEnv(name) {
+  const value = requiredEnv(name);
+  if (!appwriteIdentifier(value)) {
+    throw new Error(`Invalid environment variable ${name}`);
+  }
+  return value;
 }
 
-function requiredHeader(req, name) {
-  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
-  if (!value) {
-    throw new Error(`Missing header ${name}`);
+function requiredIntegerEnv(name, minimum, maximum) {
+  const rawValue = requiredEnv(name);
+  if (!/^\d+$/.test(rawValue)) {
+    throw new Error(`Invalid environment variable ${name}`);
   }
-  return Array.isArray(value) ? value[0] : value;
+  const value = Number(rawValue);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`Invalid environment variable ${name}`);
+  }
+  return value;
 }
 
 function optionalHeader(req, name) {
@@ -687,32 +716,24 @@ function optionalHeader(req, name) {
 }
 
 async function resolveCurrentUserId(config, req, body) {
+  const jwtUserId = await fetchUserIdFromJwt(config);
   const headerValue = optionalHeader(req, "x-appwrite-user-id");
   const bodyValue = asString(body.currentUserId);
-  const jwtUserId = await fetchUserIdFromJwt(config);
-  const authenticatedUserId = jwtUserId ?? asString(headerValue);
 
-  if (jwtUserId && headerValue && asString(headerValue) !== jwtUserId) {
+  if (headerValue && asString(headerValue) !== jwtUserId) {
     throw authError("Authenticated user mismatch");
   }
 
-  if (authenticatedUserId) {
-    if (bodyValue && bodyValue !== authenticatedUserId) {
-      throw authError("Authenticated user mismatch");
-    }
-    return authenticatedUserId;
+  if (bodyValue && bodyValue !== jwtUserId) {
+    throw authError("Authenticated user mismatch");
   }
 
-  if (bodyValue && config.allowBodyUserIdFallback) {
-    return bodyValue;
-  }
-
-  throw authError("Missing authenticated user id");
+  return jwtUserId;
 }
 
 async function fetchUserIdFromJwt(config) {
   if (!config.userJwt) {
-    return null;
+    throw authError("Missing user JWT", 401);
   }
 
   const response = await fetch(`${config.endpoint}/account`, {
@@ -724,14 +745,18 @@ async function fetchUserIdFromJwt(config) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw authError(payload.message ?? "Invalid user JWT");
+    throw authError("Invalid user JWT", 401);
   }
-  return asString(payload.$id);
+  const userId = appwriteIdentifier(payload.$id);
+  if (!userId) {
+    throw authError("Invalid user JWT", 401);
+  }
+  return userId;
 }
 
-function authError(message) {
+function authError(message, statusCode = 403) {
   const err = new Error(message);
-  err.statusCode = 403;
+  err.statusCode = statusCode;
   return err;
 }
 
@@ -752,42 +777,123 @@ function parseBody(req) {
 }
 
 function resolveApiKey(req) {
-  const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
+  const runtimeKey = optionalHeader(req, "x-appwrite-key");
   if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
     return runtimeKey.trim();
   }
-  return requiredHeader(req, "x-appwrite-key");
+  throw new Error("Missing Appwrite function runtime key");
 }
 
 async function listRows(config, tableId, queries) {
   const payload = await request(
     config,
     "GET",
-    `/tablesdb/${config.databaseId}/tables/${tableId}/rows`,
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows`,
     undefined,
     queries
   );
   return Array.isArray(payload.rows) ? payload.rows : [];
 }
 
-async function listAllRows(config, tableId, baseQueries, pageSize = 100) {
+async function listRowsWindow(config, tableId, baseQueries, initialCursor, maxRows, pageSize) {
   const rows = [];
-  let page = 0;
+  const seenIds = new Set();
+  let cursor = initialCursor;
+  const maximumPageCount = Math.ceil(maxRows / pageSize) + 1;
 
-  while (true) {
+  for (let page = 0; page < maximumPageCount && rows.length < maxRows; page += 1) {
+    const remaining = maxRows - rows.length;
+    const requestLimit = Math.min(pageSize, remaining);
     const batch = await listRows(config, tableId, [
       ...baseQueries,
-      limit(pageSize),
-      offset(page * pageSize)
+      orderAsc("$id"),
+      ...(cursor ? [cursorAfter(cursor)] : []),
+      limit(requestLimit)
     ]);
-    rows.push(...batch);
 
-    if (batch.length < pageSize) {
-      return rows;
+    if (batch.length > requestLimit) {
+      throw paginationError();
+    }
+    if (batch.length === 0) {
+      return { rows, nextCursor: null };
     }
 
-    page += 1;
+    const acceptedBatch = batch.slice(0, remaining);
+    for (const row of acceptedBatch) {
+      const rowId = appwriteIdentifier(row?.$id);
+      if (!rowId || rowId === cursor || seenIds.has(rowId)) {
+        throw paginationError();
+      }
+      seenIds.add(rowId);
+      rows.push(row);
+    }
+
+    const lastId = appwriteIdentifier(acceptedBatch.at(-1)?.$id);
+    if (!lastId) {
+      throw paginationError();
+    }
+
+    if (batch.length < requestLimit) {
+      return { rows, nextCursor: null };
+    }
+
+    cursor = lastId;
   }
+
+  if (rows.length === maxRows) {
+    const lastId = appwriteIdentifier(rows.at(-1)?.$id);
+    if (!lastId) {
+      throw paginationError();
+    }
+    const probe = await listRows(config, tableId, [
+      ...baseQueries,
+      orderAsc("$id"),
+      cursorAfter(lastId),
+      limit(1)
+    ]);
+    if (probe.length === 0) {
+      return { rows, nextCursor: null };
+    }
+    const probeId = appwriteIdentifier(probe[0]?.$id);
+    if (!probeId || probeId === lastId || seenIds.has(probeId)) {
+      throw paginationError();
+    }
+    return { rows, nextCursor: lastId };
+  }
+  throw paginationError();
+}
+
+async function listRowsByExactValues(config, tableId, attribute, values) {
+  const uniqueValues = Array.from(new Set(values.filter(Boolean)));
+  const batches = [];
+  for (let index = 0; index < uniqueValues.length; index += EXCLUSION_QUERY_CHUNK_SIZE) {
+    const chunk = uniqueValues.slice(index, index + EXCLUSION_QUERY_CHUNK_SIZE);
+    batches.push(listRows(config, tableId, [
+      equal(attribute, chunk),
+      orderAsc("$id"),
+      limit(chunk.length)
+    ]));
+  }
+  return dedupeRowsById((await Promise.all(batches)).flat());
+}
+
+function optionalCursor(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  const cursor = appwriteIdentifier(value);
+  if (!cursor) {
+    const err = new Error("Invalid discovery cursor");
+    err.statusCode = 400;
+    throw err;
+  }
+  return cursor;
+}
+
+function paginationError() {
+  const err = new Error("Appwrite returned an invalid cursor page");
+  err.statusCode = 502;
+  return err;
 }
 
 async function request(config, method, path, body, queries = []) {
@@ -819,12 +925,16 @@ function equal(field, values) {
   return JSON.stringify({ method: "equal", attribute: field, values });
 }
 
-function limit(value) {
-  return JSON.stringify({ method: "limit", values: [value] });
+function orderAsc(field) {
+  return JSON.stringify({ method: "orderAsc", attribute: field });
 }
 
-function offset(value) {
-  return JSON.stringify({ method: "offset", values: [value] });
+function cursorAfter(value) {
+  return JSON.stringify({ method: "cursorAfter", values: [value] });
+}
+
+function limit(value) {
+  return JSON.stringify({ method: "limit", values: [value] });
 }
 
 export function dedupeRowsById(rows) {
@@ -847,6 +957,15 @@ export function dedupeRowsById(rows) {
 
 function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+export function appwriteIdentifier(value) {
+  const identifier = asString(value);
+  return identifier && APPWRITE_IDENTIFIER_PATTERN.test(identifier) ? identifier : null;
+}
+
+export function pathSegment(value) {
+  return encodeURIComponent(String(value));
 }
 
 function asBool(value) {
@@ -881,7 +1000,7 @@ function asNullableBool(value) {
   return null;
 }
 
-function discoverName(row) {
+export function discoverName(row) {
   const firstName = asString(row.firstName) ?? "";
   const lastName = asString(row.lastName) ?? "";
   const fullName = `${firstName} ${lastName}`.trim();
@@ -889,57 +1008,114 @@ function discoverName(row) {
     return fullName;
   }
 
-  const email = asString(row.email);
-  if (email) {
-    return email.split("@")[0];
-  }
-
   return "Fyre";
 }
 
 function discoverPhotoFileIds(row) {
   if (Array.isArray(row.photoFileIds)) {
-    return row.photoFileIds
-      .map((value) => asString(value))
-      .filter(Boolean);
+    return normalizedAvatarFileIds(row.photoFileIds);
   }
 
   const serialized = asString(row.photoFileIds);
   if (serialized) {
-    return serialized
+    return normalizedAvatarFileIds(serialized
       .split(/[,|\n]/)
-      .map((value) => value.trim())
-      .filter(Boolean);
+      .map((value) => value.trim()));
   }
 
   return [];
 }
 
-function discoverPhotoURLs(config, row) {
-  if (Array.isArray(row.photos)) {
-    const directUrls = row.photos.map((value) => asString(value)).filter(Boolean);
-    if (directUrls.length > 0) {
-      return directUrls;
+async function discoverPhotoURLs(config, row) {
+  const photoFileIds = discoverPhotoFileIds(row);
+  const avatarFileId = normalizedAvatarFileId(row.avatarFileId);
+  const fileIds = photoFileIds.length > 0
+    ? photoFileIds
+    : avatarFileId ? [avatarFileId] : [];
+  const urls = await Promise.all(fileIds.map(async (fileId) => {
+    try {
+      return await temporaryAvatarURL(config, fileId);
+    } catch {
+      return null;
     }
-  }
-
-  if (!config.avatarsBucketId) {
-    return [];
-  }
-
-  return discoverPhotoFileIds(row)
-    .map((fileId) => buildStorageFileURL(config, fileId))
-    .filter(Boolean);
+  }));
+  return urls.filter(Boolean);
 }
 
-function buildStorageFileURL(config, fileId) {
-  if (!fileId || !config.avatarsBucketId) {
-    return null;
+function normalizedAvatarFileIds(values) {
+  return Array.from(new Set(values.map(normalizedAvatarFileId).filter(Boolean))).slice(0, 6);
+}
+
+function normalizedAvatarFileId(value) {
+  const fileId = asString(value);
+  return appwriteIdentifier(fileId);
+}
+
+async function temporaryAvatarURL(config, fileId) {
+  const now = Date.now();
+  pruneAvatarTokenCache(now);
+  const cacheKey = `${config.endpoint}\u0000${config.projectId}\u0000${config.avatarsBucketId}\u0000${fileId}`;
+  const cached = avatarTokenCache.get(cacheKey);
+  if (cached && cached.usableUntil > now) {
+    avatarTokenCache.delete(cacheKey);
+    avatarTokenCache.set(cacheKey, cached);
+    return cached.url;
   }
 
-  const url = new URL(`${config.endpoint}/storage/buckets/${config.avatarsBucketId}/files/${fileId}/view`);
+  const requestedExpiry = new Date(now + config.avatarTokenTtlSeconds * 1000).toISOString();
+  const token = await request(
+    config,
+    "POST",
+    `/tokens/buckets/${pathSegment(config.avatarsBucketId)}/files/${pathSegment(fileId)}`,
+    { expire: requestedExpiry }
+  );
+  const secret = asString(token.secret);
+  if (!secret) {
+    throw new Error("Appwrite returned an invalid avatar file token");
+  }
+
+  const parsedResponseExpiry = Date.parse(asString(token.expire) ?? requestedExpiry);
+  const responseExpiry = Number.isFinite(parsedResponseExpiry)
+    ? parsedResponseExpiry
+    : now + config.avatarTokenTtlSeconds * 1000;
+  const usableUntil = Math.max(
+    now,
+    Math.min(now + config.avatarTokenTtlSeconds * 1000, responseExpiry) - AVATAR_TOKEN_CACHE_SAFETY_MS
+  );
+  const url = new URL(`${config.endpoint}/storage/buckets/${pathSegment(config.avatarsBucketId)}/files/${pathSegment(fileId)}/view`);
   url.searchParams.set("project", config.projectId);
-  return url.toString();
+  url.searchParams.set("token", secret);
+  const cachedValue = { url: url.toString(), usableUntil };
+  if (avatarTokenCache.size >= AVATAR_TOKEN_CACHE_LIMIT) {
+    avatarTokenCache.delete(avatarTokenCache.keys().next().value);
+  }
+  avatarTokenCache.set(cacheKey, cachedValue);
+  return cachedValue.url;
+}
+
+function pruneAvatarTokenCache(now) {
+  for (const [cacheKey, entry] of avatarTokenCache) {
+    if (entry.usableUntil <= now) {
+      avatarTokenCache.delete(cacheKey);
+    }
+  }
+}
+
+async function mapWithConcurrency(values, concurrency, transform) {
+  const results = new Array(values.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, values.length) },
+    async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await transform(values[index], index);
+      }
+    }
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 function relationshipStateForPair(currentUserId, otherUserId, relationships) {

@@ -1,0 +1,235 @@
+[
+  {
+    "$id": "profiles",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Profiles",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "userId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "email", "type": "string", "size": 320, "format": "email", "required": true, "array": false, "default": null},
+      {"key": "firstName", "type": "varchar", "size": 100, "required": false, "array": false, "default": null},
+      {"key": "lastName", "type": "varchar", "size": 100, "required": false, "array": false, "default": null},
+      {"key": "city", "type": "varchar", "size": 160, "required": false, "array": false, "default": null},
+      {"key": "birthDate", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "gender", "type": "string", "size": 32, "format": "enum", "elements": ["male", "female", "nonBinary", "other"], "required": false, "array": false, "default": null},
+      {"key": "orientation", "type": "string", "size": 32, "format": "enum", "elements": ["straight", "gay", "lesbian", "bisexual", "pansexual", "other"], "required": false, "array": false, "default": null},
+      {"key": "preferredGenders", "type": "string", "size": 32, "format": "enum", "elements": ["male", "female", "nonBinary", "other"], "required": false, "array": true, "default": null},
+      {"key": "minPreferredAge", "type": "integer", "required": false, "array": false, "default": 18, "min": 18, "max": 99},
+      {"key": "maxPreferredAge", "type": "integer", "required": false, "array": false, "default": 35, "min": 18, "max": 99},
+      {"key": "maxDistanceKm", "type": "integer", "required": false, "array": false, "default": null, "min": 5, "max": 999},
+      {"key": "latitude", "type": "double", "required": false, "array": false, "default": null, "min": -90, "max": 90},
+      {"key": "longitude", "type": "double", "required": false, "array": false, "default": null, "min": -180, "max": 180},
+      {"key": "excludeSmokers", "type": "boolean", "required": false, "array": false, "default": false},
+      {"key": "excludeDrinkers", "type": "boolean", "required": false, "array": false, "default": false},
+      {"key": "smokes", "type": "boolean", "required": false, "array": false, "default": null},
+      {"key": "drinks", "type": "boolean", "required": false, "array": false, "default": null},
+      {"key": "bio", "type": "text", "required": false, "array": false, "default": null},
+      {"key": "intent", "type": "string", "size": 32, "format": "enum", "elements": ["relationship", "friendship", "casual", "notSure"], "required": false, "array": false, "default": null},
+      {"key": "interests", "type": "text", "required": false, "array": false, "default": null},
+      {"key": "instagramTag", "type": "varchar", "size": 64, "required": false, "array": false, "default": null},
+      {"key": "spotifyTag", "type": "varchar", "size": 64, "required": false, "array": false, "default": null},
+      {"key": "profileReady", "type": "boolean", "required": false, "array": false, "default": false},
+      {"key": "avatarFileId", "type": "varchar", "size": 36, "required": false, "array": false, "default": null},
+      {"key": "photoFileIds", "type": "varchar", "size": 36, "required": false, "array": true, "default": null},
+      {"key": "presenceUpdatedAt", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "lastSeenAt", "type": "datetime", "required": false, "array": false, "default": null}
+    ],
+    "indexes": [
+      {"key": "profiles_user_unique", "type": "unique", "columns": ["userId"], "orders": ["ASC"]},
+      {"key": "profiles_email_unique", "type": "unique", "columns": ["email"], "orders": ["ASC"]},
+      {"key": "profiles_gender", "type": "key", "columns": ["gender"], "orders": ["ASC"]}
+    ]
+  },
+  {
+    "$id": "events",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Events",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "title", "type": "varchar", "size": 200, "required": true, "array": false, "default": null},
+      {"key": "startsAt", "type": "datetime", "required": true, "array": false, "default": null},
+      {"key": "status", "type": "string", "size": 32, "format": "enum", "elements": ["active", "draft", "cancelled", "completed", "archived"], "required": false, "array": false, "default": "active"},
+      {"key": "place", "type": "varchar", "size": 256, "required": false, "array": false, "default": null},
+      {"key": "description", "type": "text", "required": false, "array": false, "default": null},
+      {"key": "rules", "type": "varchar", "size": 500, "required": false, "array": true, "default": null},
+      {"key": "maxParticipants", "type": "integer", "required": false, "array": false, "default": 48, "min": 2, "max": 500},
+      {"key": "maleLimit", "type": "integer", "required": false, "array": false, "default": 24, "min": 0, "max": 500},
+      {"key": "femaleLimit", "type": "integer", "required": false, "array": false, "default": 24, "min": 0, "max": 500},
+      {"key": "maleCount", "type": "integer", "required": false, "array": false, "default": 0, "min": 0, "max": 100000},
+      {"key": "femaleCount", "type": "integer", "required": false, "array": false, "default": 0, "min": 0, "max": 100000},
+      {"key": "waitingListCount", "type": "integer", "required": false, "array": false, "default": 0, "min": 0, "max": 100000},
+      {"key": "registrationClosesAt", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "cancellationClosesAt", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "viewersOnline", "type": "integer", "required": false, "array": false, "default": 0, "min": 0},
+      {"key": "checkIns", "type": "integer", "required": false, "array": false, "default": 0, "min": 0},
+      {"key": "chatPerMinute", "type": "integer", "required": false, "array": false, "default": 0, "min": 0}
+    ],
+    "indexes": [
+      {"key": "events_starts_at", "type": "key", "columns": ["startsAt"], "orders": ["ASC"]},
+      {"key": "events_status", "type": "key", "columns": ["status"], "orders": ["ASC"]},
+      {"key": "events_status_starts_at", "type": "key", "columns": ["status", "startsAt"], "orders": ["ASC", "ASC"]}
+    ]
+  },
+  {
+    "$id": "eventregistrations",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Event registrations",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "eventId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "userId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "gender", "type": "string", "size": 16, "format": "enum", "elements": ["male", "female"], "required": true, "array": false, "default": null},
+      {"key": "status", "type": "string", "size": 32, "format": "enum", "elements": ["confirmed", "waitlisted", "promoted", "cancelled"], "required": true, "array": false, "default": null},
+      {"key": "createdAt", "type": "datetime", "required": true, "array": false, "default": null},
+      {"key": "cancelledAt", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "promotedAt", "type": "datetime", "required": false, "array": false, "default": null}
+    ],
+    "indexes": [
+      {"key": "registrations_event_user", "type": "unique", "columns": ["eventId", "userId"], "orders": ["ASC", "ASC"]},
+      {"key": "registrations_event", "type": "key", "columns": ["eventId"], "orders": ["ASC"]},
+      {"key": "registrations_event_status", "type": "key", "columns": ["eventId", "status"], "orders": ["ASC", "ASC"]},
+      {"key": "registrations_user", "type": "key", "columns": ["userId"], "orders": ["ASC"]}
+    ]
+  },
+  {
+    "$id": "threads",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Threads",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "threadId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "createdByUserId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "subject", "type": "varchar", "size": 200, "required": true, "array": false, "default": null},
+      {"key": "status", "type": "string", "size": 24, "format": "enum", "elements": ["active", "archived", "blocked"], "required": false, "array": false, "default": "active"},
+      {"key": "lastMessageText", "type": "text", "required": false, "array": false, "default": null},
+      {"key": "lastMessageAt", "type": "datetime", "required": false, "array": false, "default": null}
+    ],
+    "indexes": [
+      {"key": "threads_thread_unique", "type": "unique", "columns": ["threadId"], "orders": ["ASC"]},
+      {"key": "threads_last_message", "type": "key", "columns": ["lastMessageAt"], "orders": ["DESC"]}
+    ]
+  },
+  {
+    "$id": "threadparticipants",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Thread participants",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "threadId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "userId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "role", "type": "varchar", "size": 32, "required": false, "array": false, "default": "participant"},
+      {"key": "lastReadAt", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "muted", "type": "boolean", "required": false, "array": false, "default": false},
+      {"key": "pinned", "type": "boolean", "required": false, "array": false, "default": false},
+      {"key": "notificationsEnabled", "type": "boolean", "required": false, "array": false, "default": true}
+    ],
+    "indexes": [
+      {"key": "participants_thread_user", "type": "unique", "columns": ["threadId", "userId"], "orders": ["ASC", "ASC"]},
+      {"key": "participants_thread", "type": "key", "columns": ["threadId"], "orders": ["ASC"]},
+      {"key": "participants_user", "type": "key", "columns": ["userId"], "orders": ["ASC"]}
+    ]
+  },
+  {
+    "$id": "messages",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Messages",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "threadId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "senderUserId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "text", "type": "text", "required": false, "array": false, "default": null},
+      {"key": "messageType", "type": "string", "size": 24, "format": "enum", "elements": ["text", "image", "video", "audio", "file"], "required": false, "array": false, "default": "text"},
+      {"key": "attachmentFileId", "type": "varchar", "size": 36, "required": false, "array": false, "default": null},
+      {"key": "attachmentName", "type": "varchar", "size": 255, "required": false, "array": false, "default": null},
+      {"key": "attachmentMimeType", "type": "varchar", "size": 127, "required": false, "array": false, "default": null},
+      {"key": "attachmentSize", "type": "integer", "required": false, "array": false, "default": null, "min": 0, "max": 20971520},
+      {"key": "attachmentWidth", "type": "integer", "required": false, "array": false, "default": null, "min": 0},
+      {"key": "attachmentHeight", "type": "integer", "required": false, "array": false, "default": null, "min": 0},
+      {"key": "attachmentDuration", "type": "double", "required": false, "array": false, "default": null, "min": 0},
+      {"key": "replyToMessageId", "type": "varchar", "size": 36, "required": false, "array": false, "default": null},
+      {"key": "createdAt", "type": "datetime", "required": true, "array": false, "default": null}
+    ],
+    "indexes": [
+      {"key": "messages_thread_created", "type": "key", "columns": ["threadId", "createdAt"], "orders": ["ASC", "ASC"]},
+      {"key": "messages_sender", "type": "key", "columns": ["senderUserId"], "orders": ["ASC"]}
+    ]
+  },
+  {
+    "$id": "swipe",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Swipes",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "swipeKey", "type": "varchar", "size": 73, "required": true, "array": false, "default": null},
+      {"key": "fromUserId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "toUserId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "decision", "type": "string", "size": 16, "format": "enum", "elements": ["liked", "passed"], "required": true, "array": false, "default": null},
+      {"key": "createdAt", "type": "datetime", "required": true, "array": false, "default": null},
+      {"key": "serverRecordedAt", "type": "datetime", "required": false, "array": false, "default": null}
+    ],
+    "indexes": [
+      {"key": "swipes_key_unique", "type": "unique", "columns": ["swipeKey"], "orders": ["ASC"]},
+      {"key": "swipes_from", "type": "key", "columns": ["fromUserId"], "orders": ["ASC"]},
+      {"key": "swipes_to", "type": "key", "columns": ["toUserId"], "orders": ["ASC"]}
+    ]
+  },
+  {
+    "$id": "matches",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Matches",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "matchKey", "type": "varchar", "size": 73, "required": true, "array": false, "default": null},
+      {"key": "userAId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "userBId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "threadId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "createdAt", "type": "datetime", "required": true, "array": false, "default": null},
+      {"key": "matchedAt", "type": "datetime", "required": true, "array": false, "default": null}
+    ],
+    "indexes": [
+      {"key": "matches_key_unique", "type": "unique", "columns": ["matchKey"], "orders": ["ASC"]},
+      {"key": "matches_user_a", "type": "key", "columns": ["userAId"], "orders": ["ASC"]},
+      {"key": "matches_user_b", "type": "key", "columns": ["userBId"], "orders": ["ASC"]}
+    ]
+  },
+  {
+    "$id": "relationships",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Relationships",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "pairKey", "type": "varchar", "size": 73, "required": true, "array": false, "default": null},
+      {"key": "userAId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "userBId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "userAState", "type": "string", "size": 24, "format": "enum", "elements": ["none", "liked", "matched", "archived", "blocked"], "required": false, "array": false, "default": "none"},
+      {"key": "userBState", "type": "string", "size": 24, "format": "enum", "elements": ["none", "liked", "matched", "archived", "blocked"], "required": false, "array": false, "default": "none"},
+      {"key": "threadId", "type": "varchar", "size": 36, "required": false, "array": false, "default": null},
+      {"key": "matchedAt", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "createdAt", "type": "datetime", "required": true, "array": false, "default": null},
+      {"key": "updatedAt", "type": "datetime", "required": true, "array": false, "default": null}
+    ],
+    "indexes": [
+      {"key": "relationships_pair_unique", "type": "unique", "columns": ["pairKey"], "orders": ["ASC"]},
+      {"key": "relationships_user_a", "type": "key", "columns": ["userAId"], "orders": ["ASC"]},
+      {"key": "relationships_user_b", "type": "key", "columns": ["userBId"], "orders": ["ASC"]}
+    ]
+  }
+]

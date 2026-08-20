@@ -1,25 +1,55 @@
+import { createHash } from "node:crypto";
 import { makeChatMessageContract } from "./contracts.js";
 
-const DEFAULT_MATCH_SUBJECT = "Fyre match";
+const DEFAULT_MATCH_SUBJECT = "Match";
+const APPWRITE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/;
+const MAX_MESSAGE_TEXT_LENGTH = 4_000;
+const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+const MAX_MEDIA_DIMENSION = 32_768;
+const MAX_MEDIA_DURATION_SECONDS = 24 * 60 * 60;
+const ATTACHMENT_MIME_TYPES = new Map([
+  ["jpg", new Set(["image/jpeg"])],
+  ["jpeg", new Set(["image/jpeg"])],
+  ["png", new Set(["image/png"])],
+  ["webp", new Set(["image/webp"])],
+  ["heic", new Set(["image/heic", "image/heif"])],
+  ["pdf", new Set(["application/pdf"])],
+  ["m4a", new Set(["audio/mp4", "audio/x-m4a"])],
+  ["mp3", new Set(["audio/mpeg"])],
+  ["wav", new Set(["audio/wav", "audio/x-wav", "audio/wave"])],
+  ["mp4", new Set(["video/mp4"])],
+  ["mov", new Set(["video/quicktime"])]
+]);
 
 export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
     const body = parseBody(req);
     const currentUserId = await resolveCurrentUserId(config, req, body);
-    const threadId = asString(body.threadId);
-    const text = asOptionalString(body.text);
-    const replyToMessageId = asString(body.replyToMessageId);
-    const messageType = asString(body.messageType) ?? "text";
-    const attachmentFileId = asString(body.attachmentFileId);
-    const attachmentName = asOptionalString(body.attachmentName);
-    const attachmentMimeType = asOptionalString(body.attachmentMimeType);
-    const attachmentSize = asOptionalNumber(body.attachmentSize);
-    const attachmentWidth = asOptionalNumber(body.attachmentWidth);
-    const attachmentHeight = asOptionalNumber(body.attachmentHeight);
-    const attachmentDuration = asOptionalNumber(body.attachmentDuration);
+    const action = asString(body.action) ?? "sendMessage";
+    const threadId = appwriteIdentifier(body.threadId);
+    const text = boundedOptionalString(body.text, MAX_MESSAGE_TEXT_LENGTH);
+    const rawReplyToMessageId = asString(body.replyToMessageId);
+    const replyToMessageId = appwriteIdentifier(rawReplyToMessageId);
+    const requestedMessageType = asString(body.messageType) ?? "text";
+    const rawAttachmentFileId = asString(body.attachmentFileId);
+    const attachmentFileId = appwriteIdentifier(rawAttachmentFileId);
+    let messageType = "text";
+    let attachmentName = null;
+    let attachmentMimeType = null;
+    let attachmentSize = null;
+    let attachmentWidth = null;
+    let attachmentHeight = null;
+    let attachmentDuration = null;
 
-    if (!threadId || (!text && !attachmentFileId)) {
+    if (
+      !threadId
+      || (typeof body.text === "string" && body.text.trim().length > MAX_MESSAGE_TEXT_LENGTH)
+      || (body.replyToMessageId != null && body.replyToMessageId !== "" && !replyToMessageId)
+      || (body.attachmentFileId != null && body.attachmentFileId !== "" && !attachmentFileId)
+      || !["text", "image", "video", "audio", "file"].includes(requestedMessageType)
+      || (action !== "sendMessage" && action !== "updateParticipant")
+    ) {
       return res.json({ message: "Missing payload" }, 400);
     }
 
@@ -27,33 +57,66 @@ export default async ({ req, res, error }) => {
       equal("threadId", [threadId]),
       limit(10)
     ]);
-    const participantIds = participantRows.map((row) => row.userId).filter(Boolean);
-    const participantPermissions = conversationRowPermissions(participantIds);
+    const participantContext = validateParticipantRows(threadId, participantRows);
+    if (!participantContext) {
+      return res.json({ message: "Conversation unavailable" }, 403);
+    }
+    const participantIds = participantContext.userIds;
+    const sharedPermissions = conversationRowPermissions(participantIds);
+    const currentParticipant = participantContext.rowsByUserId.get(currentUserId);
 
     // Only participants of the thread are allowed to append new messages to it.
-    if (!participantIds.includes(currentUserId)) {
+    if (!currentParticipant) {
       return res.json({ message: "Forbidden" }, 403);
     }
 
-    if (config.relationshipsTableId) {
-      const otherUserId = participantIds.find((userId) => userId !== currentUserId);
-      const relationship = otherUserId
-        ? await findRelationshipRow(config, currentUserId, otherUserId)
-        : null;
+    if (action === "updateParticipant") {
+      const update = parseParticipantUpdate(body);
+      if (!update) {
+        return res.json({ message: "Invalid participant update" }, 400);
+      }
+      const now = new Date().toISOString();
+      const lastReadAt = update.markRead ? now : (asString(currentParticipant.lastReadAt) ?? null);
+      const notificationsEnabled = update.notificationsEnabled ?? (currentParticipant.notificationsEnabled !== false);
+      const pinned = update.pinned ?? (currentParticipant.pinned === true);
+      await updateRow(config, config.threadParticipantsTableId, currentParticipant.$id, {
+        threadId,
+        userId: currentUserId,
+        role: "participant",
+        lastReadAt,
+        muted: currentParticipant.muted === true,
+        pinned,
+        notificationsEnabled
+      }, sharedPermissions);
+      return res.json({
+        ok: true,
+        threadId,
+        lastReadAt,
+        notificationsEnabled,
+        pinned
+      }, 200);
+    }
 
-      if (!relationship) {
-        const hasLegacyMatch = otherUserId
-          ? await findLegacyMatch(config, currentUserId, otherUserId)
-          : false;
-        if (!hasLegacyMatch) {
-          return res.json({ message: "Conversation unavailable" }, 403);
-        }
-      } else if (!relationshipAllowsMessaging(relationship, currentUserId, otherUserId)) {
-        return res.json({ message: "Conversation unavailable" }, 403);
+    if (!text && !attachmentFileId) {
+      return res.json({ message: "Missing payload" }, 400);
+    }
+
+    const otherUserId = participantIds.find((userId) => userId !== currentUserId);
+    const relationship = otherUserId
+      ? await findRelationshipRow(config, currentUserId, otherUserId)
+      : null;
+    if (!relationship || !relationshipAllowsMessaging(relationship, currentUserId, otherUserId, threadId)) {
+      return res.json({ message: "Conversation unavailable" }, 403);
+    }
+
+    if (replyToMessageId) {
+      const reply = await getRowIfExists(config, config.messagesTableId, replyToMessageId);
+      if (!isReplyInThread(reply, replyToMessageId, threadId)) {
+        return res.json({ message: "Invalid reply reference" }, 400);
       }
     }
 
-    await repairConversationAccess(config, threadId, currentUserId, participantRows, participantPermissions);
+    await repairConversationAccess(config, threadId, currentUserId, participantRows, sharedPermissions);
 
     if (attachmentFileId) {
       if (!config.chatAttachmentsBucketId) {
@@ -62,6 +125,22 @@ export default async ({ req, res, error }) => {
 
       try {
         const file = await getFile(config, attachmentFileId);
+        if (!hasFileOwnership(file, currentUserId)) {
+          throw authError("Attachment ownership required");
+        }
+        const metadata = canonicalAttachmentMetadata(file, body);
+        if (!metadata) {
+          return res.json({ message: "Invalid attachment" }, 400);
+        }
+        ({
+          messageType,
+          attachmentName,
+          attachmentMimeType,
+          attachmentSize,
+          attachmentWidth,
+          attachmentHeight,
+          attachmentDuration
+        } = metadata);
         const permissions = participantIds.map((userId) => `read("user:${userId}")`);
         permissions.push(`update("user:${currentUserId}")`);
         permissions.push(`delete("user:${currentUserId}")`);
@@ -71,13 +150,18 @@ export default async ({ req, res, error }) => {
           permissions
         });
       } catch (err) {
-        throw new Error(`Failed updating attachment permissions: ${err?.message ?? err}`);
+        if (err?.statusCode === 403) {
+          throw err;
+        }
+        throw new Error("Failed updating attachment permissions");
       }
+    } else if (requestedMessageType !== "text" || hasAttachmentMetadata(body)) {
+      return res.json({ message: "Invalid attachment metadata" }, 400);
     }
 
     const now = new Date().toISOString();
     const messageId = uniqueId();
-    const messagePermissions = messageRowPermissions(participantIds, currentUserId);
+    const messagePermissions = messageRowPermissions(participantIds);
     try {
       await createRow(config, config.messagesTableId, messageId, {
         threadId,
@@ -101,25 +185,24 @@ export default async ({ req, res, error }) => {
     // Update the thread preview immediately so inbox ordering stays in sync with the latest message.
     try {
       const previewText = text ?? attachmentName ?? defaultAttachmentPreview(messageType);
-      await upsertThreadPreview(config, threadId, currentUserId, previewText, now, participantPermissions);
+      await upsertThreadPreview(config, threadId, currentUserId, previewText, now, sharedPermissions);
     } catch (err) {
-      error(`Non-fatal thread preview update failure in ${config.threadsTableId}: ${err?.message ?? err}`);
+      error(`sendmessage thread preview update failed (${err?.statusCode ?? 500})`);
     }
 
-    const currentParticipant = participantRows.find((row) => row.userId === currentUserId);
     if (currentParticipant?.$id) {
       try {
         await updateRow(config, config.threadParticipantsTableId, currentParticipant.$id, {
           threadId,
           userId: currentUserId,
-          role: currentParticipant.role ?? "member",
+          role: "participant",
           lastReadAt: now,
           muted: currentParticipant.muted ?? false,
           pinned: currentParticipant.pinned ?? false,
           notificationsEnabled: currentParticipant.notificationsEnabled ?? true
-        }, participantPermissions);
+        }, sharedPermissions);
       } catch (err) {
-        error(`Non-fatal participant update failure in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
+        error(`sendmessage participant update failed (${err?.statusCode ?? 500})`);
       }
     }
 
@@ -152,28 +235,35 @@ export default async ({ req, res, error }) => {
       replyToMessageId,
       createdAt: now
     };
-    console.log(`RESULT_JSON:${JSON.stringify(responsePayload)}`);
+    console.log(JSON.stringify({
+      event: "sendmessage.complete",
+      messageType,
+      hasAttachment: Boolean(attachmentFileId)
+    }));
     return res.json(responsePayload, 200);
   } catch (err) {
-    error(String(err?.stack ?? err));
-    return res.json({ message: err?.statusCode === 403 ? "Forbidden" : "Unable to send message" }, err?.statusCode ?? 500);
+    error(`sendmessage failed (${err?.statusCode ?? 500})`);
+    const message = err?.statusCode === 401
+      ? "Unauthorized"
+      : err?.statusCode === 403
+        ? "Forbidden"
+        : "Unable to send message";
+    return res.json({ message }, err?.statusCode ?? 500);
   }
 };
 
 function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
-    projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
+    projectId: requiredIdentifierEnv("APPWRITE_FUNCTION_PROJECT_ID"),
     apiKey: resolveApiKey(req),
     userJwt: optionalHeader(req, "x-appwrite-user-jwt"),
-    databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
-    threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
-    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
-    messagesTableId: requiredEnv("APPWRITE_MESSAGES_TABLE_ID"),
-    chatAttachmentsBucketId: optionalEnv("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID"),
-    relationshipsTableId: optionalEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
-    matchesTableId: optionalEnv("APPWRITE_MATCHES_TABLE_ID"),
-    allowBodyUserIdFallback: optionalEnv("APPWRITE_ALLOW_BODY_USER_ID_FALLBACK") === "true"
+    databaseId: requiredIdentifierEnv("APPWRITE_DATABASE_ID"),
+    threadsTableId: requiredIdentifierEnv("APPWRITE_THREADS_TABLE_ID"),
+    threadParticipantsTableId: requiredIdentifierEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
+    messagesTableId: requiredIdentifierEnv("APPWRITE_MESSAGES_TABLE_ID"),
+    chatAttachmentsBucketId: optionalIdentifierEnv("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID"),
+    relationshipsTableId: requiredIdentifierEnv("APPWRITE_RELATIONSHIPS_TABLE_ID")
   };
 }
 
@@ -201,17 +291,25 @@ function requiredEnv(name) {
   return value;
 }
 
+function requiredIdentifierEnv(name) {
+  const value = requiredEnv(name);
+  if (!appwriteIdentifier(value)) {
+    throw new Error(`Invalid environment variable ${name}`);
+  }
+  return value;
+}
+
 function optionalEnv(name) {
   const value = process.env[name];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function requiredHeader(req, name) {
-  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
-  if (!value) {
-    throw new Error(`Missing header ${name}`);
+function optionalIdentifierEnv(name) {
+  const value = optionalEnv(name);
+  if (value && !appwriteIdentifier(value)) {
+    throw new Error(`Invalid environment variable ${name}`);
   }
-  return Array.isArray(value) ? value[0] : value;
+  return value;
 }
 
 function optionalHeader(req, name) {
@@ -223,32 +321,24 @@ function optionalHeader(req, name) {
 }
 
 async function resolveCurrentUserId(config, req, body) {
+  const jwtUserId = await fetchUserIdFromJwt(config);
   const headerValue = optionalHeader(req, "x-appwrite-user-id");
   const bodyValue = asString(body.currentUserId);
-  const jwtUserId = await fetchUserIdFromJwt(config);
-  const authenticatedUserId = jwtUserId ?? asString(headerValue);
 
-  if (jwtUserId && headerValue && asString(headerValue) !== jwtUserId) {
+  if (headerValue && asString(headerValue) !== jwtUserId) {
     throw authError("Authenticated user mismatch");
   }
 
-  if (authenticatedUserId) {
-    if (bodyValue && bodyValue !== authenticatedUserId) {
-      throw authError("Authenticated user mismatch");
-    }
-    return authenticatedUserId;
+  if (bodyValue && bodyValue !== jwtUserId) {
+    throw authError("Authenticated user mismatch");
   }
 
-  if (bodyValue && config.allowBodyUserIdFallback) {
-    return bodyValue;
-  }
-
-  throw authError("Missing authenticated user id");
+  return jwtUserId;
 }
 
 async function fetchUserIdFromJwt(config) {
   if (!config.userJwt) {
-    return null;
+    throw authError("Missing user JWT", 401);
   }
 
   const response = await fetch(`${config.endpoint}/account`, {
@@ -260,38 +350,112 @@ async function fetchUserIdFromJwt(config) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw authError(payload.message ?? "Invalid user JWT");
+    throw authError("Invalid user JWT", 401);
   }
-  return asString(payload.$id);
+  const userId = appwriteIdentifier(payload.$id);
+  if (!userId) {
+    throw authError("Invalid user JWT", 401);
+  }
+  return userId;
 }
 
-function authError(message) {
+function authError(message, statusCode = 403) {
   const err = new Error(message);
-  err.statusCode = 403;
+  err.statusCode = statusCode;
   return err;
 }
 
 function resolveApiKey(req) {
-  const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
+  const runtimeKey = optionalHeader(req, "x-appwrite-key");
   if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
     return runtimeKey.trim();
   }
-  return requiredHeader(req, "x-appwrite-key");
+  throw new Error("Missing Appwrite function runtime key");
 }
 
-function messageRowPermissions(participantIds, currentUserId) {
-  const permissions = participantIds.map((userId) => `read("user:${userId}")`);
-  permissions.push(`update("user:${currentUserId}")`);
-  permissions.push(`delete("user:${currentUserId}")`);
-  return Array.from(new Set(permissions));
+export function validateParticipantRows(threadId, participantRows) {
+  if (!Array.isArray(participantRows) || participantRows.length !== 2) {
+    return null;
+  }
+
+  const rowsByUserId = new Map();
+  const rowIds = new Set();
+  for (const row of participantRows) {
+    const userId = appwriteIdentifier(row?.userId);
+    const rowId = asString(row?.$id);
+    if (!userId
+      || !rowId
+      || asString(row?.threadId) !== threadId
+      || rowId !== stableParticipantRowId(threadId, userId)
+      || rowsByUserId.has(userId)
+      || rowIds.has(rowId)) {
+      return null;
+    }
+    rowsByUserId.set(userId, row);
+    rowIds.add(rowId);
+  }
+
+  return {
+    userIds: [...rowsByUserId.keys()].sort(),
+    rowsByUserId
+  };
+}
+
+function parseParticipantUpdate(body) {
+  const allowedKeys = new Set([
+    "action",
+    "threadId",
+    "currentUserId",
+    "markRead",
+    "notificationsEnabled",
+    "pinned"
+  ]);
+  if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
+    return null;
+  }
+
+  const hasMarkRead = Object.hasOwn(body, "markRead");
+  const hasNotifications = Object.hasOwn(body, "notificationsEnabled");
+  const hasPinned = Object.hasOwn(body, "pinned");
+  if (!hasMarkRead && !hasNotifications && !hasPinned) {
+    return null;
+  }
+  if ((hasMarkRead && body.markRead !== true)
+    || (hasNotifications && typeof body.notificationsEnabled !== "boolean")
+    || (hasPinned && typeof body.pinned !== "boolean")) {
+    return null;
+  }
+
+  return {
+    markRead: hasMarkRead,
+    notificationsEnabled: hasNotifications ? body.notificationsEnabled : undefined,
+    pinned: hasPinned ? body.pinned : undefined
+  };
+}
+
+export function hasFileOwnership(file, userId) {
+  if (!Array.isArray(file?.$permissions)) {
+    return false;
+  }
+  const permissions = new Set(file.$permissions);
+  return permissions.has(`update("user:${userId}")`)
+    && permissions.has(`delete("user:${userId}")`);
+}
+
+function messageRowPermissions(participantIds) {
+  return conversationRowPermissions(participantIds);
 }
 
 function conversationRowPermissions(participantIds) {
-  return Array.from(new Set(participantIds.flatMap((userId) => [
-    `read("user:${userId}")`,
-    `update("user:${userId}")`,
-    `delete("user:${userId}")`
-  ])));
+  return Array.from(new Set(participantIds.map((userId) => `read("user:${userId}")`)));
+}
+
+function stableParticipantRowId(threadId, userId) {
+  return `tp_${createHash("sha256").update(`${threadId}:${userId}`).digest("hex").slice(0, 32)}`;
+}
+
+function stableRelationshipRowId(userIds) {
+  return `rl_${createHash("sha256").update(userIds.join(":")).digest("hex").slice(0, 32)}`;
 }
 
 async function repairConversationAccess(config, threadId, currentUserId, participantRows, permissions) {
@@ -332,7 +496,7 @@ async function repairConversationAccess(config, threadId, currentUserId, partici
     await updateRow(config, config.threadParticipantsTableId, participantRowId, {
       threadId,
       userId,
-      role: participantRow.role ?? "member",
+      role: "participant",
       lastReadAt: participantRow.lastReadAt ?? null,
       muted: participantRow.muted ?? false,
       pinned: participantRow.pinned ?? false,
@@ -385,7 +549,7 @@ async function listRows(config, tableId, queries) {
   const payload = await request(
     config,
     "GET",
-    `/tablesdb/${config.databaseId}/tables/${tableId}/rows`,
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows`,
     undefined,
     queries
   );
@@ -393,7 +557,7 @@ async function listRows(config, tableId, queries) {
 }
 
 async function createRow(config, tableId, rowId, data, permissions) {
-  return request(config, "POST", `/tablesdb/${config.databaseId}/tables/${tableId}/rows`, {
+  return request(config, "POST", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows`, {
     rowId,
     data,
     permissions
@@ -401,39 +565,33 @@ async function createRow(config, tableId, rowId, data, permissions) {
 }
 
 async function findRelationshipRow(config, currentUserId, otherUserId) {
-  if (!config.relationshipsTableId || !otherUserId) {
+  if (!otherUserId) {
     return null;
   }
 
-  const pairKey = [currentUserId, otherUserId].sort().join(":");
-  const rows = await listRows(config, config.relationshipsTableId, [
-    equal("pairKey", [pairKey]),
-    limit(1)
-  ]);
-  return rows[0] ?? null;
+  const userIds = [currentUserId, otherUserId].sort();
+  const relationship = await getRowIfExists(
+    config,
+    config.relationshipsTableId,
+    stableRelationshipRowId(userIds)
+  );
+  return relationshipRowBelongsToPair(relationship, userIds) ? relationship : null;
 }
 
-async function findLegacyMatch(config, currentUserId, otherUserId) {
-  if (!config.matchesTableId || !otherUserId) {
-    return null;
-  }
-
-  const rows = await listRows(config, config.matchesTableId, [
-    equal("matchKey", [[currentUserId, otherUserId].sort().join(":")]),
-    limit(1)
-  ]);
-  return rows[0] ?? null;
+function relationshipRowBelongsToPair(row, userIds) {
+  return asString(row?.$id) === stableRelationshipRowId(userIds)
+    && asString(row?.pairKey) === userIds.join(":")
+    && asString(row?.userAId) === userIds[0]
+    && asString(row?.userBId) === userIds[1];
 }
 
-function relationshipAllowsMessaging(relationship, currentUserId, otherUserId) {
+export function relationshipAllowsMessaging(relationship, currentUserId, otherUserId, threadId) {
   const currentState = relationshipStateForUser(relationship, currentUserId);
   const otherState = relationshipStateForUser(relationship, otherUserId);
 
-  if (currentState === "blocked" || otherState === "blocked") {
-    return false;
-  }
-
-  return currentState === "matched" || otherState === "matched" || Boolean(relationship.matchedAt);
+  return currentState === "matched"
+    && otherState === "matched"
+    && appwriteIdentifier(relationship.threadId) === threadId;
 }
 
 function relationshipStateForUser(relationship, userId) {
@@ -447,7 +605,7 @@ function relationshipStateForUser(relationship, userId) {
 }
 
 async function getRow(config, tableId, rowId) {
-  return request(config, "GET", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`);
+  return request(config, "GET", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`);
 }
 
 async function getRowIfExists(config, tableId, rowId) {
@@ -462,11 +620,11 @@ async function getRowIfExists(config, tableId, rowId) {
 }
 
 async function getFile(config, fileId) {
-  return request(config, "GET", `/storage/buckets/${config.chatAttachmentsBucketId}/files/${fileId}`);
+  return request(config, "GET", `/storage/buckets/${pathSegment(config.chatAttachmentsBucketId)}/files/${pathSegment(fileId)}`);
 }
 
 async function updateFile(config, fileId, data) {
-  return request(config, "PUT", `/storage/buckets/${config.chatAttachmentsBucketId}/files/${fileId}`, data);
+  return request(config, "PUT", `/storage/buckets/${pathSegment(config.chatAttachmentsBucketId)}/files/${pathSegment(fileId)}`, data);
 }
 
 async function updateRow(config, tableId, rowId, data, permissions) {
@@ -474,7 +632,7 @@ async function updateRow(config, tableId, rowId, data, permissions) {
   if (permissions) {
     body.permissions = permissions;
   }
-  return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, body);
+  return request(config, "PATCH", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`, body);
 }
 
 async function request(config, method, path, body, queries = []) {
@@ -542,23 +700,103 @@ function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function asOptionalString(value) {
+export function appwriteIdentifier(value) {
+  const identifier = asString(value);
+  return identifier && APPWRITE_IDENTIFIER_PATTERN.test(identifier) ? identifier : null;
+}
+
+export function pathSegment(value) {
+  return encodeURIComponent(String(value));
+}
+
+function boundedOptionalString(value, maximumLength) {
   if (typeof value !== "string") {
     return null;
   }
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return trimmed.length > 0 && trimmed.length <= maximumLength ? trimmed : null;
 }
 
-function asOptionalNumber(value) {
+function boundedOptionalNumber(value, minimum, maximum, integer = false) {
+  if (value == null || value === "") {
+    return null;
+  }
+  let parsed = null;
   if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
+    parsed = value;
+  } else if (typeof value === "string" && value.trim().length > 0) {
+    const candidate = Number(value);
+    parsed = Number.isFinite(candidate) ? candidate : null;
   }
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+  if (parsed == null || parsed < minimum || parsed > maximum || (integer && !Number.isInteger(parsed))) {
+    return undefined;
   }
-  return null;
+  return parsed;
+}
+
+export function canonicalAttachmentMetadata(file, body) {
+  const rawName = typeof file?.name === "string" ? file.name.trim() : "";
+  const safeName = rawName.split(/[\\/]/).at(-1)?.replace(/[\u0000-\u001f\u007f]/g, "").trim() ?? "";
+  const mimeType = typeof file?.mimeType === "string" ? file.mimeType.trim().toLowerCase() : "";
+  const size = boundedOptionalNumber(file?.sizeOriginal, 1, MAX_ATTACHMENT_SIZE, true);
+  const extension = safeName.includes(".") ? safeName.split(".").at(-1).toLowerCase() : "";
+  const allowedMimeTypes = ATTACHMENT_MIME_TYPES.get(extension);
+  if (
+    !safeName
+    || safeName.length > 255
+    || !allowedMimeTypes?.has(mimeType)
+    || size == null
+  ) {
+    return null;
+  }
+
+  const messageType = mimeType.startsWith("image/")
+    ? "image"
+    : mimeType.startsWith("video/")
+      ? "video"
+      : mimeType.startsWith("audio/")
+        ? "audio"
+        : "file";
+  const width = boundedOptionalNumber(body.attachmentWidth, 1, MAX_MEDIA_DIMENSION, true);
+  const height = boundedOptionalNumber(body.attachmentHeight, 1, MAX_MEDIA_DIMENSION, true);
+  const duration = boundedOptionalNumber(body.attachmentDuration, 0, MAX_MEDIA_DURATION_SECONDS);
+
+  if (
+    width === undefined
+    || height === undefined
+    || duration === undefined
+    || ((width == null) !== (height == null))
+    || ((messageType !== "image" && messageType !== "video") && (width != null || height != null))
+    || ((messageType !== "audio" && messageType !== "video") && duration != null)
+  ) {
+    return null;
+  }
+
+  return {
+    messageType,
+    attachmentName: safeName,
+    attachmentMimeType: mimeType,
+    attachmentSize: size,
+    attachmentWidth: width,
+    attachmentHeight: height,
+    attachmentDuration: duration
+  };
+}
+
+export function isReplyInThread(reply, replyToMessageId, threadId) {
+  return asString(reply?.$id) === replyToMessageId
+    && asString(reply?.threadId) === threadId;
+}
+
+function hasAttachmentMetadata(body) {
+  return [
+    "attachmentName",
+    "attachmentMimeType",
+    "attachmentSize",
+    "attachmentWidth",
+    "attachmentHeight",
+    "attachmentDuration"
+  ].some((key) => body[key] != null && body[key] !== "");
 }
 
 function defaultAttachmentPreview(messageType) {

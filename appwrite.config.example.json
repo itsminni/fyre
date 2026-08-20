@@ -1,0 +1,11 @@
+{
+  "projectId": "fyre-development",
+  "projectName": "Fyre development",
+  "endpoint": "http://localhost/v1",
+  "includes": {
+    "tablesDB": "./appwrite/tables-db.json",
+    "tables": "./appwrite/tables.json",
+    "buckets": "./appwrite/buckets.json",
+    "functions": "./appwrite/functions.json"
+  }
+}

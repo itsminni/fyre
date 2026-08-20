@@ -1,160 +1,60 @@
 import { createHash } from "node:crypto";
 
-const DEFAULT_MATCH_SUBJECT = "Fyre match";
-const PLACEHOLDER_MATCH_SUBJECTS = new Set(["Match", DEFAULT_MATCH_SUBJECT]);
+const DEFAULT_MATCH_SUBJECT = "Match";
+const MAX_TRANSACTION_ATTEMPTS = 4;
+const TRANSACTION_TTL_SECONDS = 30;
+const APPWRITE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/;
 
 export default async ({ req, res, error }) => {
   try {
     const config = getConfig(req);
     const body = parseBody(req);
     const currentUserId = await resolveCurrentUserId(config, req, body);
-    const otherUserId = asString(body.otherUserId);
-    const otherUserName = asString(body.otherUserName);
+    const otherUserId = appwriteIdentifier(body.otherUserId);
     const decision = asDecision(body.decision);
 
     if (!otherUserId || otherUserId === currentUserId || !decision) {
       return json(res, { message: "Invalid swipe payload" }, 400);
     }
 
-    const now = new Date().toISOString();
-    const existingRelationship = config.relationshipsTableId
-      ? await findRelationshipRow(config, currentUserId, otherUserId)
-      : null;
-
-    if (relationshipBlocksInteraction(existingRelationship, currentUserId, otherUserId)) {
-      return json(res, { message: "Interaction unavailable" }, 403);
-    }
-
-    const swipeKey = `${currentUserId}:${otherUserId}`;
-    const existingSwipe = await findSwipeRow(config, currentUserId, otherUserId);
-
-    const swipePayload = {
-      swipeKey,
-      fromUserId: currentUserId,
-      toUserId: otherUserId,
-      decision,
-      createdAt: existingSwipe?.createdAt ?? now
-    };
-
-    if (existingSwipe?.$id) {
-      await updateRow(config, config.swipesTableId, existingSwipe.$id, swipePayload, swipePermissions(currentUserId));
-    } else {
-      await createOrUpdateRow(
-        config,
-        config.swipesTableId,
-        stableSwipeRowId(swipeKey),
-        swipePayload,
-        swipePermissions(currentUserId)
-      );
-    }
-
-    if (config.relationshipsTableId) {
-      await upsertRelationshipForSwipe(
-        config,
-        existingRelationship,
-        currentUserId,
-        otherUserId,
-        decision,
-        now
-      );
-    }
-
-    if (decision !== "liked") {
-      return json(res, { matched: false, relationshipState: "none" }, 200);
-    }
-
-    // A match exists only when the opposite swipe was already a like.
-    const reverseSwipe = await findSwipeRow(config, otherUserId, currentUserId, "liked");
-
-    if (!reverseSwipe?.$id) {
-      return json(res, { matched: false, relationshipState: "liked" }, 200);
-    }
-
-    const userIds = [currentUserId, otherUserId].sort();
-    const matchKey = userIds.join(":");
-    const permissions = participantPermissions(userIds);
-    const existingMatch = await findMatchRow(config, userIds);
-
-    if (existingMatch?.threadId) {
-      await ensureThreadAccess(config, existingMatch.threadId, currentUserId, otherUserId, otherUserName);
-      if (config.relationshipsTableId) {
-        await upsertMatchedRelationship(
-          config,
-          existingRelationship,
-          currentUserId,
-          otherUserId,
-          existingMatch.threadId,
-          now
-        );
-      }
-      await updateRow(config, config.matchesTableId, existingMatch.$id, {
-        matchKey,
-        userAId: userIds[0],
-        userBId: userIds[1],
-        threadId: existingMatch.threadId,
-        createdAt: existingMatch.createdAt ?? now,
-        matchedAt: now
-      }, permissions);
-      return json(res, {
-        matched: true,
-        matchId: existingMatch.$id,
-        threadId: existingMatch.threadId,
-        relationshipState: "matched"
-      }, 200);
-    }
-
-    const threadId = await createThreadWithParticipants(config, currentUserId, otherUserId, otherUserName);
-    if (config.relationshipsTableId) {
-      await upsertMatchedRelationship(config, existingRelationship, currentUserId, otherUserId, threadId, now);
-    }
-
-    if (existingMatch?.$id) {
-      await updateRow(config, config.matchesTableId, existingMatch.$id, {
-        matchKey,
-        userAId: userIds[0],
-        userBId: userIds[1],
-        threadId,
-        createdAt: existingMatch.createdAt ?? now,
-        matchedAt: now
-      }, permissions);
-      return json(res, { matched: true, matchId: existingMatch.$id, threadId, relationshipState: "matched" }, 200);
-    }
-
-    const matchId = stableMatchRowId(userIds);
-    await createOrReuseMatchRow(config, matchId, {
-      matchKey,
-      userAId: userIds[0],
-      userBId: userIds[1],
-      threadId,
-      createdAt: now,
-      matchedAt: now
-    }, permissions);
-
-    return json(res, { matched: true, matchId, threadId, relationshipState: "matched" }, 200);
+    const result = await recordSwipeWithTransaction(
+      config,
+      currentUserId,
+      otherUserId,
+      decision
+    );
+    return json(res, result, 200);
   } catch (err) {
-    error(String(err?.stack ?? err));
-    return json(res, { message: err?.statusCode === 403 ? "Forbidden" : "Unable to record swipe" }, err?.statusCode ?? 500);
+    error(`recordswipe failed (${err?.statusCode ?? 500})`);
+    const message = err?.statusCode === 401
+      ? "Unauthorized"
+      : err?.statusCode === 403
+        ? "Forbidden"
+        : err?.statusCode === 404
+          ? "Interaction unavailable"
+          : "Unable to record swipe";
+    return json(res, { message }, err?.statusCode ?? 500);
   }
 };
 
 function json(res, payload, status) {
-  console.log(`RESULT_JSON:${JSON.stringify(payload)}`);
+  console.log(JSON.stringify({ event: "recordswipe.response", status }));
   return res.json(payload, status);
 }
 
 function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
-    projectId: requiredEnv("APPWRITE_FUNCTION_PROJECT_ID"),
+    projectId: requiredIdentifierEnv("APPWRITE_FUNCTION_PROJECT_ID"),
     apiKey: resolveApiKey(req),
     userJwt: optionalHeader(req, "x-appwrite-user-jwt"),
-    databaseId: requiredEnv("APPWRITE_DATABASE_ID"),
-    swipesTableId: requiredEnv("APPWRITE_SWIPES_TABLE_ID"),
-    matchesTableId: requiredEnv("APPWRITE_MATCHES_TABLE_ID"),
-    threadsTableId: requiredEnv("APPWRITE_THREADS_TABLE_ID"),
-    threadParticipantsTableId: requiredEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
-    relationshipsTableId: optionalEnv("APPWRITE_RELATIONSHIPS_TABLE_ID"),
-    allowBodyUserIdFallback: optionalEnv("APPWRITE_ALLOW_BODY_USER_ID_FALLBACK") === "true"
+    databaseId: requiredIdentifierEnv("APPWRITE_DATABASE_ID"),
+    profilesTableId: requiredIdentifierEnv("APPWRITE_PROFILES_TABLE_ID"),
+    swipesTableId: requiredIdentifierEnv("APPWRITE_SWIPES_TABLE_ID"),
+    matchesTableId: requiredIdentifierEnv("APPWRITE_MATCHES_TABLE_ID"),
+    threadsTableId: requiredIdentifierEnv("APPWRITE_THREADS_TABLE_ID"),
+    threadParticipantsTableId: requiredIdentifierEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
+    relationshipsTableId: requiredIdentifierEnv("APPWRITE_RELATIONSHIPS_TABLE_ID")
   };
 }
 
@@ -168,7 +68,8 @@ function parseBody(req) {
   }
 
   try {
-    return JSON.parse(req.bodyText);
+    const parsed = JSON.parse(req.bodyText);
+    return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
@@ -182,17 +83,12 @@ function requiredEnv(name) {
   return value;
 }
 
-function optionalEnv(name) {
-  const value = process.env[name];
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function requiredHeader(req, name) {
-  const value = req.headers?.[name] ?? req.headers?.[name.toLowerCase()] ?? req.headers?.[name.toUpperCase()];
-  if (!value) {
-    throw new Error(`Missing header ${name}`);
+function requiredIdentifierEnv(name) {
+  const value = requiredEnv(name);
+  if (!appwriteIdentifier(value)) {
+    throw new Error(`Invalid environment variable ${name}`);
   }
-  return Array.isArray(value) ? value[0] : value;
+  return value;
 }
 
 function optionalHeader(req, name) {
@@ -204,32 +100,24 @@ function optionalHeader(req, name) {
 }
 
 async function resolveCurrentUserId(config, req, body) {
+  const jwtUserId = await fetchUserIdFromJwt(config);
   const headerValue = optionalHeader(req, "x-appwrite-user-id");
   const bodyValue = asString(body.currentUserId);
-  const jwtUserId = await fetchUserIdFromJwt(config);
-  const authenticatedUserId = jwtUserId ?? asString(headerValue);
 
-  if (jwtUserId && headerValue && asString(headerValue) !== jwtUserId) {
-    throw authError("Authenticated user mismatch");
+  if (headerValue && asString(headerValue) !== jwtUserId) {
+    throw httpError("Authenticated user mismatch", 403);
   }
 
-  if (authenticatedUserId) {
-    if (bodyValue && bodyValue !== authenticatedUserId) {
-      throw authError("Authenticated user mismatch");
-    }
-    return authenticatedUserId;
+  if (bodyValue && bodyValue !== jwtUserId) {
+    throw httpError("Authenticated user mismatch", 403);
   }
 
-  if (bodyValue && config.allowBodyUserIdFallback) {
-    return bodyValue;
-  }
-
-  throw authError("Missing authenticated user id");
+  return jwtUserId;
 }
 
 async function fetchUserIdFromJwt(config) {
   if (!config.userJwt) {
-    return null;
+    throw httpError("Missing user JWT", 401);
   }
 
   const response = await fetch(`${config.endpoint}/account`, {
@@ -241,241 +129,448 @@ async function fetchUserIdFromJwt(config) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw authError(payload.message ?? "Invalid user JWT");
+    throw httpError("Invalid user JWT", 401);
   }
-  return asString(payload.$id);
-}
-
-function authError(message) {
-  const err = new Error(message);
-  err.statusCode = 403;
-  return err;
+  const userId = appwriteIdentifier(payload.$id);
+  if (!userId) {
+    throw httpError("Invalid user JWT", 401);
+  }
+  return userId;
 }
 
 function resolveApiKey(req) {
-  const runtimeKey = process.env.APPWRITE_FUNCTION_API_KEY ?? process.env.APPWRITE_API_KEY;
+  const runtimeKey = optionalHeader(req, "x-appwrite-key");
   if (typeof runtimeKey === "string" && runtimeKey.trim().length > 0) {
     return runtimeKey.trim();
   }
-  return requiredHeader(req, "x-appwrite-key");
+  throw new Error("Missing Appwrite function runtime key");
 }
 
-function participantPermissions(userIds) {
-  return userIds.flatMap((userId) => [
-    `read("user:${userId}")`,
-    `update("user:${userId}")`,
-    `delete("user:${userId}")`
-  ]);
+async function recordSwipeWithTransaction(config, currentUserId, otherUserId, decision) {
+  for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
+    let transactionId = null;
+
+    try {
+      transactionId = await createTransaction(config);
+
+      const currentProfile = await getRowIfExists(
+        config,
+        config.profilesTableId,
+        currentUserId,
+        transactionId
+      );
+      if (!isCanonicalTargetProfile(currentProfile, currentUserId)) {
+        throw httpError("Current profile unavailable", 403);
+      }
+
+      const targetProfile = await getRowIfExists(
+        config,
+        config.profilesTableId,
+        otherUserId,
+        transactionId
+      );
+      if (!isCanonicalTargetProfile(targetProfile, otherUserId)) {
+        throw httpError("Target profile unavailable", 404);
+      }
+
+      const userIds = [currentUserId, otherUserId].sort();
+      let relationship = await getCanonicalRelationship(config, userIds, transactionId);
+      if (relationshipBlocksInteraction(relationship, currentUserId, otherUserId)) {
+        throw httpError("Interaction unavailable", 403);
+      }
+
+      const now = new Date().toISOString();
+      const existingSwipe = await findSwipeRow(
+        config,
+        currentUserId,
+        otherUserId,
+        null,
+        false,
+        transactionId
+      );
+      await upsertSwipeRow(config, existingSwipe, {
+        swipeKey: `${currentUserId}:${otherUserId}`,
+        fromUserId: currentUserId,
+        toUserId: otherUserId,
+        decision,
+        createdAt: asIsoDate(existingSwipe?.createdAt) ?? now,
+        serverRecordedAt: now
+      }, currentUserId, transactionId);
+
+      // Re-read both decisions in the same transaction. This is the source of
+      // truth used to derive the relationship and match state at commit time.
+      const currentSwipe = await findSwipeRow(
+        config,
+        currentUserId,
+        otherUserId,
+        decision,
+        true,
+        transactionId
+      );
+      const reverseSwipe = await findSwipeRow(
+        config,
+        otherUserId,
+        currentUserId,
+        null,
+        true,
+        transactionId
+      );
+      if (!currentSwipe) {
+        throw httpError("Swipe transaction is inconsistent", 409);
+      }
+
+      relationship = await getCanonicalRelationship(config, userIds, transactionId);
+      if (relationshipBlocksInteraction(relationship, currentUserId, otherUserId)) {
+        throw httpError("Interaction unavailable", 403);
+      }
+
+      const result = await reconcilePairState(config, {
+        currentUserId,
+        otherUserId,
+        currentSwipe,
+        reverseSwipe,
+        relationship,
+        now,
+        transactionId
+      });
+
+      await commitTransaction(config, transactionId);
+      return result;
+    } catch (err) {
+      if (transactionId) {
+        await rollbackTransaction(config, transactionId);
+      }
+      if (isConflictError(err) && attempt < MAX_TRANSACTION_ATTEMPTS) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error("Unable to commit swipe transaction");
 }
 
-function swipePermissions(userId) {
-  return [
-    `read("user:${userId}")`,
-    `update("user:${userId}")`,
-    `delete("user:${userId}")`
-  ];
+async function reconcilePairState(config, context) {
+  const {
+    currentUserId,
+    otherUserId,
+    currentSwipe,
+    reverseSwipe,
+    relationship,
+    now,
+    transactionId
+  } = context;
+  const userIds = [currentUserId, otherUserId].sort();
+  const currentDecision = asDecision(currentSwipe.decision);
+  const reverseDecision = asDecision(reverseSwipe?.decision);
+  const otherExistingState = relationshipStateForUser(relationship, otherUserId);
+  const otherArchived = otherExistingState === "archived";
+  const shouldMatch = currentDecision === "liked"
+    && reverseDecision === "liked"
+    && !otherArchived;
+  const existingMatch = await getCanonicalMatch(config, userIds, transactionId);
+
+  if (shouldMatch) {
+    const threadId = stableThreadRowId(userIds);
+    const matchedAt = asIsoDate(relationship?.matchedAt)
+      ?? asIsoDate(existingMatch?.matchedAt)
+      ?? now;
+    const permissions = sharedRelationshipPermissions(userIds);
+
+    await upsertRelationshipRow(config, relationship, {
+      pairKey: userIds.join(":"),
+      userAId: userIds[0],
+      userBId: userIds[1],
+      userAState: "matched",
+      userBState: "matched",
+      threadId,
+      matchedAt,
+      createdAt: asIsoDate(relationship?.createdAt) ?? now,
+      updatedAt: now
+    }, permissions, transactionId);
+
+    await ensureThreadAccess(
+      config,
+      threadId,
+      currentUserId,
+      otherUserId,
+      transactionId
+    );
+
+    const matchId = stableMatchRowId(userIds);
+    await upsertMatchRow(config, existingMatch, matchId, {
+      matchKey: userIds.join(":"),
+      userAId: userIds[0],
+      userBId: userIds[1],
+      threadId,
+      createdAt: asIsoDate(existingMatch?.createdAt) ?? now,
+      matchedAt
+    }, permissions, transactionId);
+
+    return {
+      matched: true,
+      matchId,
+      threadId,
+      relationshipState: "matched"
+    };
+  }
+
+  const currentState = currentDecision === "liked" ? "liked" : "none";
+  const otherState = otherArchived
+    ? "archived"
+    : reverseDecision === "liked" ? "liked" : "none";
+  const permissions = sharedRelationshipPermissions(userIds);
+  const relationshipPayload = {
+    pairKey: userIds.join(":"),
+    userAId: userIds[0],
+    userBId: userIds[1],
+    userAState: userIds[0] === currentUserId ? currentState : otherState,
+    userBState: userIds[0] === currentUserId ? otherState : currentState,
+    threadId: null,
+    matchedAt: null,
+    createdAt: asIsoDate(relationship?.createdAt) ?? now,
+    updatedAt: now
+  };
+
+  if (relationship || currentState !== "none" || otherState !== "none") {
+    await upsertRelationshipRow(
+      config,
+      relationship,
+      relationshipPayload,
+      permissions,
+      transactionId
+    );
+  }
+
+  if (existingMatch?.$id) {
+    await deleteRow(
+      config,
+      config.matchesTableId,
+      existingMatch.$id,
+      transactionId
+    );
+  }
+
+  return {
+    matched: false,
+    relationshipState: currentState
+  };
 }
 
-async function createThreadWithParticipants(config, currentUserId, otherUserId, otherUserName) {
+export function isCanonicalTargetProfile(profile, userId) {
+  return Boolean(
+    profile
+    && asString(profile.$id) === userId
+    && asString(profile.userId) === userId
+    && profile.profileReady === true
+  );
+}
+
+export function sharedRelationshipPermissions(userIds) {
+  return userIds.map((userId) => `read("user:${userId}")`);
+}
+
+export function participantRowPermissions(userIds) {
+  return sharedRelationshipPermissions(userIds);
+}
+
+export function swipePermissions(userId) {
+  return [`read("user:${userId}")`];
+}
+
+async function upsertSwipeRow(config, existingSwipe, data, userId, transactionId) {
+  if (existingSwipe?.$id) {
+    await updateRow(
+      config,
+      config.swipesTableId,
+      existingSwipe.$id,
+      data,
+      swipePermissions(userId),
+      transactionId
+    );
+    return existingSwipe.$id;
+  }
+
+  const rowId = stableSwipeRowId(data.swipeKey);
+  await createRow(
+    config,
+    config.swipesTableId,
+    rowId,
+    data,
+    swipePermissions(userId),
+    transactionId
+  );
+  return rowId;
+}
+
+async function upsertRelationshipRow(config, existingRelationship, data, permissions, transactionId) {
+  const relationshipId = stableRelationshipRowId([data.userAId, data.userBId]);
+  if (existingRelationship?.$id) {
+    await updateRow(
+      config,
+      config.relationshipsTableId,
+      relationshipId,
+      data,
+      permissions,
+      transactionId
+    );
+    return relationshipId;
+  }
+
+  await createRow(
+    config,
+    config.relationshipsTableId,
+    relationshipId,
+    data,
+    permissions,
+    transactionId
+  );
+  return relationshipId;
+}
+
+async function upsertMatchRow(config, existingMatch, matchId, data, permissions, transactionId) {
+  if (existingMatch?.$id) {
+    await updateRow(
+      config,
+      config.matchesTableId,
+      matchId,
+      data,
+      permissions,
+      transactionId
+    );
+    return matchId;
+  }
+
+  await createRow(
+    config,
+    config.matchesTableId,
+    matchId,
+    data,
+    permissions,
+    transactionId
+  );
+  return matchId;
+}
+
+async function ensureThreadAccess(config, threadId, currentUserId, otherUserId, transactionId) {
   const participantIds = [currentUserId, otherUserId].sort();
-  const threadId = stableThreadRowId(participantIds);
-  await ensureThreadAccess(config, threadId, currentUserId, otherUserId, otherUserName);
+  const permissions = sharedRelationshipPermissions(participantIds);
+  if (threadId !== stableThreadRowId(participantIds)) {
+    throw httpError("Invalid thread id", 409);
+  }
+  const existingThread = await getRowIfExists(
+    config,
+    config.threadsTableId,
+    threadId,
+    transactionId
+  );
+  const existingParticipants = await listRows(config, config.threadParticipantsTableId, [
+    equal("threadId", [threadId]),
+    limit(3)
+  ], transactionId);
 
-  return threadId;
-}
+  if (!participantRowsBelongToPair(existingParticipants, threadId, participantIds)) {
+    throw httpError("Thread participants do not match", 403);
+  }
 
-async function ensureThreadAccess(config, threadId, currentUserId, otherUserId, otherUserName) {
-  const participantIds = [currentUserId, otherUserId].sort();
-  const permissions = participantPermissions(participantIds);
-
-  await createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions);
-  await Promise.all([
-    ensureThreadParticipant(config, threadId, currentUserId, permissions),
-    ensureThreadParticipant(config, threadId, otherUserId, permissions)
-  ]);
-}
-
-async function createOrReuseThreadRow(config, threadId, currentUserId, otherUserName, permissions) {
-  const existingThread = await getRowIfExists(config, config.threadsTableId, threadId);
+  const threadData = threadPayloadFromExisting(
+    existingThread,
+    threadId,
+    currentUserId,
+    participantIds
+  );
   if (existingThread?.$id) {
     await updateRow(
       config,
       config.threadsTableId,
       threadId,
-      threadPayloadFromExisting(existingThread, threadId, currentUserId, otherUserName),
-      permissions
+      threadData,
+      permissions,
+      transactionId
     );
-    return threadId;
-  }
-
-  try {
+  } else {
     await createRow(
       config,
       config.threadsTableId,
       threadId,
-      threadPayloadFromExisting(null, threadId, currentUserId, otherUserName),
-      permissions
+      threadData,
+      permissions,
+      transactionId
     );
-  } catch (err) {
-    if (!isAlreadyExistsError(err)) {
-      throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
-    }
   }
 
-  return threadId;
+  for (const userId of participantIds) {
+    await ensureThreadParticipant(
+      config,
+      threadId,
+      userId,
+      participantIds,
+      transactionId
+    );
+  }
+
+  const finalParticipants = await listRows(config, config.threadParticipantsTableId, [
+    equal("threadId", [threadId]),
+    limit(3)
+  ], transactionId);
+  if (
+    finalParticipants.length !== 2
+    || !participantRowsBelongToPair(finalParticipants, threadId, participantIds)
+  ) {
+    throw httpError("Thread participants do not match", 403);
+  }
 }
 
-async function ensureThreadParticipant(config, threadId, userId, permissions) {
+async function ensureThreadParticipant(config, threadId, userId, participantIds, transactionId) {
   const participantRowId = stableParticipantRowId(threadId, userId);
-  const existingParticipant = await getRowIfExists(config, config.threadParticipantsTableId, participantRowId);
+  const existingParticipant = await getRowIfExists(
+    config,
+    config.threadParticipantsTableId,
+    participantRowId,
+    transactionId
+  );
+  if (existingParticipant && (
+    asString(existingParticipant.$id) !== participantRowId
+    || asString(existingParticipant.threadId) !== threadId
+    || asString(existingParticipant.userId) !== userId
+  )) {
+    throw httpError("Invalid thread participant", 409);
+  }
 
+  const data = participantPayloadFromExisting(existingParticipant, threadId, userId);
+  const permissions = participantRowPermissions(participantIds);
   if (existingParticipant?.$id) {
     await updateRow(
       config,
       config.threadParticipantsTableId,
       participantRowId,
-      participantPayloadFromExisting(existingParticipant, threadId, userId),
-      permissions
+      data,
+      permissions,
+      transactionId
     );
-    return participantRowId;
-  }
-
-  try {
-    const participantRow = await createRow(
+  } else {
+    await createRow(
       config,
       config.threadParticipantsTableId,
       participantRowId,
-      participantPayloadFromExisting(null, threadId, userId),
-      permissions
+      data,
+      permissions,
+      transactionId
     );
-    return participantRow?.$id ?? null;
-  } catch (err) {
-    if (isAlreadyExistsError(err)) {
-      return participantRowId;
-    }
-    throw new Error(`Failed creating participant row in ${config.threadParticipantsTableId}: ${err?.message ?? err}`);
   }
 }
 
-async function createOrReuseMatchRow(config, matchId, data, permissions) {
-  const existingMatch = await getRowIfExists(config, config.matchesTableId, matchId);
-  if (existingMatch?.$id) {
-    await updateRow(config, config.matchesTableId, matchId, data, permissions);
-    return matchId;
-  }
-
-  try {
-    await createRow(config, config.matchesTableId, matchId, data, permissions);
-  } catch (err) {
-    if (!isAlreadyExistsError(err)) {
-      throw new Error(`Failed creating row in ${config.matchesTableId}: ${err?.message ?? err}`);
-    }
-
-    await updateRow(config, config.matchesTableId, matchId, data, permissions);
-  }
-
-  return matchId;
-}
-
-async function createOrUpdateRow(config, tableId, rowId, data, permissions) {
-  try {
-    await createRow(config, tableId, rowId, data, permissions);
-  } catch (err) {
-    if (!isAlreadyExistsError(err)) {
-      throw new Error(`Failed creating row in ${tableId}: ${err?.message ?? err}`);
-    }
-
-    await updateRow(config, tableId, rowId, data, permissions);
-  }
-
-  return rowId;
-}
-
-async function upsertRelationshipForSwipe(config, existingRelationship, currentUserId, otherUserId, decision, now) {
-  if (!config.relationshipsTableId) {
-    return null;
-  }
-
-  const userIds = [currentUserId, otherUserId].sort();
-  const isCurrentUserA = userIds[0] === currentUserId;
-  const currentStateKey = isCurrentUserA ? "userAState" : "userBState";
-  const otherStateKey = isCurrentUserA ? "userBState" : "userAState";
-  const nextCurrentState = decision === "liked" ? "liked" : "none";
-  const payload = {
-    pairKey: userIds.join(":"),
-    userAId: userIds[0],
-    userBId: userIds[1],
-    userAState: isCurrentUserA ? nextCurrentState : (asString(existingRelationship?.userAState) ?? "none"),
-    userBState: isCurrentUserA ? (asString(existingRelationship?.userBState) ?? "none") : nextCurrentState,
-    threadId: existingRelationship?.threadId ?? null,
-    matchedAt: existingRelationship?.matchedAt ?? null,
-    createdAt: existingRelationship?.createdAt ?? now,
-    updatedAt: now
-  };
-
-  // Respect an existing block from either side instead of silently downgrading it with new swipes.
-  if (asString(existingRelationship?.[currentStateKey]) === "blocked" || asString(existingRelationship?.[otherStateKey]) === "blocked") {
-    payload[currentStateKey] = asString(existingRelationship?.[currentStateKey]) ?? "none";
-    payload[otherStateKey] = asString(existingRelationship?.[otherStateKey]) ?? "none";
-  }
-
-  return upsertRelationshipRow(config, existingRelationship, payload, participantPermissions(userIds));
-}
-
-async function upsertMatchedRelationship(config, existingRelationship, currentUserId, otherUserId, threadId, now) {
-  if (!config.relationshipsTableId) {
-    return null;
-  }
-
-  const userIds = [currentUserId, otherUserId].sort();
-  const payload = {
-    pairKey: userIds.join(":"),
-    userAId: userIds[0],
-    userBId: userIds[1],
-    userAState: "matched",
-    userBState: "matched",
-    threadId,
-    matchedAt: existingRelationship?.matchedAt ?? now,
-    createdAt: existingRelationship?.createdAt ?? now,
-    updatedAt: now
-  };
-
-  return upsertRelationshipRow(config, existingRelationship, payload, participantPermissions(userIds));
-}
-
-async function upsertRelationshipRow(config, existingRelationship, payload, permissions) {
-  const relationshipId = existingRelationship?.$id ?? stableRelationshipRowId([payload.userAId, payload.userBId]);
-
-  if (existingRelationship?.$id) {
-    await updateRow(config, config.relationshipsTableId, relationshipId, payload, permissions);
-    return relationshipId;
-  }
-
-  try {
-    await createRow(config, config.relationshipsTableId, relationshipId, payload, permissions);
-  } catch (err) {
-    if (!isAlreadyExistsError(err)) {
-      throw new Error(`Failed creating row in ${config.relationshipsTableId}: ${err?.message ?? err}`);
-    }
-    await updateRow(config, config.relationshipsTableId, relationshipId, payload, permissions);
-  }
-
-  return relationshipId;
-}
-
-function threadPayloadFromExisting(threadRow, threadId, currentUserId, otherUserName) {
-  const currentSubject = asString(threadRow?.subject);
-  const nextSubject = currentSubject && !PLACEHOLDER_MATCH_SUBJECTS.has(currentSubject)
-    ? currentSubject
-    : (asString(otherUserName) ?? currentSubject ?? DEFAULT_MATCH_SUBJECT);
-
+function threadPayloadFromExisting(threadRow, threadId, currentUserId, participantIds) {
+  const existingCreatedByUserId = asString(threadRow?.createdByUserId);
   return {
     threadId,
-    createdByUserId: asString(threadRow?.createdByUserId) ?? currentUserId,
-    subject: nextSubject,
+    createdByUserId: participantIds.includes(existingCreatedByUserId)
+      ? existingCreatedByUserId
+      : currentUserId,
+    subject: DEFAULT_MATCH_SUBJECT,
     status: asString(threadRow?.status) ?? "active",
     lastMessageText: threadRow?.lastMessageText ?? null,
-    lastMessageAt: threadRow?.lastMessageAt ?? null
+    lastMessageAt: asIsoDate(threadRow?.lastMessageAt)
   };
 }
 
@@ -484,7 +579,7 @@ function participantPayloadFromExisting(participantRow, threadId, userId) {
     threadId,
     userId,
     role: asString(participantRow?.role) ?? "participant",
-    lastReadAt: participantRow?.lastReadAt ?? null,
+    lastReadAt: asIsoDate(participantRow?.lastReadAt),
     muted: typeof participantRow?.muted === "boolean" ? participantRow.muted : false,
     pinned: typeof participantRow?.pinned === "boolean" ? participantRow.pinned : false,
     notificationsEnabled: typeof participantRow?.notificationsEnabled === "boolean"
@@ -493,14 +588,173 @@ function participantPayloadFromExisting(participantRow, threadId, userId) {
   };
 }
 
-async function findSingleRow(config, tableId, queries) {
-  const rows = await listRows(config, tableId, queries);
-  return rows[0] ?? null;
+async function getCanonicalRelationship(config, userIds, transactionId) {
+  const relationshipId = stableRelationshipRowId(userIds);
+  const relationship = await getRowIfExists(
+    config,
+    config.relationshipsTableId,
+    relationshipId,
+    transactionId
+  );
+  if (!relationship) {
+    return null;
+  }
+  if (
+    asString(relationship.$id) !== relationshipId
+    || !relationshipRowBelongsToPair(relationship, userIds)
+  ) {
+    throw httpError("Invalid relationship row", 409);
+  }
+  return relationship;
 }
 
-async function getRowIfExists(config, tableId, rowId) {
+async function getCanonicalMatch(config, userIds, transactionId) {
+  const matchId = stableMatchRowId(userIds);
+  const match = await getRowIfExists(
+    config,
+    config.matchesTableId,
+    matchId,
+    transactionId
+  );
+  if (!match) {
+    return null;
+  }
+  if (asString(match.$id) !== matchId || !isCanonicalMatchRow(match, userIds)) {
+    throw httpError("Invalid match row", 409);
+  }
+  return match;
+}
+
+async function findSwipeRow(
+  config,
+  fromUserId,
+  toUserId,
+  decision = null,
+  requireServerRecord = false,
+  transactionId = null
+) {
+  const swipeKey = `${fromUserId}:${toUserId}`;
+  const stableSwipe = await getRowIfExists(
+    config,
+    config.swipesTableId,
+    stableSwipeRowId(swipeKey),
+    transactionId
+  );
+  if (stableSwipe) {
+    if (!isCanonicalSwipeRow(stableSwipe, fromUserId, toUserId, null, false)) {
+      throw httpError("Invalid swipe row", 409);
+    }
+    return isCanonicalSwipeRow(
+      stableSwipe,
+      fromUserId,
+      toUserId,
+      decision,
+      requireServerRecord
+    ) ? stableSwipe : null;
+  }
+
+  const rows = await listRows(config, config.swipesTableId, [
+    equal("swipeKey", [swipeKey]),
+    limit(2)
+  ], transactionId);
+  if (rows.length === 0) {
+    return null;
+  }
+  if (rows.length !== 1 || !isCanonicalSwipeRow(rows[0], fromUserId, toUserId, null, false)) {
+    throw httpError("Invalid swipe rows", 409);
+  }
+  return isCanonicalSwipeRow(
+    rows[0],
+    fromUserId,
+    toUserId,
+    decision,
+    requireServerRecord
+  ) ? rows[0] : null;
+}
+
+export function relationshipRowBelongsToPair(row, userIds) {
+  if (!row || typeof row !== "object" || !Array.isArray(userIds) || userIds.length !== 2) {
+    return false;
+  }
+  const sortedUserIds = [...userIds].sort();
+  return asString(row.pairKey) === sortedUserIds.join(":")
+    && asString(row.userAId) === sortedUserIds[0]
+    && asString(row.userBId) === sortedUserIds[1]
+    && (row.threadId == null || asString(row.threadId) === stableThreadRowId(sortedUserIds));
+}
+
+export function isCanonicalSwipeRow(row, fromUserId, toUserId, decision = null, requireServerRecord = false) {
+  if (!row || typeof row !== "object") {
+    return false;
+  }
+  const expectedKey = `${fromUserId}:${toUserId}`;
+  const storedDecision = asDecision(row.decision);
+  return asString(row.swipeKey) === expectedKey
+    && asString(row.fromUserId) === fromUserId
+    && asString(row.toUserId) === toUserId
+    && Boolean(storedDecision)
+    && (!decision || storedDecision === decision)
+    && (!requireServerRecord || Boolean(asIsoDate(row.serverRecordedAt)));
+}
+
+export function isCanonicalMatchRow(row, userIds) {
+  if (!row || typeof row !== "object" || !Array.isArray(userIds) || userIds.length !== 2) {
+    return false;
+  }
+  const sortedUserIds = [...userIds].sort();
+  return asString(row.matchKey) === sortedUserIds.join(":")
+    && asString(row.userAId) === sortedUserIds[0]
+    && asString(row.userBId) === sortedUserIds[1]
+    && asString(row.threadId) === stableThreadRowId(sortedUserIds);
+}
+
+export function participantRowsBelongToPair(rows, threadId, userIds) {
+  if (!Array.isArray(rows) || rows.length > 2) {
+    return false;
+  }
+  const expectedUserIds = new Set(userIds);
+  const seenUserIds = new Set();
+  for (const row of rows) {
+    const userId = asString(row?.userId);
+    if (!userId
+      || !expectedUserIds.has(userId)
+      || seenUserIds.has(userId)
+      || asString(row?.threadId) !== threadId
+      || asString(row?.$id) !== stableParticipantRowId(threadId, userId)) {
+      return false;
+    }
+    seenUserIds.add(userId);
+  }
+  return true;
+}
+
+function relationshipBlocksInteraction(relationship, currentUserId, otherUserId) {
+  if (!relationship) {
+    return false;
+  }
+  return relationshipStateForUser(relationship, currentUserId) === "blocked"
+    || relationshipStateForUser(relationship, otherUserId) === "blocked";
+}
+
+function relationshipStateForUser(relationship, userId) {
+  if (relationship?.userAId === userId) {
+    return asRelationshipState(relationship.userAState);
+  }
+  if (relationship?.userBId === userId) {
+    return asRelationshipState(relationship.userBState);
+  }
+  return "none";
+}
+
+function asRelationshipState(value) {
+  return ["none", "liked", "matched", "archived", "blocked"].includes(value)
+    ? value
+    : "none";
+}
+
+async function getRowIfExists(config, tableId, rowId, transactionId = null) {
   try {
-    return await request(config, "GET", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`);
+    return await getRow(config, tableId, rowId, transactionId);
   } catch (err) {
     if (isNotFoundError(err)) {
       return null;
@@ -509,104 +763,96 @@ async function getRowIfExists(config, tableId, rowId) {
   }
 }
 
-async function findRelationshipRow(config, currentUserId, otherUserId) {
-  if (!config.relationshipsTableId) {
-    return null;
-  }
-
-  const pairKey = [currentUserId, otherUserId].sort().join(":");
-  const stableRelationship = await getRowIfExists(
+async function getRow(config, tableId, rowId, transactionId = null) {
+  return request(
     config,
-    config.relationshipsTableId,
-    stableRelationshipRowId([currentUserId, otherUserId].sort())
+    "GET",
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`,
+    undefined,
+    [],
+    transactionId ? { transactionId } : {}
   );
-  if (stableRelationship?.$id) {
-    return stableRelationship;
-  }
-
-  return findSingleRow(config, config.relationshipsTableId, [
-    equal("pairKey", [pairKey]),
-    limit(1)
-  ]);
 }
 
-async function findSwipeRow(config, fromUserId, toUserId, decision = null) {
-  const swipeKey = `${fromUserId}:${toUserId}`;
-  const stableSwipe = await getRowIfExists(config, config.swipesTableId, stableSwipeRowId(swipeKey));
-  if (stableSwipe?.$id) {
-    return !decision || asString(stableSwipe.decision) === decision ? stableSwipe : null;
-  }
-
-  const queries = [equal("swipeKey", [swipeKey])];
-  if (decision) {
-    queries.push(equal("decision", [decision]));
-  }
-  queries.push(limit(1));
-  return findSingleRow(config, config.swipesTableId, queries);
-}
-
-async function findMatchRow(config, userIds) {
-  const matchId = stableMatchRowId(userIds);
-  const stableMatch = await getRowIfExists(config, config.matchesTableId, matchId);
-  if (stableMatch?.$id) {
-    return stableMatch;
-  }
-
-  return findSingleRow(config, config.matchesTableId, [
-    equal("matchKey", [userIds.join(":")]),
-    limit(1)
-  ]);
-}
-
-function relationshipBlocksInteraction(relationship, currentUserId, otherUserId) {
-  if (!relationship) {
-    return false;
-  }
-
-  return relationshipStateForUser(relationship, currentUserId) === "blocked"
-    || relationshipStateForUser(relationship, otherUserId) === "blocked";
-}
-
-function relationshipStateForUser(relationship, userId) {
-  if (relationship.userAId === userId) {
-    return asString(relationship.userAState) ?? "none";
-  }
-  if (relationship.userBId === userId) {
-    return asString(relationship.userBState) ?? "none";
-  }
-  return "none";
-}
-
-async function listRows(config, tableId, queries) {
+async function listRows(config, tableId, queries, transactionId = null) {
   const payload = await request(
     config,
     "GET",
-    `/tablesdb/${config.databaseId}/tables/${tableId}/rows`,
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows`,
     undefined,
-    queries
+    queries,
+    transactionId ? { transactionId, ttl: 0 } : { ttl: 0 }
   );
   return Array.isArray(payload.rows) ? payload.rows : [];
 }
 
-async function createRow(config, tableId, rowId, data, permissions) {
-  return request(config, "POST", `/tablesdb/${config.databaseId}/tables/${tableId}/rows`, {
-    rowId,
-    data,
-    permissions
-  });
+async function createRow(config, tableId, rowId, data, permissions, transactionId) {
+  return request(
+    config,
+    "POST",
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows`,
+    { rowId, data, permissions, transactionId }
+  );
 }
 
-async function updateRow(config, tableId, rowId, data, permissions) {
-  return request(config, "PATCH", `/tablesdb/${config.databaseId}/tables/${tableId}/rows/${rowId}`, {
-    data,
-    permissions
-  });
+async function updateRow(config, tableId, rowId, data, permissions, transactionId) {
+  return request(
+    config,
+    "PATCH",
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`,
+    { data, permissions, transactionId }
+  );
 }
 
-async function request(config, method, path, body, queries = []) {
+async function deleteRow(config, tableId, rowId, transactionId) {
+  return request(
+    config,
+    "DELETE",
+    `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`,
+    { transactionId }
+  );
+}
+
+async function createTransaction(config) {
+  const transaction = await request(config, "POST", "/tablesdb/transactions", {
+    ttl: TRANSACTION_TTL_SECONDS
+  });
+  const transactionId = appwriteIdentifier(transaction.$id);
+  if (!transactionId) {
+    throw new Error("Appwrite did not return a transaction id");
+  }
+  return transactionId;
+}
+
+async function commitTransaction(config, transactionId) {
+  await request(
+    config,
+    "PATCH",
+    `/tablesdb/transactions/${pathSegment(transactionId)}`,
+    { commit: true }
+  );
+}
+
+async function rollbackTransaction(config, transactionId) {
+  try {
+    await request(
+      config,
+      "PATCH",
+      `/tablesdb/transactions/${pathSegment(transactionId)}`,
+      { rollback: true }
+    );
+  } catch {
+    // A committed, expired, or conflict-aborted transaction needs no cleanup.
+  }
+}
+
+async function request(config, method, path, body, queries = [], queryParameters = {}) {
   const url = new URL(`${config.endpoint}${path}`);
   for (const query of queries) {
     url.searchParams.append("queries[]", query);
+  }
+  for (const [key, value] of Object.entries(queryParameters)) {
+    url.searchParams.set(key, String(value));
   }
 
   const response = await fetch(url, {
@@ -621,22 +867,27 @@ async function request(config, method, path, body, queries = []) {
   });
 
   const text = await response.text();
-  let payload = {};
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = { message: text };
-    }
-  }
-
+  const payload = parseJSONSafely(text);
   if (!response.ok) {
-    const requestError = new Error(payload.message ?? `Request failed with status ${response.status}`);
-    requestError.statusCode = response.status;
-    requestError.type = payload.type ?? null;
+    const requestError = httpError(
+      payload.message ?? `Request failed with status ${response.status}`,
+      response.status
+    );
+    requestError.type = asString(payload.type);
     throw requestError;
   }
   return payload;
+}
+
+function parseJSONSafely(text) {
+  if (!text) {
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
 }
 
 function equal(field, values) {
@@ -647,25 +898,11 @@ function limit(value) {
   return JSON.stringify({ method: "limit", values: [value] });
 }
 
-function isAlreadyExistsError(err) {
-  const message = String(err?.message ?? err ?? "").toLowerCase();
-  return message.includes("already exists");
-}
-
-function isNotFoundError(err) {
-  if (err?.statusCode === 404) {
-    return true;
-  }
-
-  const message = String(err?.message ?? err ?? "").toLowerCase();
-  return message.includes("not found") || message.includes("could not be found");
-}
-
 function stableThreadRowId(userIds) {
   return stableRowId("th", userIds.join(":"));
 }
 
-function stableParticipantRowId(threadId, userId) {
+export function stableParticipantRowId(threadId, userId) {
   return stableRowId("tp", `${threadId}:${userId}`);
 }
 
@@ -685,10 +922,50 @@ function stableRowId(prefix, seed) {
   return `${prefix}_${createHash("sha256").update(seed).digest("hex").slice(0, 32)}`;
 }
 
+function isConflictError(err) {
+  const message = String(err?.message ?? "").toLowerCase();
+  const type = String(err?.type ?? "").toLowerCase();
+  return err?.statusCode === 409
+    || type.includes("conflict")
+    || message.includes("already exists");
+}
+
+function isNotFoundError(err) {
+  if (err?.statusCode === 404) {
+    return true;
+  }
+  const message = String(err?.message ?? "").toLowerCase();
+  return message.includes("not found") || message.includes("could not be found");
+}
+
 function asString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+export function appwriteIdentifier(value) {
+  const identifier = asString(value);
+  return identifier && APPWRITE_IDENTIFIER_PATTERN.test(identifier) ? identifier : null;
+}
+
+export function pathSegment(value) {
+  return encodeURIComponent(String(value));
+}
+
+function asIsoDate(value) {
+  const text = asString(value);
+  if (!text) {
+    return null;
+  }
+  const timestamp = Date.parse(text);
+  return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
+}
+
 function asDecision(value) {
   return value === "liked" || value === "passed" ? value : null;
+}
+
+function httpError(message, statusCode) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
 }
