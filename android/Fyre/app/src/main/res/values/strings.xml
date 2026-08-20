@@ -13,13 +13,10 @@
     <string name="common_cancel">Cancel</string>
     <string name="common_save">Save</string>
     <string name="common_logout">Log out</string>
-    <string name="common_terms_privacy">Terms and Privacy</string>
-    <string name="common_dash">-</string>
     <string name="common_none">None</string>
-    <string name="common_all">All</string>
 
     <!-- Navigation -->
-    <string name="nav_loading_session">Loading session...</string>
+    <string name="nav_loading_session">Loading session…</string>
 
     <!-- Tabs -->
     <string name="tab_discovery">Home</string>
@@ -32,13 +29,13 @@
     <string name="welcome_description">Sign in or create an account to start\nyour %1$s experience.</string>
     <string name="welcome_cta_login">Sign in</string>
     <string name="welcome_cta_create_account">Create account</string>
-    <string name="welcome_terms_link">Read Terms and Privacy</string>
+    <string name="welcome_demo_notice_link">Read the demo and data notice</string>
     <string name="welcome_footer">%1$s</string>
 
     <!-- Auth Login -->
     <string name="auth_login_subtitle">Sign in to your account</string>
-    <string name="auth_login_email_placeholder">name@example.test</string>
-    <string name="auth_login_loading">Signing in...</string>
+    <string name="auth_login_email_placeholder">name@example.com</string>
+    <string name="auth_login_loading">Signing in…</string>
     <string name="auth_login_register_prompt">No account yet? Register</string>
 
     <!-- Auth Register -->
@@ -47,21 +44,16 @@
     <string name="auth_register_name_placeholder">Mario Rossi</string>
     <string name="auth_register_password_hint">Min. 8 characters, 1 uppercase letter, 1 number</string>
     <string name="auth_register_confirm_password">Confirm Password</string>
-    <string name="auth_register_terms_checkbox">I accept Terms and Privacy</string>
-    <string name="auth_register_loading">Registering...</string>
+    <string name="auth_register_demo_notice_checkbox">I have read the demo and data notice</string>
+    <string name="auth_register_loading">Registering…</string>
     <string name="auth_register_cta">Register</string>
     <string name="auth_register_login_prompt">Already have an account? Sign in</string>
-    <string name="auth_register_password_valid">Valid password</string>
-    <string name="auth_register_password_mismatch">Passwords do not match</string>
 
-    <!-- Terms & Privacy -->
-    <string name="terms_title">Terms and Privacy</string>
-    <string name="terms_intro">By continuing, you confirm that you have read and understood the terms of use and privacy notice.</string>
-    <string name="terms_section_1">1) Allowed use\nUse Fyre respectfully and avoid illegal, abusive, or harmful content.</string>
-    <string name="terms_section_2">2) Processed data\nFyre processes account, profile, event, and messaging data to provide the app features.</string>
-    <string name="terms_section_3">3) Responsibility\nYou are responsible for the information and content you share through the service.</string>
-    <string name="terms_section_4">4) Consent\nAccepting Terms and Privacy is required to register.</string>
-    <string name="terms_accept_and_continue">Accept and continue</string>
+    <!-- Demo and data notice -->
+    <string name="demo_notice_title">School project demonstration</string>
+    <string name="demo_notice_body_1">Fyre is a pre-release school project. Use synthetic data only in demonstration environments.</string>
+    <string name="demo_notice_body_2">The client communicates with Appwrite services configured by the operator. Before any real-world service, the operator must provide complete terms and a privacy notice.</string>
+    <string name="demo_notice_back">Back</string>
 
     <!-- Profile Completion -->
     <string name="profile_completion_title">Complete your profile</string>
@@ -71,7 +63,7 @@
     <string name="profile_completion_birth_date">Birth date</string>
     <string name="profile_completion_birth_date_placeholder">DD/MM/YYYY</string>
     <string name="profile_completion_bio_placeholder">Tell something about yourself</string>
-    <string name="profile_completion_loading">Saving...</string>
+    <string name="profile_completion_loading">Saving…</string>
     <string name="profile_completion_cta">Complete profile</string>
     <string name="profile_photo_section">Profile avatar</string>
     <string name="profile_photo_action">Choose avatar</string>
@@ -86,12 +78,11 @@
     <string name="profile_photo_move_right">Move photo right</string>
     <string name="profile_section_required">Required</string>
     <string name="profile_section_information">Information</string>
-    <string name="profile_section_information_hint">Only some fields stay locked after setup. If you need to change them, email support at %1$s.</string>
+    <string name="profile_section_information_hint">First name, last name, email, and birth date cannot be changed after setup. You can update the other profile details here.</string>
     <string name="profile_section_discovery">Discovery</string>
     <string name="profile_section_discovery_hint">These fields change who you see and how relevant profiles are.</string>
     <string name="profile_section_social">Social</string>
     <string name="profile_section_preferences">Preferences</string>
-    <string name="profile_section_security_hint">Manage profile security settings.</string>
     <string name="profile_city_hint">Distance is calculated from your verified location.</string>
     <string name="profile_gender">Gender</string>
     <string name="profile_gender_male">Man</string>
@@ -123,26 +114,18 @@
     <string name="profile_drinks">Do you drink alcohol?</string>
     <string name="profile_exclude_smokers">Exclude smokers</string>
     <string name="profile_exclude_drinkers">Exclude people who drink alcohol</string>
-    <string name="profile_save_changes">Save profile changes</string>
 
     <!-- Account -->
-    <string name="account_hub_title">Account and profile</string>
     <string name="account_menu_account">Account</string>
     <string name="account_segment_settings">Settings</string>
-    <string name="account_user_fallback">User</string>
-    <string name="account_email_fallback">email unavailable</string>
-    <string name="account_user_email_summary">%1$s - %2$s</string>
-    <string name="account_section_edit_profile">Edit profile</string>
     <string name="account_section_discovery_preferences">Discovery preferences</string>
     <string name="account_section_notifications">Notifications</string>
-    <string name="account_section_security">Security</string>
     <string name="account_section_appearance">Appearance</string>
     <string name="account_section_event_history">Event history</string>
     <string name="account_events_empty">No upcoming event activity.</string>
     <string name="account_events_open_all">Events</string>
     <string name="account_preferences_hint">Choose what appears on discovery cards.</string>
     <string name="account_notifications_hint">Control which notifications you receive from Fyre.</string>
-    <string name="account_discovery_card_visibility">Swipe card visibility</string>
     <string name="account_switch_show_age">Show age</string>
     <string name="account_switch_show_age_hint">Show or hide age on cards.</string>
     <string name="account_switch_show_distance">Show distance</string>
@@ -179,7 +162,7 @@
     <string name="account_app_icon_fyre_2">Fyre night</string>
     <string name="account_app_icon_fyre_3">Fyre graphite</string>
     <string name="account_profile_auto_save">Automatic saving enabled</string>
-    <string name="account_profile_auto_saving">Saving automatically...</string>
+    <string name="account_profile_auto_saving">Saving automatically…</string>
     <string name="account_chat_label">Chat</string>
     <string name="account_chat_background_style">Chat background</string>
     <string name="account_chat_background_brightness">Background brightness (-100/100)</string>
@@ -196,52 +179,36 @@
     <string name="account_chat_color_picker">Selected color</string>
     <string name="account_back_to_hub_cd">Back to account hub</string>
     <string name="account_event_status">Status: %1$s</string>
-    <string name="profile_security_reset_description">To reset your password or change email, contact support from your profile address.</string>
-    <string name="profile_security_reset_action">Request password reset</string>
-    <string name="profile_security_change_email_action">Request email change</string>
-    <string name="profile_security_mail_opened">Email ready for support.</string>
-    <string name="profile_security_mail_failed">Could not open the email app.</string>
-
     <!-- Discover -->
-    <string name="discover_title">Discovery</string>
     <string name="discover_match_title">It is a match!</string>
     <string name="discover_match_description">You matched. You can already open the chat.</string>
     <string name="discover_match_notification_body">You matched with %1$s</string>
     <string name="discover_match_notification_fallback">You have a new match</string>
     <string name="discover_open_thread">Open thread</string>
     <string name="discover_continue">Continue</string>
-    <string name="discover_counter">%1$d/%2$d</string>
     <string name="discover_pass_profile_cd">Pass profile</string>
     <string name="discover_like_profile_cd">Like</string>
     <string name="discover_profile_name_age">%1$s, %2$d</string>
     <string name="discover_profile_name">%1$s</string>
     <string name="discover_profile_city_distance">%1$s - %2$d km</string>
     <string name="discover_profile_city">%1$s</string>
-    <string name="discover_photo_counter">Photo %1$d/%2$d</string>
-    <string name="discover_compatibility">%1$d%% compatible</string>
     <string name="discover_details_open">Profile details</string>
-    <string name="discover_details_close">Close details</string>
-    <string name="discover_details_title">Profile details</string>
     <string name="discover_details_info">Information</string>
-    <string name="discover_details_gallery">Gallery</string>
     <string name="discover_details_bio">Bio</string>
-    <string name="discover_details_yes">Yes</string>
-    <string name="discover_details_no">No</string>
-    <string name="discover_verified_chip">Verified profile</string>
-    <string name="discover_intent">Intent: %1$s</string>
     <string name="discover_interests">Interests</string>
     <string name="discover_social_tags">Social tags</string>
     <string name="discover_empty_filtered">No profile matches the current filters.</string>
     <string name="discover_empty_exhausted">You are out of available profiles. Come back later.</string>
-    <string name="discover_flame">🔥</string>
     <string name="match_banner_title">Match with %1$s</string>
     <string name="match_banner_subtitle">Tap to open the chat</string>
 
     <!-- Messages -->
     <string name="messages_empty_title">No chats</string>
     <string name="messages_empty_description">New matches will appear here.</string>
-    <string name="messages_new_message_one">1 new message</string>
-    <string name="messages_new_messages_many">%1$d new messages</string>
+    <plurals name="messages_new_messages">
+        <item quantity="one">%1$d new message</item>
+        <item quantity="other">%1$d new messages</item>
+    </plurals>
     <string name="messages_notification_fallback">Open the chat to read them</string>
     <string name="messages_notification_body">%1$s: %2$s</string>
     <string name="messages_back_to_inbox_cd">Back to inbox</string>
@@ -249,6 +216,8 @@
     <string name="messages_attachment_image">Image</string>
     <string name="messages_attachment_video">Video</string>
     <string name="messages_attachment_file">File</string>
+    <string name="messages_attachment_unsupported">Unsupported attachment format. Use JPG, JPEG, PNG, WEBP, HEIC, PDF, M4A, MP3, WAV, MP4, or MOV.</string>
+    <string name="messages_attachment_open_failed">Unable to open this attachment securely.</string>
     <string name="messages_attachment_menu_cd">Attach</string>
     <string name="messages_take_photo">Take photo</string>
     <string name="messages_record_voice">Record</string>
@@ -276,11 +245,9 @@
     <string name="messages_status_read">Read</string>
     <string name="messages_status_failed">Send failed</string>
     <string name="messages_reply_prefix">Reply: %1$s</string>
-    <string name="messages_attachment_item">%1$s: %2$s</string>
     <string name="messages_close_image_preview">Close</string>
     <string name="messages_play_voice">Play voice</string>
     <string name="messages_play_video">Play video</string>
-    <string name="messages_stop">Stop</string>
     <string name="messages_reply_action">Reply</string>
     <string name="messages_info_action">Info</string>
     <string name="messages_info_title">Message info</string>
@@ -294,9 +261,8 @@
     <!-- Events -->
     <string name="events_title">Events</string>
     <string name="events_empty">No events available.</string>
-    <string name="events_user_state">User state: %1$s</string>
-    <string name="events_capacity_deadline">Capacity %1$d/%2$d - Deadline %3$s</string>
     <string name="events_preview_deadline">Deadline: %1$s</string>
+    <string name="events_cancellation_deadline">Cancellation deadline: %1$s</string>
     <string name="events_preview_remaining">Remaining seats - M: %1$d, F: %2$d</string>
     <string name="events_preview_open">Open event details</string>
     <string name="events_poster_cd">Event poster</string>
@@ -308,23 +274,8 @@
     <string name="events_section_info">Event info</string>
     <string name="events_section_rules">Rules</string>
     <string name="events_section_live">Live status</string>
-    <string name="events_info_club">EVENT_VENUE_REDACTED</string>
-    <string name="events_info_address">EVENT_ADDRESS_REDACTED</string>
-    <string name="events_info_exclusive">Exclusive evening for selected couples and singles in a private setting.</string>
-    <string name="events_info_buffet">Evening buffet included.</string>
-    <string name="events_info_welcome_drink">Welcome drink included.</string>
-    <string name="events_info_contribution">Participation fee: 35 EUR per person.</string>
-    <string name="events_info_contact">Info and bookings: EVENT_CONTACT_REDACTED</string>
-    <string name="events_info_dress_code">Dress code: elegant / sensual.</string>
-    <string name="events_rule_max_participants">24 private spots, maximum 48 participants</string>
-    <string name="events_rule_balance">The waiting list starts only when the 24 seats for your gender are full</string>
-    <string name="events_rule_cancel_48h">Cancellation allowed up to 48 hours before</string>
-    <string name="events_rule_lock_24h">Registrations become final 24 hours before</string>
-    <string name="events_rule_staff">On-site support staff: EVENT_STAFF_REDACTED.</string>
     <string name="events_label_male">Men</string>
     <string name="events_label_female">Women</string>
-    <string name="events_label_capacity">Capacity</string>
-    <string name="events_label_waiting">Waiting</string>
     <string name="events_capacity_value">%1$d/%2$d</string>
     <string name="events_male_count">Men: %1$d</string>
     <string name="events_female_count">Women: %1$d</string>
@@ -334,25 +285,13 @@
     <string name="events_action_leave_waiting">Leave waiting list</string>
     <string name="events_admin_subtitle">Update event data and manage participants like on iOS.</string>
     <string name="events_admin_participants_empty">No registered participants.</string>
-    <string name="events_metric_online">Online %1$d</string>
-    <string name="events_metric_checkin">Check-in %1$d</string>
-    <string name="events_metric_chat_per_min">Chat/min %1$d</string>
     <string name="events_reminder_set_title">Reminder set</string>
     <string name="events_reminder_set_body">We will remind you about %1$s</string>
+    <string name="events_reminder_notification_title">Event reminder</string>
+    <string name="events_reminder_notification_body_twenty_four_hours">%1$s starts within 24 hours</string>
+    <string name="events_reminder_notification_body_one_hour">%1$s starts within one hour</string>
+    <string name="events_reminder_notification_body_with_date">%1$s - %2$s</string>
     <string name="events_detail_back_to_events_cd">Back to events</string>
-    <string name="events_detail_label_date">Date</string>
-    <string name="events_detail_label_place">Place</string>
-    <string name="events_detail_label_deadline">Deadline</string>
-    <string name="events_detail_label_capacity">Capacity</string>
-    <string name="events_detail_label_user_state">Event user state</string>
-    <string name="events_detail_capacity_value">%1$d/%2$d</string>
-    <string name="events_detail_section_description">Description</string>
-    <string name="events_detail_section_rules">Rules</string>
-    <string name="events_detail_section_live_metrics">Live metrics</string>
-    <string name="events_detail_section_registration_actions">Registration actions</string>
-    <string name="events_detail_action_join">Join</string>
-    <string name="events_detail_action_cancel">Cancel</string>
-    <string name="events_detail_action_waitlist">Waitlist</string>
     <string name="events_detail_section_admin">Event admin</string>
     <string name="events_detail_input_title">Title</string>
     <string name="events_detail_input_date">Date</string>
@@ -363,19 +302,14 @@
     <string name="events_detail_input_capacity">Capacity</string>
     <string name="events_detail_input_male_limit">Men limit</string>
     <string name="events_detail_input_female_limit">Women limit</string>
-    <string name="events_detail_input_admin_emails">Admin emails (one per line)</string>
     <string name="events_detail_input_rules">Rules (one per line)</string>
     <string name="events_detail_save_changes">Save event changes</string>
     <string name="events_detail_section_manage_participants">Participant management</string>
     <string name="events_detail_participant_status">%1$s - %2$s</string>
-    <string name="events_detail_rule_item">- %1$s</string>
     <string name="events_detail_status_registered_short">R</string>
     <string name="events_detail_status_waitlist_short">W</string>
     <string name="events_detail_status_promoted_short">P</string>
     <string name="events_detail_status_none_short">N</string>
 
     <!-- Home -->
-    <string name="home_welcome_title">Welcome!</string>
-    <string name="home_account_title">Your account</string>
-    <string name="home_registered_on">Registered on</string>
 </resources>

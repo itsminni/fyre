@@ -1,0 +1,44 @@
+package minni.fyre.messages.data
+
+import minni.fyre.messages.model.AttachmentType
+import minni.fyre.messages.model.ChatMessage
+import minni.fyre.messages.model.MessageThread
+import minni.fyre.messages.model.RelationshipAction
+
+interface MessagesRepository {
+    suspend fun getThreads(): Result<List<MessageThread>>
+
+    suspend fun getMessages(threadId: String): Result<List<ChatMessage>>
+
+    suspend fun ensureThread(threadId: String): Result<MessageThread>
+
+    suspend fun sendTextMessage(
+        threadId: String,
+        text: String,
+        replyToMessageId: String? = null
+    ): Result<ChatMessage>
+
+    suspend fun sendAttachmentMessage(
+        threadId: String,
+        type: AttachmentType,
+        displayName: String,
+        localUri: String,
+        mimeType: String,
+        replyToMessageId: String? = null
+    ): Result<ChatMessage>
+
+    suspend fun sendVoiceMessage(
+        threadId: String,
+        localPath: String,
+        durationSec: Int,
+        replyToMessageId: String? = null
+    ): Result<ChatMessage>
+
+    suspend fun markAsRead(threadId: String): Result<Unit>
+
+    suspend fun setThreadNotifications(threadId: String, enabled: Boolean): Result<MessageThread>
+
+    suspend fun markCurrentUserPresence(isOnline: Boolean): Result<Unit>
+
+    suspend fun updateRelationship(threadId: String, action: RelationshipAction): Result<Unit>
+}

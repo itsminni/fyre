@@ -13,13 +13,10 @@
     <string name="common_cancel">Annulla</string>
     <string name="common_save">Salva</string>
     <string name="common_logout">Esci</string>
-    <string name="common_terms_privacy">Termini e Privacy</string>
-    <string name="common_dash">-</string>
     <string name="common_none">Nessuno</string>
-    <string name="common_all">Tutti</string>
 
     <!-- Navigation -->
-    <string name="nav_loading_session">Caricamento sessione...</string>
+    <string name="nav_loading_session">Caricamento sessione…</string>
 
     <!-- Tabs -->
     <string name="tab_discovery">Home</string>
@@ -32,13 +29,13 @@
     <string name="welcome_description">Accedi o crea un account per iniziare\nla tua esperienza con %1$s.</string>
     <string name="welcome_cta_login">Accedi</string>
     <string name="welcome_cta_create_account">Crea un account</string>
-    <string name="welcome_terms_link">Leggi Termini e Privacy</string>
+    <string name="welcome_demo_notice_link">Leggi la nota sulla demo e sui dati</string>
     <string name="welcome_footer">%1$s</string>
 
     <!-- Auth Login -->
     <string name="auth_login_subtitle">Accedi al tuo account</string>
-    <string name="auth_login_email_placeholder">mario.rossi@email.com</string>
-    <string name="auth_login_loading">Accesso...</string>
+    <string name="auth_login_email_placeholder">mario.rossi@example.com</string>
+    <string name="auth_login_loading">Accesso…</string>
     <string name="auth_login_register_prompt">Non hai un account? Registrati</string>
 
     <!-- Auth Register -->
@@ -47,21 +44,16 @@
     <string name="auth_register_name_placeholder">Mario Rossi</string>
     <string name="auth_register_password_hint">Min. 8 caratteri, 1 maiuscola, 1 numero</string>
     <string name="auth_register_confirm_password">Conferma Password</string>
-    <string name="auth_register_terms_checkbox">Accetto Termini e Privacy</string>
-    <string name="auth_register_loading">Registrazione...</string>
+    <string name="auth_register_demo_notice_checkbox">Ho letto la nota sulla demo e sui dati</string>
+    <string name="auth_register_loading">Registrazione…</string>
     <string name="auth_register_cta">Registrati</string>
-    <string name="auth_register_login_prompt">Hai gia un account? Accedi</string>
-    <string name="auth_register_password_valid">Password valida</string>
-    <string name="auth_register_password_mismatch">Le password non corrispondono</string>
+    <string name="auth_register_login_prompt">Hai già un account? Accedi</string>
 
-    <!-- Terms & Privacy -->
-    <string name="terms_title">Termini e Privacy</string>
-    <string name="terms_intro">Continuando confermi di aver letto e compreso condizioni d\'uso e informativa privacy.</string>
-    <string name="terms_section_1">1) Usi consentiti\nUsa Fyre con rispetto ed evita contenuti illeciti, abusivi o dannosi.</string>
-    <string name="terms_section_2">2) Dati trattati\nFyre tratta dati account, profilo, eventi e messaggi per fornire le funzioni dell\'app.</string>
-    <string name="terms_section_3">3) Responsabilita\nSei responsabile delle informazioni e dei contenuti che condividi nel servizio.</string>
-    <string name="terms_section_4">4) Consenso\nPer registrarti e obbligatorio accettare Termini e Privacy.</string>
-    <string name="terms_accept_and_continue">Accetto e continuo</string>
+    <!-- Nota sulla demo e sui dati -->
+    <string name="demo_notice_title">Dimostrazione di un progetto scolastico</string>
+    <string name="demo_notice_body_1">Fyre è un progetto scolastico in pre-release. Negli ambienti dimostrativi usa soltanto dati sintetici.</string>
+    <string name="demo_notice_body_2">Il client comunica con i servizi Appwrite configurati dal gestore. Prima di offrire un servizio reale, il gestore deve fornire termini e informativa privacy completi.</string>
+    <string name="demo_notice_back">Indietro</string>
 
     <!-- Profile Completion -->
     <string name="profile_completion_title">Completa il tuo profilo</string>
@@ -71,7 +63,7 @@
     <string name="profile_completion_birth_date">Data nascita</string>
     <string name="profile_completion_birth_date_placeholder">GG/MM/AAAA</string>
     <string name="profile_completion_bio_placeholder">Raccontati in poche righe</string>
-    <string name="profile_completion_loading">Salvataggio...</string>
+    <string name="profile_completion_loading">Salvataggio…</string>
     <string name="profile_completion_cta">Completa profilo</string>
     <string name="profile_photo_section">Avatar profilo</string>
     <string name="profile_photo_action">Scegli avatar</string>
@@ -86,12 +78,11 @@
     <string name="profile_photo_move_right">Sposta foto a destra</string>
     <string name="profile_section_required">Obbligatorio</string>
     <string name="profile_section_information">Informazioni</string>
-    <string name="profile_section_information_hint">Solo alcuni dati restano bloccati dopo il setup. Se devi modificarli, invia una mail al supporto a %1$s.</string>
+    <string name="profile_section_information_hint">Nome, cognome, email e data di nascita non sono modificabili dopo il setup. Puoi aggiornare qui gli altri dati del profilo.</string>
     <string name="profile_section_discovery">Scoperta</string>
     <string name="profile_section_discovery_hint">Questi campi cambiano chi vedi e quanto i profili risultano rilevanti.</string>
     <string name="profile_section_social">Social</string>
     <string name="profile_section_preferences">Preferenze</string>
-    <string name="profile_section_security_hint">Gestisci le impostazioni di sicurezza collegate al profilo.</string>
     <string name="profile_city_hint">I km sono calcolati dalla localita verificata.</string>
     <string name="profile_gender">Genere</string>
     <string name="profile_gender_male">Uomo</string>
@@ -123,26 +114,18 @@
     <string name="profile_drinks">Bevi alcolici?</string>
     <string name="profile_exclude_smokers">Escludi chi fuma</string>
     <string name="profile_exclude_drinkers">Escludi chi beve alcolici</string>
-    <string name="profile_save_changes">Salva modifiche profilo</string>
 
     <!-- Account -->
-    <string name="account_hub_title">Account e profilo</string>
     <string name="account_menu_account">Account</string>
     <string name="account_segment_settings">Impostazioni</string>
-    <string name="account_user_fallback">Utente</string>
-    <string name="account_email_fallback">email non disponibile</string>
-    <string name="account_user_email_summary">%1$s - %2$s</string>
-    <string name="account_section_edit_profile">Modifica profilo</string>
     <string name="account_section_discovery_preferences">Preferenze discovery</string>
     <string name="account_section_notifications">Notifiche</string>
-    <string name="account_section_security">Sicurezza</string>
     <string name="account_section_appearance">Aspetto</string>
     <string name="account_section_event_history">Cronologia eventi</string>
     <string name="account_events_empty">Nessuna attivita eventi futuri.</string>
     <string name="account_events_open_all">Eventi</string>
     <string name="account_preferences_hint">Scegli cosa mostrare sulle card nella discovery.</string>
     <string name="account_notifications_hint">Controlla quali notifiche ricevere da Fyre.</string>
-    <string name="account_discovery_card_visibility">Visibilita card swipe</string>
     <string name="account_switch_show_age">Mostra eta</string>
     <string name="account_switch_show_age_hint">Mostra o nasconde l\'eta sulle card.</string>
     <string name="account_switch_show_distance">Mostra distanza</string>
@@ -179,7 +162,7 @@
     <string name="account_app_icon_fyre_2">Fyre notte</string>
     <string name="account_app_icon_fyre_3">Fyre graphite</string>
     <string name="account_profile_auto_save">Salvataggio automatico attivo</string>
-    <string name="account_profile_auto_saving">Salvataggio automatico...</string>
+    <string name="account_profile_auto_saving">Salvataggio automatico…</string>
     <string name="account_chat_label">Chat</string>
     <string name="account_chat_background_style">Sfondo chat</string>
     <string name="account_chat_background_brightness">Luminosita sfondo (-100/100)</string>
@@ -196,52 +179,37 @@
     <string name="account_chat_color_picker">Colore selezionato</string>
     <string name="account_back_to_hub_cd">Torna all\'hub account</string>
     <string name="account_event_status">Stato: %1$s</string>
-    <string name="profile_security_reset_description">Per reimpostare la password o cambiare email, contatta il supporto dal tuo indirizzo profilo.</string>
-    <string name="profile_security_reset_action">Richiedi reset password</string>
-    <string name="profile_security_change_email_action">Richiedi cambio email</string>
-    <string name="profile_security_mail_opened">Email pronta per il supporto.</string>
-    <string name="profile_security_mail_failed">Impossibile aprire l\'app email.</string>
-
     <!-- Discover -->
-    <string name="discover_title">Discovery</string>
     <string name="discover_match_title">It is a match!</string>
-    <string name="discover_match_description">Avete fatto match. Puoi gia aprire la chat.</string>
+    <string name="discover_match_description">Avete fatto match. Puoi già aprire la chat.</string>
     <string name="discover_match_notification_body">Hai fatto match con %1$s</string>
     <string name="discover_match_notification_fallback">Hai un nuovo match</string>
     <string name="discover_open_thread">Apri thread</string>
     <string name="discover_continue">Continua</string>
-    <string name="discover_counter">%1$d/%2$d</string>
     <string name="discover_pass_profile_cd">Passa profilo</string>
     <string name="discover_like_profile_cd">Mi piace</string>
     <string name="discover_profile_name_age">%1$s, %2$d</string>
     <string name="discover_profile_name">%1$s</string>
     <string name="discover_profile_city_distance">%1$s - %2$d km</string>
     <string name="discover_profile_city">%1$s</string>
-    <string name="discover_photo_counter">Foto %1$d/%2$d</string>
-    <string name="discover_compatibility">%1$d%% compatibile</string>
     <string name="discover_details_open">Dettagli profilo</string>
-    <string name="discover_details_close">Chiudi dettagli</string>
-    <string name="discover_details_title">Dettagli profilo</string>
     <string name="discover_details_info">Informazioni</string>
-    <string name="discover_details_gallery">Galleria</string>
     <string name="discover_details_bio">Bio</string>
-    <string name="discover_details_yes">Si</string>
-    <string name="discover_details_no">No</string>
-    <string name="discover_verified_chip">Profilo verificato</string>
-    <string name="discover_intent">Intent: %1$s</string>
     <string name="discover_interests">Interessi</string>
     <string name="discover_social_tags">Tag social</string>
     <string name="discover_empty_filtered">Nessun profilo compatibile con i filtri correnti.</string>
-    <string name="discover_empty_exhausted">Hai finito i profili disponibili. Torna piu tardi.</string>
-    <string name="discover_flame">🔥</string>
+    <string name="discover_empty_exhausted">Hai finito i profili disponibili. Torna più tardi.</string>
     <string name="match_banner_title">Match con %1$s</string>
     <string name="match_banner_subtitle">Tocca per aprire la chat</string>
 
     <!-- Messages -->
     <string name="messages_empty_title">Nessuna chat</string>
     <string name="messages_empty_description">I nuovi match compariranno qui.</string>
-    <string name="messages_new_message_one">1 nuovo messaggio</string>
-    <string name="messages_new_messages_many">%1$d nuovi messaggi</string>
+    <plurals name="messages_new_messages">
+        <item quantity="one">%1$d nuovo messaggio</item>
+        <item quantity="many">%1$d nuovi messaggi</item>
+        <item quantity="other">%1$d nuovi messaggi</item>
+    </plurals>
     <string name="messages_notification_fallback">Apri la chat per leggerli</string>
     <string name="messages_notification_body">%1$s: %2$s</string>
     <string name="messages_back_to_inbox_cd">Torna all\'inbox</string>
@@ -249,6 +217,8 @@
     <string name="messages_attachment_image">Immagine</string>
     <string name="messages_attachment_video">Video</string>
     <string name="messages_attachment_file">File</string>
+    <string name="messages_attachment_unsupported">Formato allegato non supportato. Usa JPG, JPEG, PNG, WEBP, HEIC, PDF, M4A, MP3, WAV, MP4 o MOV.</string>
+    <string name="messages_attachment_open_failed">Impossibile aprire questo allegato in modo sicuro.</string>
     <string name="messages_attachment_menu_cd">Allega</string>
     <string name="messages_take_photo">Scatta foto</string>
     <string name="messages_record_voice">Registra</string>
@@ -276,11 +246,9 @@
     <string name="messages_status_read">Letto</string>
     <string name="messages_status_failed">Invio non riuscito</string>
     <string name="messages_reply_prefix">Risposta: %1$s</string>
-    <string name="messages_attachment_item">%1$s: %2$s</string>
     <string name="messages_close_image_preview">Chiudi</string>
     <string name="messages_play_voice">Play vocale</string>
     <string name="messages_play_video">Riproduci video</string>
-    <string name="messages_stop">Stop</string>
     <string name="messages_reply_action">Rispondi</string>
     <string name="messages_info_action">Info</string>
     <string name="messages_info_title">Info messaggio</string>
@@ -294,9 +262,8 @@
     <!-- Events -->
     <string name="events_title">Eventi</string>
     <string name="events_empty">Nessun evento disponibile.</string>
-    <string name="events_user_state">Stato utente: %1$s</string>
-    <string name="events_capacity_deadline">Capienza %1$d/%2$d - Deadline %3$s</string>
     <string name="events_preview_deadline">Deadline: %1$s</string>
+    <string name="events_cancellation_deadline">Scadenza cancellazione: %1$s</string>
     <string name="events_preview_remaining">Posti rimanenti - M: %1$d, F: %2$d</string>
     <string name="events_preview_open">Apri dettaglio evento</string>
     <string name="events_poster_cd">Poster evento</string>
@@ -308,23 +275,8 @@
     <string name="events_section_info">Info evento</string>
     <string name="events_section_rules">Regole</string>
     <string name="events_section_live">Stato live</string>
-    <string name="events_info_club">EVENT_VENUE_REDACTED</string>
-    <string name="events_info_address">EVENT_ADDRESS_REDACTED</string>
-    <string name="events_info_exclusive">Serata esclusiva per coppie e single selezionati, in un ambiente riservato.</string>
-    <string name="events_info_buffet">Buffet serale incluso.</string>
-    <string name="events_info_welcome_drink">Drink di benvenuto incluso.</string>
-    <string name="events_info_contribution">Contributo di partecipazione: 35 EUR a persona.</string>
-    <string name="events_info_contact">Info e prenotazioni: EVENT_CONTACT_REDACTED</string>
-    <string name="events_info_dress_code">Dress code: elegante / sensuale.</string>
-    <string name="events_rule_max_participants">24 prive, massimo 48 partecipanti</string>
-    <string name="events_rule_balance">La waiting list scatta solo quando i 24 posti del tuo genere sono pieni</string>
-    <string name="events_rule_cancel_48h">Disdetta consentita fino a 48 ore prima</string>
-    <string name="events_rule_lock_24h">Iscrizioni definitive 24 ore prima</string>
-    <string name="events_rule_staff">Staff di supporto in sede: EVENT_STAFF_REDACTED.</string>
     <string name="events_label_male">Uomini</string>
     <string name="events_label_female">Donne</string>
-    <string name="events_label_capacity">Capienza</string>
-    <string name="events_label_waiting">Waiting</string>
     <string name="events_capacity_value">%1$d/%2$d</string>
     <string name="events_male_count">Uomini: %1$d</string>
     <string name="events_female_count">Donne: %1$d</string>
@@ -334,25 +286,13 @@
     <string name="events_action_leave_waiting">Esci dalla waiting list</string>
     <string name="events_admin_subtitle">Aggiorna dati evento e gestisci partecipanti come su iOS.</string>
     <string name="events_admin_participants_empty">Nessun partecipante registrato.</string>
-    <string name="events_metric_online">Online %1$d</string>
-    <string name="events_metric_checkin">Check-in %1$d</string>
-    <string name="events_metric_chat_per_min">Chat/min %1$d</string>
     <string name="events_reminder_set_title">Reminder impostato</string>
     <string name="events_reminder_set_body">Ti ricorderemo %1$s</string>
+    <string name="events_reminder_notification_title">Promemoria evento</string>
+    <string name="events_reminder_notification_body_twenty_four_hours">%1$s inizia entro 24 ore</string>
+    <string name="events_reminder_notification_body_one_hour">%1$s inizia entro un’ora</string>
+    <string name="events_reminder_notification_body_with_date">%1$s - %2$s</string>
     <string name="events_detail_back_to_events_cd">Torna agli eventi</string>
-    <string name="events_detail_label_date">Data</string>
-    <string name="events_detail_label_place">Luogo</string>
-    <string name="events_detail_label_deadline">Deadline</string>
-    <string name="events_detail_label_capacity">Capienza</string>
-    <string name="events_detail_label_user_state">Stato utente evento</string>
-    <string name="events_detail_capacity_value">%1$d/%2$d</string>
-    <string name="events_detail_section_description">Descrizione</string>
-    <string name="events_detail_section_rules">Regole</string>
-    <string name="events_detail_section_live_metrics">Metriche live</string>
-    <string name="events_detail_section_registration_actions">Azioni iscrizione</string>
-    <string name="events_detail_action_join">Join</string>
-    <string name="events_detail_action_cancel">Cancel</string>
-    <string name="events_detail_action_waitlist">Waitlist</string>
     <string name="events_detail_section_admin">Admin evento</string>
     <string name="events_detail_input_title">Titolo</string>
     <string name="events_detail_input_date">Data</string>
@@ -363,19 +303,14 @@
     <string name="events_detail_input_capacity">Capienza</string>
     <string name="events_detail_input_male_limit">Limite uomini</string>
     <string name="events_detail_input_female_limit">Limite donne</string>
-    <string name="events_detail_input_admin_emails">Email admin (una per riga)</string>
     <string name="events_detail_input_rules">Regole (una per riga)</string>
     <string name="events_detail_save_changes">Salva modifiche evento</string>
     <string name="events_detail_section_manage_participants">Gestione partecipanti</string>
     <string name="events_detail_participant_status">%1$s - %2$s</string>
-    <string name="events_detail_rule_item">- %1$s</string>
     <string name="events_detail_status_registered_short">R</string>
     <string name="events_detail_status_waitlist_short">W</string>
     <string name="events_detail_status_promoted_short">P</string>
     <string name="events_detail_status_none_short">N</string>
 
     <!-- Home -->
-    <string name="home_welcome_title">Benvenuto! 👋</string>
-    <string name="home_account_title">Il tuo account</string>
-    <string name="home_registered_on">Registrato il</string>
 </resources>

@@ -12,31 +12,6 @@ val localProperties = Properties().apply {
     }
 }
 
-val defaultAppwriteConfig = mapOf(
-    "APPWRITE_ENDPOINT" to "http://localhost/v1",
-    "APPWRITE_PROJECT_ID" to "fyre-development",
-    "APPWRITE_DATABASE_ID" to "fyre",
-    "APPWRITE_PROFILES_TABLE_ID" to "profiles",
-    "APPWRITE_AVATARS_BUCKET_ID" to "avatars",
-    "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID" to "chat-attachments",
-    "APPWRITE_EVENTS_TABLE_ID" to "events",
-    "APPWRITE_EVENT_REGISTRATIONS_TABLE_ID" to "eventregistrations",
-    "APPWRITE_THREADS_TABLE_ID" to "threads",
-    "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID" to "threadparticipants",
-    "APPWRITE_MESSAGES_TABLE_ID" to "messages",
-    "APPWRITE_SWIPES_TABLE_ID" to "swipe",
-    "APPWRITE_MATCHES_TABLE_ID" to "matches",
-    "APPWRITE_RELATIONSHIPS_TABLE_ID" to "relationships",
-    "APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID" to "registerforevent",
-    "APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID" to "canceleventregistration",
-    "APPWRITE_EVENT_ADMIN_FUNCTION_ID" to "manageeventadmin",
-    "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID" to "createorgetthread",
-    "APPWRITE_SEND_MESSAGE_FUNCTION_ID" to "sendmessage",
-    "APPWRITE_RECORD_SWIPE_FUNCTION_ID" to "recordswipe",
-    "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID" to "discoverprofiles",
-    "APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID" to "managerelationship"
-)
-
 fun appwriteConfigValue(name: String): String {
     val fromGradleProperty = providers.gradleProperty(name).orNull
     if (!fromGradleProperty.isNullOrBlank()) {
@@ -53,7 +28,16 @@ fun appwriteConfigValue(name: String): String {
         return fromEnvironment.trim()
     }
 
-    return defaultAppwriteConfig[name].orEmpty()
+    return ""
+}
+
+fun appwriteBooleanConfigValue(name: String, defaultValue: Boolean): String {
+    val value = appwriteConfigValue(name).ifBlank { defaultValue.toString() }
+    return when (value.lowercase()) {
+        "true" -> "true"
+        "false" -> "false"
+        else -> error("$name must be either true or false")
+    }
 }
 
 fun asBuildConfigString(value: String): String {
@@ -64,7 +48,7 @@ fun asBuildConfigString(value: String): String {
 }
 
 android {
-    namespace = "com.example.fyre"
+    namespace = "minni.fyre"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -83,8 +67,7 @@ android {
         buildConfigField(
             "boolean",
             "APPWRITE_BACKEND_ENABLED",
-            appwriteConfigValue("APPWRITE_BACKEND_ENABLED")
-                .ifBlank { "true" }
+            appwriteBooleanConfigValue("APPWRITE_BACKEND_ENABLED", defaultValue = false)
         )
         buildConfigField(
             "String",
@@ -171,6 +154,11 @@ android {
         )
         buildConfigField(
             "String",
+            "APPWRITE_MANAGE_PROFILE_FUNCTION_ID",
+            asBuildConfigString(appwriteConfigValue("APPWRITE_MANAGE_PROFILE_FUNCTION_ID"))
+        )
+        buildConfigField(
+            "String",
             "APPWRITE_EVENT_ADMIN_FUNCTION_ID",
             asBuildConfigString(appwriteConfigValue("APPWRITE_EVENT_ADMIN_FUNCTION_ID"))
         )
@@ -243,6 +231,11 @@ android {
         compose = true
         buildConfig = true
     }
+    bundle {
+        language {
+            enableSplit = false
+        }
+    }
 }
 
 dependencies {
@@ -254,30 +247,30 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    
+
     implementation(libs.androidx.navigation.compose)
-    
+
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    
+
     implementation(libs.androidx.lifecycle.runtime.compose)
-    
+
     implementation(libs.androidx.compose.material.icons.extended)
-    
+
     implementation(libs.coil.compose)
-    
+
     implementation(libs.google.gson)
-    
+
     implementation(libs.androidx.datastore.preferences)
-    
+
     implementation(libs.androidx.documentfile)
-    
+
     implementation(libs.accompanist.permissions)
-    
+
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
-    
+
     implementation(libs.androidx.work.runtime.ktx)
-    
+
     implementation(libs.squareup.okhttp)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
