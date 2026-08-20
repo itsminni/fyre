@@ -1,71 +1,77 @@
 # Fyre iOS
 
+SwiftUI app with an iOS 17 deployment target.
+
+## Requirements
+
+- a recent Xcode release with iOS 17 or newer support;
+- an iOS simulator or physical device.
+
+## Setup
+
+From the repository root:
+
+```sh
+cd ios/Fyre
+cp Fyre/Config.example.plist Fyre/Config.plist
+open Fyre.xcodeproj
+```
+
+Replace the required public Appwrite resource placeholders. The attachments bucket, admin function, and direct-function domains may stay empty when their features are unused. Select the shared `Fyre` scheme and a simulator or device.
+
+`Config.plist` is ignored by Git but bundled with the app. It must contain public client configuration only.
+
+Without the local file, the app reports that the backend is unavailable without aborting startup. Unit tests use synthetic configuration and need no live credentials.
+
+## Structure
+
+- [`Fyre/`](Fyre/): application and UI;
+- [`Fyre/Auth/`](Fyre/Auth/): authentication, Appwrite, and realtime;
+- [`Fyre/data/`](Fyre/data/): contracts and services;
+- [`FyreTests/`](FyreTests/): unit tests.
+
+## Tests
+
+Run the `FyreTests` target from the shared `Fyre` scheme. [CI](../../.github/workflows/ci.yml) selects an available simulator and uses normal ad-hoc signing for Keychain verification.
+
+See the [main README](../../README.md) and [Appwrite setup](../../appwrite/README.md).
+
+---
+
 ## Italiano
 
-Questa cartella contiene l'app iOS di Fyre, sviluppata in SwiftUI.
+App SwiftUI con deployment target iOS 17.
 
 ### Requisiti
 
-- Xcode recente con supporto iOS 17 o superiore.
-- Simulatore iOS o dispositivo fisico.
-- Configurazione Appwrite in `ios/Fyre/Fyre/Config.plist` per usare il backend reale.
+- una versione recente di Xcode con supporto iOS 17 o successivo;
+- un simulatore iOS o dispositivo fisico.
 
-### Quick start
+### Avvio
 
-1. Aprire `ios/Fyre/Fyre.xcodeproj` in Xcode.
-2. Selezionare lo schema `Fyre`.
-3. Selezionare un simulatore o un dispositivo.
-4. Avviare l'app con Run.
+Dalla root del repository:
 
-### Architettura
+```sh
+cd ios/Fyre
+cp Fyre/Config.example.plist Fyre/Config.plist
+open Fyre.xcodeproj
+```
 
-- `FyreApp.swift`: bootstrap dell'app, tema, notifiche e servizi.
-- `ContentView.swift`: router principale per autenticazione, setup profilo e app autenticata.
-- `MainTabView.swift`: navigazione principale a tab.
-- `UserStore.swift`: stato utente, eventi e logica principale.
-- `data/AppServices.swift`: registro dei servizi applicativi.
-- `data/AppwriteBackendAPI.swift`: adapter verso il backend Appwrite.
-- `Auth/AppwriteService.swift`: integrazione Appwrite per auth, profili ed eventi.
-- `Auth/AppwriteRealtimeService.swift`: sottoscrizioni realtime per inbox, chat e notifiche.
+Sostituire i placeholder obbligatori delle risorse pubbliche Appwrite. Il bucket degli allegati, la funzione amministrativa e i domini diretti delle funzioni possono restare vuoti quando le relative funzionalità non vengono usate. Selezionare lo schema condiviso `Fyre` e un simulatore o dispositivo.
+
+`Config.plist` è ignorato da Git ma incluso nel bundle. Deve contenere soltanto configurazione pubblica del client.
+
+Senza il file locale l'app segnala il backend come non disponibile senza interrompere l'avvio. I test unitari usano una configurazione sintetica e non richiedono credenziali live.
+
+### Struttura
+
+- [`Fyre/`](Fyre/): applicazione e UI;
+- [`Fyre/Auth/`](Fyre/Auth/): autenticazione, Appwrite e realtime;
+- [`Fyre/data/`](Fyre/data/): contratti e servizi;
+- [`FyreTests/`](FyreTests/): test unitari.
 
 ### Test
 
-Da Xcode si possono eseguire:
+Eseguire il target `FyreTests` dallo schema condiviso `Fyre`. La [CI](../../.github/workflows/ci.yml) seleziona un simulatore disponibile e usa la normale firma ad-hoc necessaria a verificare il Keychain.
 
-- unit test in `ios/Fyre/FyreTests`;
-- UI test in `ios/Fyre/FyreUITests`.
-
-## English
-
-This folder contains the Fyre iOS app, built with SwiftUI.
-
-### Requirements
-
-- A recent Xcode version with iOS 17+ support.
-- iOS Simulator or a physical device.
-- Appwrite configuration in `ios/Fyre/Fyre/Config.plist` to use the real backend.
-
-### Quick start
-
-1. Open `ios/Fyre/Fyre.xcodeproj` in Xcode.
-2. Select the `Fyre` scheme.
-3. Select a simulator or device.
-4. Run the app.
-
-### Architecture
-
-- `FyreApp.swift`: app bootstrap, theme, notifications, and services.
-- `ContentView.swift`: root router for authentication, profile setup, and authenticated app state.
-- `MainTabView.swift`: main tab navigation.
-- `UserStore.swift`: user state, event state, and main app logic.
-- `data/AppServices.swift`: app-wide service registry.
-- `data/AppwriteBackendAPI.swift`: adapter for the Appwrite backend.
-- `Auth/AppwriteService.swift`: Appwrite integration for auth, profiles, and events.
-- `Auth/AppwriteRealtimeService.swift`: realtime subscriptions for inbox, chat, and notifications.
-
-### Tests
-
-From Xcode, run:
-
-- unit tests in `ios/Fyre/FyreTests`;
-- UI tests in `ios/Fyre/FyreUITests`.
+Consultare anche il [README principale](../../README.md#italiano) e la [configurazione Appwrite](../../appwrite/README.md#italiano).

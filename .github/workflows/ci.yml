@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  javascript:
+    name: Web, shared contracts and functions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Check web application
+        run: npm run check
+        working-directory: web
+
+      - name: Validate Appwrite manifests
+        run: ruby scripts/prepare-appwrite-config.rb --check .env.example
+
+      - name: Test Appwrite endpoint validation
+        run: ruby scripts/secure_appwrite_endpoint.test.rb
+
+      - name: Test shared contracts
+        run: node --test shared/contracts/index.test.mjs
+
+      - name: Test Appwrite functions
+        run: npm --prefix functions test
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android/Fyre
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - name: Run unit tests, lint and release build
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease
+
+  ios:
+    name: iOS
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+          if [[ -z "$simulator_id" ]]; then
+            echo "No available iPhone simulator was found." >&2
+            exit 1
+          fi
+
+          xcodebuild test \
+            -project ios/Fyre/Fyre.xcodeproj \
+            -scheme Fyre \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -only-testing:FyreTests

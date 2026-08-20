@@ -1,59 +1,85 @@
-# Fyre Appwrite Functions
+# Fyre Appwrite functions
+
+The functions centralize rules that must not be trusted to the three clients.
+
+## Inventory
+
+| Function | Responsibility |
+| --- | --- |
+| `manageprofile` | Profile bound to the verified account |
+| `discoverprofiles` | Filtered discovery and temporary avatar URLs |
+| `recordswipe` | Transactional swipes, matches, and relationship state |
+| `createorgetthread` | Pair-thread verification or creation |
+| `sendmessage` | Validated messages, replies, and attachments |
+| `managerelationship` | Archive, unmatch, and block actions |
+| `registerforevent` | Registration or waitlist entry |
+| `canceleventregistration` | Cancellation and waitlist promotion |
+| `manageeventadmin` | Events and participants with consistent ACLs |
+
+Runtime, minimum scopes, variables, authenticated execution, and `logging: false` are defined in [`appwrite/functions.json`](../appwrite/functions.json). All functions use Node.js 22.
+
+## Security rules
+
+- Every function verifies `x-appwrite-user-jwt` through Account before trusting identity. Client-supplied identity fields are not authoritative.
+- Server operations accept only Appwrite's injected `x-appwrite-key`; there are no static API-key fallbacks.
+- Avatars remain owner-only. Authorized functions issue short-lived File Token URLs after access checks and never log them.
+- `sendmessage` accepts sender-owned files from the attachments bucket, reads metadata from Appwrite, and confines replies to the same thread.
+
+## Pagination
+
+- `discoverprofiles` accepts `profileCursor`, scans stable windows of at most 400 profiles, returns at most 40 results, and provides `nextCursor`.
+- `manageeventadmin` accepts `participantLimit` from 1 to 100 and `participantCursor`. Mutations fail closed above the 1,000-active-registration operational bound.
+
+## Tests and deployment
+
+From the repository root:
+
+```sh
+npm --prefix functions test
+```
+
+Use the project-validated deployment command documented in the [Appwrite guide](../appwrite/README.md#deployment), rather than configuring functions individually.
+
+---
 
 ## Italiano
 
-Questa cartella contiene le funzioni Appwrite usate dal backend di Fyre. Le funzioni centralizzano la logica più delicata del progetto, in modo che i client iOS, Android e web condividano le stesse regole.
+Le funzioni centralizzano le regole che non possono essere affidate ai tre client.
 
-### Funzioni disponibili
+### Inventario
 
-- `discoverprofiles`: restituisce profili compatibili per la discovery.
-- `recordswipe`: registra like o skip e crea un match quando l'interesse è reciproco.
-- `createorgetthread`: crea o recupera una conversazione tra utenti.
-- `sendmessage`: invia messaggi e aggiorna la preview del thread.
-- `managerelationship`: gestisce archiviazione, unmatch o blocco.
-- `registerforevent`: registra l'utente a un evento o alla lista d'attesa.
-- `canceleventregistration`: annulla un'iscrizione e promuove utenti dalla lista d'attesa quando possibile.
-- `manageeventadmin`: espone le operazioni amministrative per eventi e partecipanti.
+| Funzione | Responsabilità |
+| --- | --- |
+| `manageprofile` | Profilo legato all'account verificato |
+| `discoverprofiles` | Discovery filtrata e URL temporanei degli avatar |
+| `recordswipe` | Swipe, match e relazioni transazionali |
+| `createorgetthread` | Verifica o creazione del thread della coppia |
+| `sendmessage` | Messaggi, risposte e allegati convalidati |
+| `managerelationship` | Archiviazione, unmatch e blocco |
+| `registerforevent` | Iscrizione o ingresso in lista d'attesa |
+| `canceleventregistration` | Annullamento e promozione dalla lista d'attesa |
+| `manageeventadmin` | Eventi e partecipanti con ACL coerenti |
 
-### Quick start
+Runtime, scope minimi, variabili, esecuzione autenticata e `logging: false` sono definiti in [`appwrite/functions.json`](../appwrite/functions.json). Tutte le funzioni usano Node.js 22.
 
-1. Entrare nella cartella della funzione interessata:
+### Regole di sicurezza
 
-   ```bash
-   cd functions/discoverprofiles
-   ```
+- Ogni funzione verifica `x-appwrite-user-jwt` tramite Account prima di fidarsi dell'identità. I campi identità inviati dal client non sono autorevoli.
+- Le operazioni server accettano soltanto `x-appwrite-key`, iniettata da Appwrite; non esistono fallback con API key statiche.
+- Gli avatar restano accessibili soltanto al proprietario. Le funzioni autorizzate generano URL File Token brevi dopo i controlli e non li registrano nei log.
+- `sendmessage` accetta file posseduti dal mittente nel bucket degli allegati, legge i metadati da Appwrite e limita le risposte allo stesso thread.
 
-2. Verificare che il runtime Appwrite usi Node.js con moduli ES.
+### Paginazione
 
-3. Configurare le variabili d'ambiente richieste dalla funzione.
+- `discoverprofiles` accetta `profileCursor`, scansiona finestre stabili di massimo 400 profili, restituisce al massimo 40 risultati e fornisce `nextCursor`.
+- `manageeventadmin` accetta `participantLimit` da 1 a 100 e `participantCursor`. Le mutazioni falliscono in modo chiuso oltre il limite operativo di 1.000 iscrizioni attive.
 
-4. Distribuire la funzione tramite Appwrite Console o Appwrite CLI.
+### Test e distribuzione
 
-## English
+Dalla root del repository:
 
-This folder contains the Appwrite functions used by the Fyre backend. The functions centralize the most sensitive project logic so the iOS, Android, and web clients share the same application rules.
+```sh
+npm --prefix functions test
+```
 
-### Available functions
-
-- `discoverprofiles`: returns compatible profiles for discovery.
-- `recordswipe`: records like or skip decisions and creates a match when interest is mutual.
-- `createorgetthread`: creates or retrieves a conversation between users.
-- `sendmessage`: sends messages and updates the thread preview.
-- `managerelationship`: manages archive, unmatch, or block actions.
-- `registerforevent`: registers the user for an event or waitlist.
-- `canceleventregistration`: cancels a registration and promotes waitlisted users when possible.
-- `manageeventadmin`: exposes admin operations for events and participants.
-
-### Quick start
-
-1. Go to the target function folder:
-
-   ```bash
-   cd functions/discoverprofiles
-   ```
-
-2. Make sure the Appwrite runtime uses Node.js with ES modules.
-
-3. Configure the environment variables required by the function.
-
-4. Deploy the function through the Appwrite Console or Appwrite CLI.
+Usare il comando con verifica del progetto documentato nella [guida Appwrite](../appwrite/README.md#distribuzione), invece di configurare manualmente le singole funzioni.

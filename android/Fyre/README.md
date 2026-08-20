@@ -1,119 +1,73 @@
 # Fyre Android
 
+Kotlin app built with Jetpack Compose.
+
+## Requirements
+
+- JDK 17;
+- Android Studio and the Android SDK required by the project;
+- an emulator or physical device to run the app.
+
+## Setup
+
+From the repository root:
+
+```sh
+cd android/Fyre
+cp local.properties.example local.properties
+./gradlew assembleDebug
+```
+
+Android Studio may add `sdk.dir`. Fill in the public Appwrite resource values and set `APPWRITE_BACKEND_ENABLED=true`, optional direct-function domains may stay empty. The same values can be supplied through Gradle properties or environment variables.
+
+`local.properties` is ignored by Git, but its Appwrite values are embedded in the app.
+
+Profile, discovery, swipe, and relationship operations use authenticated functions, there is no client-side fallback.
+
+Open `android/Fyre` in Android Studio and run the debug variant. The CI release build is unsigned.
+
+## Checks
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleRelease
+```
+
+Dependencies and versions are defined in [`gradle/libs.versions.toml`](gradle/libs.versions.toml) and [`app/build.gradle.kts`](app/build.gradle.kts). See the [main README](../../README.md), [Appwrite setup](../../appwrite/README.md), and [CI workflow](../../.github/workflows/ci.yml).
+
+---
+
 ## Italiano
 
-Questa cartella contiene l'app Android di Fyre, sviluppata in Kotlin con Jetpack Compose.
+App Kotlin costruita con Jetpack Compose.
 
 ### Requisiti
 
-- Android Studio recente.
-- JDK compatibile con il progetto Gradle.
-- Android SDK configurato.
-- Emulatore o dispositivo Android.
-- Configurazione Appwrite pubblica già inclusa nel progetto.
+- JDK 17;
+- Android Studio e l'Android SDK richiesto dal progetto;
+- un emulatore o dispositivo fisico per eseguire l'app.
 
-### Quick start
+### Avvio
 
-1. Entrare nella cartella del progetto:
+Dalla root del repository:
 
-   ```bash
-   cd android/Fyre
-   ```
+```sh
+cd android/Fyre
+cp local.properties.example local.properties
+./gradlew assembleDebug
+```
 
-2. Compilare la build release:
+Android Studio può aggiungere `sdk.dir`. Compilare i valori pubblici delle risorse Appwrite e impostare `APPWRITE_BACKEND_ENABLED=true`; i domini diretti opzionali delle funzioni possono restare vuoti. Gli stessi valori possono provenire da proprietà Gradle o variabili d'ambiente.
 
-   ```bash
-   ./gradlew assembleRelease
-   ```
+`local.properties` è ignorato da Git, ma i valori Appwrite vengono inclusi nell'app.
 
-3. Per eseguire i test unitari:
+Profilo, discovery, swipe e relazioni usano funzioni autenticate, non esiste un fallback client.
 
-   ```bash
-   ./gradlew testDebugUnitTest
-   ```
+Aprire `android/Fyre` in Android Studio e avviare la variante debug. La release prodotta dalla CI rimane non firmata finché non viene configurato il signing del distributore.
 
-4. Per avviare l'app, aprire `android/Fyre` in Android Studio e usare Run su un emulatore o dispositivo.
+### Verifiche
 
-### Librerie esterne
+```sh
+./gradlew testDebugUnitTest lintDebug assembleRelease
+```
 
-Le librerie esterne sono gestite da Gradle tramite `gradle/libs.versions.toml` e `app/build.gradle.kts`. Le principali sono:
-
-- AndroidX Core, Lifecycle, Activity Compose e Navigation Compose.
-- Jetpack Compose UI, Material 3, tool preview e test.
-- DataStore Preferences per persistenza locale.
-- Coil per caricamento immagini.
-- Gson per serializzazione JSON.
-- OkHttp per chiamate REST verso Appwrite.
-- Accompanist Permissions per permessi runtime.
-- DocumentFile per gestione URI/documenti.
-- Media3 per audio e anteprime vocali.
-- WorkManager per promemoria e notifiche locali programmate.
-- JUnit, AndroidX Test, Espresso e Coroutines Test per i test.
-
-### Struttura principale
-
-- `app/src/main/java/com/example/fyre/ui`: flussi UI principali.
-- `app/src/main/java/com/example/fyre/discover`: discovery e profili compatibili.
-- `app/src/main/java/com/example/fyre/messages`: inbox, thread e messaggistica.
-- `app/src/main/java/com/example/fyre/events`: eventi e iscrizioni.
-- `app/src/main/java/com/example/fyre/account`: account e preferenze.
-- `app/src/main/java/com/example/fyre/data`: repository, configurazione Appwrite e persistenza locale.
-
-## English
-
-This folder contains the Fyre Android app, built with Kotlin and Jetpack Compose.
-
-### Requirements
-
-- A recent Android Studio version.
-- A JDK compatible with the Gradle project.
-- Android SDK configured.
-- Android emulator or physical device.
-- Public Appwrite configuration already included in the project.
-
-### Quick start
-
-1. Go to the Android project folder:
-
-   ```bash
-   cd android/Fyre
-   ```
-
-2. Build the release version:
-
-   ```bash
-   ./gradlew assembleRelease
-   ```
-
-3. Run unit tests:
-
-   ```bash
-   ./gradlew testDebugUnitTest
-   ```
-
-4. To run the app, open `android/Fyre` in Android Studio and use Run on an emulator or device.
-
-### External Libraries
-
-External libraries are managed by Gradle through `gradle/libs.versions.toml` and `app/build.gradle.kts`. The main ones are:
-
-- AndroidX Core, Lifecycle, Activity Compose, and Navigation Compose.
-- Jetpack Compose UI, Material 3, preview tooling, and tests.
-- DataStore Preferences for local persistence.
-- Coil for image loading.
-- Gson for JSON serialization.
-- OkHttp for REST calls to Appwrite.
-- Accompanist Permissions for runtime permissions.
-- DocumentFile for URI and document handling.
-- Media3 for audio and voice note previews.
-- WorkManager for reminders and scheduled local notifications.
-- JUnit, AndroidX Test, Espresso, and Coroutines Test for testing.
-
-### Main Structure
-
-- `app/src/main/java/com/example/fyre/ui`: main UI flows.
-- `app/src/main/java/com/example/fyre/discover`: discovery and compatible profiles.
-- `app/src/main/java/com/example/fyre/messages`: inbox, threads, and messaging.
-- `app/src/main/java/com/example/fyre/events`: events and registrations.
-- `app/src/main/java/com/example/fyre/account`: account and preferences.
-- `app/src/main/java/com/example/fyre/data`: repositories, Appwrite configuration, and local persistence.
+Dipendenze e versioni sono definite in [`gradle/libs.versions.toml`](gradle/libs.versions.toml) e [`app/build.gradle.kts`](app/build.gradle.kts). Consultare il [README principale](../../README.md#italiano), la [configurazione Appwrite](../../appwrite/README.md#italiano) e la [CI](../../.github/workflows/ci.yml).
