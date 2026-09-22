@@ -58,5 +58,7 @@
 	<string>&lt;APPWRITE_DISCOVER_PROFILES_FUNCTION_ID&gt;</string>
 	<key>APPWRITE_DISCOVER_PROFILES_FUNCTION_DOMAIN</key>
 	<string></string>
+	<key>APPWRITE_PUSH_PROVIDER_ID</key>
+	<string></string>
 </dict>
 </plist>

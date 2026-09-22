@@ -1440,6 +1440,7 @@ struct AccountView: View {
     private func performLogout() async {
         guard !isLoggingOut else { return }
         isLoggingOut = true
+        await PushNotificationCoordinator.shared.unregister()
         await store.logOut()
         isLoggingOut = false
     }

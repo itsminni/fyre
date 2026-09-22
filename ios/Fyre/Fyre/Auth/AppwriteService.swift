@@ -404,6 +404,36 @@ actor AppwriteService {
         )
     }
 
+    func upsertPushTarget(targetId: String, identifier: String, providerId: String) async throws {
+        do {
+            _ = try await sendRequest(
+                method: "POST",
+                pathComponents: ["account", "push-targets"],
+                jsonBody: [
+                    "targetId": targetId,
+                    "identifier": identifier,
+                    "providerId": providerId
+                ],
+                expectedStatusCodes: [201]
+            )
+        } catch let error as AppwriteServiceError where error.statusCode == 409 {
+            _ = try await sendRequest(
+                method: "PATCH",
+                pathComponents: ["account", "push-targets", targetId],
+                jsonBody: ["identifier": identifier],
+                expectedStatusCodes: [200]
+            )
+        }
+    }
+
+    func deletePushTarget(targetId: String) async throws {
+        _ = try await sendRequest(
+            method: "DELETE",
+            pathComponents: ["account", "push-targets", targetId],
+            expectedStatusCodes: [204]
+        )
+    }
+
     func clearLocalSession() {
         clearCookies()
     }

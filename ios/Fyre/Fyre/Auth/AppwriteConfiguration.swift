@@ -28,6 +28,7 @@ struct AppwriteConfiguration: Sendable {
     let recordSwipeFunctionDomain: URL?
     let discoverProfilesFunctionDomain: URL?
     let eventAdminFunctionDomain: URL?
+    let pushProviderId: String?
     let endpointURL: URL
 
     static func load(bundle: Bundle = .main) throws -> AppwriteConfiguration {
@@ -74,6 +75,7 @@ struct AppwriteConfiguration: Sendable {
         let recordSwipeFunctionDomain = try optionalURLValue(forKey: "APPWRITE_RECORD_SWIPE_FUNCTION_DOMAIN", in: dictionary)
         let discoverProfilesFunctionDomain = try optionalURLValue(forKey: "APPWRITE_DISCOVER_PROFILES_FUNCTION_DOMAIN", in: dictionary)
         let eventAdminFunctionDomain = try optionalURLValue(forKey: "APPWRITE_EVENT_ADMIN_FUNCTION_DOMAIN", in: dictionary)
+        let pushProviderId = optionalStringValue(forKey: "APPWRITE_PUSH_PROVIDER_ID", in: dictionary)
 
         guard let endpointURL = secureURL(from: publicEndpoint, allowMissingScheme: false) else {
             throw AppwriteConfigurationError.invalidEndpoint(publicEndpoint)
@@ -107,6 +109,7 @@ struct AppwriteConfiguration: Sendable {
             recordSwipeFunctionDomain: recordSwipeFunctionDomain,
             discoverProfilesFunctionDomain: discoverProfilesFunctionDomain,
             eventAdminFunctionDomain: eventAdminFunctionDomain,
+            pushProviderId: pushProviderId,
             endpointURL: endpointURL
         )
     }

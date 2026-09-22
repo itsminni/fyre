@@ -6,9 +6,11 @@
 //
 
 import SwiftUI
+import UIKit
 
 @main
 struct FyreApp: App {
+    @UIApplicationDelegateAdaptor(FyreAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("settings_theme_mode") private var themeMode = "system"
     @AppStorage("settings_notifications_enabled") private var notificationsEnabled = true
@@ -19,6 +21,7 @@ struct FyreApp: App {
     @StateObject private var router = AppRouter()
     @State private var services = AppServices.shared
     @State private var notificationCoordinator = LocalNotificationCoordinator.shared
+    @State private var pushNotificationCoordinator = PushNotificationCoordinator.shared
     @State private var presenceHeartbeatTask: Task<Void, Never>?
 
     init() {
@@ -42,6 +45,9 @@ struct FyreApp: App {
                         currentUserId: store.currentUser?.appwriteUserId,
                         upcomingEvents: store.currentUserUpcomingEventHistory
                     )
+                }
+                .task(id: pushRefreshKey) {
+                    await pushNotificationCoordinator.sync(currentUserId: store.currentUser?.appwriteUserId)
                 }
         }
     }
@@ -92,5 +98,34 @@ struct FyreApp: App {
             eventReminderNotificationsEnabled.description,
             eventSignature
         ].joined(separator: "|")
+    }
+
+    private var pushRefreshKey: String {
+        store.currentUser?.appwriteUserId ?? "guest"
+    }
+}
+
+final class FyreAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        _ = launchOptions
+        application.registerForRemoteNotifications()
+        return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        _ = application
+        Task { @MainActor in
+            PushNotificationCoordinator.shared.updateDeviceToken(deviceToken)
+        }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        _ = application
+        Task { @MainActor in
+            PushNotificationCoordinator.shared.recordRegistrationFailure(error)
+        }
     }
 }
