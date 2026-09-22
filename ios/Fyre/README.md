@@ -4,8 +4,10 @@ SwiftUI app with an iOS 17 deployment target.
 
 ## Requirements
 
-- a recent Xcode release with iOS 17 or newer support;
+- Xcode 26.2 or newer, including the iOS 26 SDK;
 - an iOS simulator or physical device.
+
+The app targets iOS 17, but building it requires the newer SDK for the conditionally enabled iOS 26 APIs. The shared scheme uses Debug for Run and Release for Archive and Profile.
 
 ## Setup
 
@@ -44,8 +46,10 @@ App SwiftUI con deployment target iOS 17.
 
 ### Requisiti
 
-- una versione recente di Xcode con supporto iOS 17 o successivo;
+- Xcode 26.2 o successivo, con SDK iOS 26;
 - un simulatore iOS o dispositivo fisico.
+
+L'app mantiene iOS 17 come deployment target, ma per compilarla occorre il nuovo SDK per le API iOS 26 abilitate condizionalmente. Lo schema condiviso usa Debug per Run e Release per Archive e Profile.
 
 ### Avvio
 

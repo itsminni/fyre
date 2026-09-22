@@ -4,7 +4,7 @@ React and TypeScript client built with Vite.
 
 ## Requirements
 
-- Node.js 22.12 or newer;
+- Node.js 22.13+ (22.x), or Node.js 24 or newer;
 - npm; the lockfile is the reproducible dependency source.
 
 ## Setup
@@ -18,7 +18,7 @@ npm ci
 npm run dev
 ```
 
-Replace every required placeholder in `.env.local`. The app rejects a missing or invalid configuration.
+Replace every required placeholder in `.env.local`. The app shows an explanatory screen when configuration is missing or invalid; local development also shows setup instructions.
 
 City search uses Photon.
 
@@ -40,7 +40,7 @@ Client React e TypeScript costruito con Vite.
 
 ### Requisiti
 
-- Node.js 22.12 o successivo;
+- Node.js 22.13+ (serie 22), oppure Node.js 24 o successivo;
 - npm; il lockfile è la fonte riproducibile delle dipendenze.
 
 ### Avvio
@@ -54,7 +54,7 @@ npm ci
 npm run dev
 ```
 
-Sostituire tutti i placeholder obbligatori in `.env.local`. L'app rifiuta una configurazione mancante o non valida.
+Sostituire tutti i placeholder obbligatori in `.env.local`. L'app mostra una schermata esplicativa se la configurazione è mancante o non valida; in sviluppo locale mostra anche le istruzioni di configurazione.
 
 La ricerca delle città usa Photon.
 

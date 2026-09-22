@@ -90,12 +90,12 @@ export function loadPersistedState(): PersistedAppState {
     return fallbackState;
   }
 
-  const rawValue = window.localStorage.getItem(STORAGE_KEY);
-  if (!rawValue) {
-    return fallbackState;
-  }
-
   try {
+    const rawValue = window.localStorage.getItem(STORAGE_KEY);
+    if (!rawValue) {
+      return fallbackState;
+    }
+
     const parsed: unknown = JSON.parse(rawValue);
     if (
       !isRecord(parsed) ||
@@ -432,5 +432,9 @@ export function persistState(value: PersistedAppState): void {
     state: withoutSensitivePersistedData(value)
   };
 
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Preferences remain available in memory when storage is blocked or full.
+  }
 }

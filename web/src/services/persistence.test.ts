@@ -22,6 +22,32 @@ afterEach(() => {
 });
 
 describe('persisted session privacy', () => {
+  it('falls back to defaults when access to browser storage is denied', () => {
+    vi.stubGlobal('window', {
+      get localStorage() {
+        throw new Error('Storage access denied');
+      }
+    });
+
+    expect(loadPersistedState()).toEqual(createDefaultPersistedState());
+    expect(() => persistState(createDefaultPersistedState())).not.toThrow();
+  });
+
+  it('keeps in-memory preferences when a storage write fails', () => {
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: () => { throw new Error('Storage read failed'); },
+        setItem: () => { throw new Error('Storage quota exceeded'); }
+      }
+    });
+    const state = createDefaultPersistedState();
+    state.settings = { ...state.settings, language: 'en' };
+
+    expect(loadPersistedState()).toEqual(createDefaultPersistedState());
+    expect(() => persistState(state)).not.toThrow();
+    expect(state.settings.language).toBe('en');
+  });
+
   it('removes account, chat, and notification data while preserving preferences', () => {
     const state = createDefaultPersistedState();
     state.users = [{
