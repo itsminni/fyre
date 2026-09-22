@@ -37,7 +37,7 @@ final class PushNotificationCoordinator {
         let signature = "\(targetId):\(identifier):\(providerId)"
         guard signature != registeredSignature else { return }
 
-        guard let service = ensureAppwriteService(configuration: configuration) else { return }
+        let service = ensureAppwriteService(configuration: configuration)
         do {
             try await service.upsertPushTarget(
                 targetId: targetId,
@@ -54,7 +54,7 @@ final class PushNotificationCoordinator {
 
     func unregister() async {
         guard let data = try? SecurePersistenceStore.data(forKey: Self.targetIdKey),
-              let targetId = data.flatMap({ String(data: $0, encoding: .utf8) }),
+              let targetId = String(data: data, encoding: .utf8),
               let service = appwriteService else {
             return
         }
@@ -75,7 +75,7 @@ final class PushNotificationCoordinator {
 
     private func loadOrCreateTargetId() -> String {
         if let data = try? SecurePersistenceStore.data(forKey: Self.targetIdKey),
-           let targetId = data.flatMap({ String(data: $0, encoding: .utf8) }),
+           let targetId = String(data: data, encoding: .utf8),
            !targetId.isEmpty {
             return targetId
         }
