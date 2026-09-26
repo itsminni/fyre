@@ -3,6 +3,8 @@
 
 # Private local documents
 docs/
+/Fyre.pdf
+/fyre.pdf
 
 # Environment and local secrets
 .env

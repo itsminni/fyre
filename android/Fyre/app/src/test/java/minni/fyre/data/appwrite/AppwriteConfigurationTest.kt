@@ -1,10 +1,27 @@
 package minni.fyre.data.appwrite
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppwriteConfigurationTest {
+    @Test
+    fun `invalid backend configuration becomes unavailable without crashing startup`() {
+        assertNull(AppwriteConfiguration.loadOrNull {
+            throw AppwriteConfigurationException("Incomplete configuration")
+        })
+        assertNull(AppwriteConfiguration.loadOrNull { null })
+    }
+
+    @Test
+    fun `unexpected initialization errors are not hidden`() {
+        assertThrows(IllegalStateException::class.java) {
+            AppwriteConfiguration.loadOrNull { error("Unexpected failure") }
+        }
+    }
+
     @Test
     fun `remote endpoints require HTTPS`() {
         assertTrue(AppwriteConfiguration.isSecureEndpoint("https://example.test/v1"))

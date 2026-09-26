@@ -32,7 +32,7 @@ class AppGraph(
     private val backendUnavailableMessage =
         "Configurazione Appwrite incompleta: l'app Android richiede il database."
 
-    val appwriteConfiguration: AppwriteConfiguration? = AppwriteConfiguration.fromBuildConfig()
+    val appwriteConfiguration: AppwriteConfiguration? = AppwriteConfiguration.loadOrNull()
     private val appwriteGateway: AppwriteGateway? = appwriteConfiguration
         ?.let { configuration -> AppwriteGateway(appContext, configuration) }
     private val localRecentChatStore = LocalRecentChatStore()

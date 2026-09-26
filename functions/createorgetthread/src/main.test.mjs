@@ -96,11 +96,14 @@ test("relationship and participant validation rejects structural spoofing", () =
   ], threadId, userIds), false);
 });
 
-test("a canonical relationship reuses only the stable pair thread", async () => {
+test("reusing the stable pair thread preserves concurrent conversation changes", async () => {
   await withEnvironment(async () => {
     const userIds = ["user-a", "user-b"];
     const relationshipId = stableRelationshipRowId(userIds);
     const threadId = stableThreadRowId(userIds);
+    const thread = {
+      $id: threadId, threadId, createdByUserId: "user-a", subject: "Match", status: "active"
+    };
     const participants = userIds.map((userId) => ({
       $id: stableParticipantRowId(threadId, userId),
       threadId,
@@ -133,23 +136,29 @@ test("a canonical relationship reuses only the stable pair thread", async () => 
         return response(200, { rows: participants });
       }
       if (method === "GET" && url.pathname.endsWith(`/tables/threads/rows/${threadId}`)) {
-        return response(200, {
-          $id: threadId,
-          threadId,
-          createdByUserId: "user-a",
-          subject: "Match",
-          status: "active"
+        const snapshot = { ...thread };
+        Object.assign(thread, {
+          lastMessageText: "New message", lastMessageAt: "2030-01-01T12:00:00.000Z"
         });
+        return response(200, snapshot);
       }
       if (method === "PATCH" && url.pathname.includes("/tables/threads/rows/")) {
-        return response(200, { $id: threadId });
+        Object.assign(thread, body.data);
+        return response(200, { ...thread });
       }
       if (method === "GET" && url.pathname.includes("/tables/participants/rows/")) {
         const participant = participants.find((row) => url.pathname.endsWith(`/rows/${row.$id}`));
-        return participant ? response(200, participant) : response(404, { message: "Not found" });
+        if (!participant) return response(404, { message: "Not found" });
+        const snapshot = { ...participant };
+        Object.assign(participant, {
+          pinned: true, notificationsEnabled: false, lastReadAt: "2030-01-01T12:00:00.000Z"
+        });
+        return response(200, snapshot);
       }
       if (method === "PATCH" && url.pathname.includes("/tables/participants/rows/")) {
-        return response(200, { $id: url.pathname.split("/").at(-1) });
+        const participant = participants.find((row) => url.pathname.endsWith(`/rows/${row.$id}`));
+        Object.assign(participant, body.data);
+        return response(200, { ...participant });
       }
       if (method === "GET" && url.pathname.endsWith("/tables/profiles/rows/user-b")) {
         return response(200, { $id: "user-b", userId: "user-b", firstName: "Bea" });
@@ -161,6 +170,13 @@ test("a canonical relationship reuses only the stable pair thread", async () => 
     assert.equal(result.status, 200);
     assert.equal(result.payload.threadId, threadId);
     assert.equal(requests.some((request) => request.method === "POST"), false);
+    assert.equal(thread.lastMessageText, "New message");
+    assert.equal(thread.lastMessageAt, "2030-01-01T12:00:00.000Z");
+    for (const participant of participants) {
+      assert.equal(participant.pinned, true);
+      assert.equal(participant.notificationsEnabled, false);
+      assert.equal(participant.lastReadAt, "2030-01-01T12:00:00.000Z");
+    }
   });
 });
 

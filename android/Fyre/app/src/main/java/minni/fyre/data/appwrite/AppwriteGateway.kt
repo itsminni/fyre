@@ -182,8 +182,7 @@ class AppwriteGateway(
     private suspend fun uploadImageToAvatarBucket(source: String, fileNamePrefix: String): String? {
         val ownerUserId = fetchCurrentAccountId(required = true)
             ?: throw AppwriteConfigurationException("Sessione backend non valida")
-        val bytes = readBinaryPayload(source)
-        if (bytes.isEmpty()) return null
+        val bytes = readBinaryPayload(source, MAX_AVATAR_UPLOAD_BYTES)
 
         val mimeType = resolveMimeType(source, fallback = "image/jpeg")
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "jpg"
@@ -215,7 +214,7 @@ class AppwriteGateway(
 
         val permissions = ownerOnlyFilePermissions(currentUserId)
 
-        val bytes = readBinaryPayload(localUri)
+        val bytes = readBinaryPayload(localUri, MAX_CHAT_UPLOAD_BYTES)
         val fileId = randomIdentifier()
         val safeName = displayName.ifBlank { "attachment_${System.currentTimeMillis()}" }
 
@@ -236,30 +235,15 @@ class AppwriteGateway(
         )
     }
 
-    suspend fun readBinaryPayload(source: String): ByteArray = withContext(Dispatchers.IO) {
-        val bytesFromUri = runCatching {
-            val parsed = Uri.parse(source)
-            if (parsed.scheme == "content" || parsed.scheme == "file") {
-                contentResolver.openInputStream(parsed)?.use { it.readBytes() }
-            } else {
-                null
+    private suspend fun readBinaryPayload(source: String, maximumBytes: Int): ByteArray = withContext(Dispatchers.IO) {
+        readUploadPayload(maximumBytes) {
+            val uri = Uri.parse(source)
+            when (uri.scheme) {
+                "content", "file" -> contentResolver.openInputStream(uri)
+                null -> File(source).inputStream()
+                else -> throw AppwriteValidationException("Origine del file non supportata")
             }
-        }.getOrNull()
-
-        if (bytesFromUri != null && bytesFromUri.isNotEmpty()) {
-            return@withContext bytesFromUri
         }
-
-        val bytesFromFile = runCatching {
-            val file = File(source)
-            if (file.exists()) file.readBytes() else null
-        }.getOrNull()
-
-        if (bytesFromFile != null && bytesFromFile.isNotEmpty()) {
-            return@withContext bytesFromFile
-        }
-
-        source.toByteArray()
     }
 
     suspend fun downloadPrivateMedia(source: String): ByteArray {

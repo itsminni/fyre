@@ -253,7 +253,7 @@ async function createOrReuseThreadRow(config, threadId, currentUserId, permissio
       config,
       config.threadsTableId,
       threadId,
-      threadPayloadFromExisting(existingThread, threadId, currentUserId),
+      { threadId, subject: DEFAULT_MATCH_SUBJECT },
       permissions
     );
     return threadId;
@@ -286,7 +286,7 @@ async function ensureThreadParticipant(config, threadId, userId, participantIds)
       config,
       config.threadParticipantsTableId,
       participantRowId,
-      participantPayloadFromExisting(existingParticipant, threadId, userId),
+      { threadId, userId, role: "participant" },
       permissions
     );
     return participantRowId;

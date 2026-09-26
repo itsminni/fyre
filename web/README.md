@@ -9,7 +9,7 @@ React and TypeScript client built with Vite.
 
 ## Setup
 
-From the repository root:
+First [configure your own Appwrite backend](../appwrite/README.md#one-time-appwrite-setup). Then, from the repository root:
 
 ```sh
 cd web
@@ -45,7 +45,7 @@ Client React e TypeScript costruito con Vite.
 
 ### Avvio
 
-Dalla root del repository:
+Prima [configurare un proprio backend Appwrite](../appwrite/README.md#configurazione-iniziale-su-appwrite). Poi, dalla root del repository:
 
 ```sh
 cd web

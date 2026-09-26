@@ -34,6 +34,14 @@ data class AppwriteConfiguration(
     val eventAdminFunctionDomain: String?
 ) {
     companion object {
+        internal fun loadOrNull(
+            loader: () -> AppwriteConfiguration? = { fromBuildConfig() }
+        ): AppwriteConfiguration? = try {
+            loader()
+        } catch (_: AppwriteConfigurationException) {
+            null
+        }
+
         fun fromBuildConfig(): AppwriteConfiguration? {
             if (!BuildConfig.APPWRITE_BACKEND_ENABLED) {
                 return null

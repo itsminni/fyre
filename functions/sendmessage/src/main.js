@@ -75,25 +75,30 @@ export default async ({ req, res, error }) => {
       if (!update) {
         return res.json({ message: "Invalid participant update" }, 400);
       }
-      const now = new Date().toISOString();
-      const lastReadAt = update.markRead ? now : (asString(currentParticipant.lastReadAt) ?? null);
-      const notificationsEnabled = update.notificationsEnabled ?? (currentParticipant.notificationsEnabled !== false);
-      const pinned = update.pinned ?? (currentParticipant.pinned === true);
-      await updateRow(config, config.threadParticipantsTableId, currentParticipant.$id, {
+      const data = {
         threadId,
         userId: currentUserId,
-        role: "participant",
-        lastReadAt,
-        muted: currentParticipant.muted === true,
-        pinned,
-        notificationsEnabled
-      }, sharedPermissions);
+        role: "participant"
+      };
+      // Patch only the requested fields; another request may change the others.
+      if (update.markRead) {
+        data.lastReadAt = new Date().toISOString();
+      }
+      if (update.notificationsEnabled !== undefined) {
+        data.notificationsEnabled = update.notificationsEnabled;
+      }
+      if (update.pinned !== undefined) {
+        data.pinned = update.pinned;
+      }
+      const participant = await updateRow(
+        config, config.threadParticipantsTableId, currentParticipant.$id, data, sharedPermissions
+      );
       return res.json({
         ok: true,
         threadId,
-        lastReadAt,
-        notificationsEnabled,
-        pinned
+        lastReadAt: asString(participant.lastReadAt) ?? null,
+        notificationsEnabled: participant.notificationsEnabled !== false,
+        pinned: participant.pinned === true
       }, 200);
     }
 
@@ -196,10 +201,7 @@ export default async ({ req, res, error }) => {
           threadId,
           userId: currentUserId,
           role: "participant",
-          lastReadAt: now,
-          muted: currentParticipant.muted ?? false,
-          pinned: currentParticipant.pinned ?? false,
-          notificationsEnabled: currentParticipant.notificationsEnabled ?? true
+          lastReadAt: now
         }, sharedPermissions);
       } catch (err) {
         error(`sendmessage participant update failed (${err?.statusCode ?? 500})`);
@@ -461,14 +463,7 @@ function stableRelationshipRowId(userIds) {
 async function repairConversationAccess(config, threadId, currentUserId, participantRows, permissions) {
   const threadRow = await getRowIfExists(config, config.threadsTableId, threadId);
   if (threadRow?.$id) {
-    await updateRow(config, config.threadsTableId, threadId, {
-      threadId,
-      createdByUserId: threadRow.createdByUserId ?? currentUserId,
-      subject: threadRow.subject ?? DEFAULT_MATCH_SUBJECT,
-      status: threadRow.status ?? "active",
-      lastMessageText: threadRow.lastMessageText ?? null,
-      lastMessageAt: threadRow.lastMessageAt ?? null
-    }, permissions);
+    await updateRow(config, config.threadsTableId, threadId, { threadId }, permissions);
   } else {
     try {
       await createRow(config, config.threadsTableId, threadId, {
@@ -496,11 +491,7 @@ async function repairConversationAccess(config, threadId, currentUserId, partici
     await updateRow(config, config.threadParticipantsTableId, participantRowId, {
       threadId,
       userId,
-      role: "participant",
-      lastReadAt: participantRow.lastReadAt ?? null,
-      muted: participantRow.muted ?? false,
-      pinned: participantRow.pinned ?? false,
-      notificationsEnabled: participantRow.notificationsEnabled ?? true
+      role: "participant"
     }, permissions);
   }
 }
@@ -509,10 +500,6 @@ async function upsertThreadPreview(config, threadId, currentUserId, previewText,
   const threadRow = await getRowIfExists(config, config.threadsTableId, threadId);
   if (threadRow?.$id) {
     await updateRow(config, config.threadsTableId, threadId, {
-      threadId,
-      createdByUserId: threadRow.createdByUserId ?? currentUserId,
-      subject: threadRow.subject ?? DEFAULT_MATCH_SUBJECT,
-      status: threadRow.status ?? "active",
       lastMessageText: previewText,
       lastMessageAt
     }, permissions);
@@ -533,12 +520,7 @@ async function upsertThreadPreview(config, threadId, currentUserId, previewText,
       throw new Error(`Failed creating row in ${config.threadsTableId}: ${err?.message ?? err}`);
     }
 
-    const existingThread = await getRowIfExists(config, config.threadsTableId, threadId);
     await updateRow(config, config.threadsTableId, threadId, {
-      threadId,
-      createdByUserId: existingThread?.createdByUserId ?? currentUserId,
-      subject: existingThread?.subject ?? DEFAULT_MATCH_SUBJECT,
-      status: existingThread?.status ?? "active",
       lastMessageText: previewText,
       lastMessageAt
     }, permissions);

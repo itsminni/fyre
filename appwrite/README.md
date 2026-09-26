@@ -2,6 +2,8 @@
 
 This directory is the reproducible source for Fyre's Appwrite backend. Tracked files contain neutral logical IDs; the live endpoint, project ID, and mapped resource IDs belong in the ignored root `.env` file.
 
+The public repository includes the backend implementation so each clone can use a separate Appwrite project.
+
 ## Tracked resources
 
 | File | Contents |
@@ -83,6 +85,8 @@ Tables have no broad permissions and use row security. Published active events r
 ## Italiano
 
 Questa cartella è la fonte riproducibile del backend Appwrite di Fyre. I file tracciati contengono ID logici neutri; endpoint live, project ID e ID delle risorse associate vanno nel file `.env` alla root, ignorato da Git.
+
+Il repository pubblico include l’implementazione del backend per consentire a ogni clone di usare un progetto Appwrite separato.
 
 ### Risorse tracciate
 

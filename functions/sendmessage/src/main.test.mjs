@@ -410,6 +410,79 @@ test("updateParticipant changes only allowed preferences through the server", as
   }
 });
 
+for (const action of ["sendMessage", "updateParticipant"]) {
+  test(`${action} preserves concurrent changes to participant state`, async () => {
+    const originalEnv = snapshotEnv();
+    const originalFetch = globalThis.fetch;
+    Object.assign(process.env, {
+      APPWRITE_FUNCTION_API_ENDPOINT: "https://appwrite.test/v1",
+      APPWRITE_FUNCTION_PROJECT_ID: "project",
+      APPWRITE_DATABASE_ID: "db",
+      APPWRITE_THREADS_TABLE_ID: "threads",
+      APPWRITE_THREAD_PARTICIPANTS_TABLE_ID: "participants",
+      APPWRITE_MESSAGES_TABLE_ID: "messages",
+      APPWRITE_RELATIONSHIPS_TABLE_ID: "relationships"
+    });
+    const rows = participantRows("thread-1");
+    const latestRead = "2030-01-01T12:00:00.000Z";
+    globalThis.fetch = async (input, options = {}) => {
+      const path = new URL(String(input)).pathname;
+      const method = options.method ?? "GET";
+      const body = options.body ? JSON.parse(options.body) : null;
+      if (path === "/v1/account") return jsonResponse(200, { $id: "user-a" });
+      if (method === "GET" && path.endsWith("/tables/participants/rows")) {
+        const snapshot = structuredClone(rows);
+        // A second request commits after this request has read the rows.
+        for (const row of rows) Object.assign(row, {
+          notificationsEnabled: false, muted: true, lastReadAt: latestRead
+        });
+        return jsonResponse(200, { rows: snapshot });
+      }
+      if (method === "GET" && path.includes("/tables/relationships/rows/")) {
+        return jsonResponse(200, matchedRelationship("user-a", "user-b", "thread-1"));
+      }
+      if (method === "GET" && path.endsWith("/tables/threads/rows/thread-1")) {
+        return jsonResponse(200, { $id: "thread-1", status: "active" });
+      }
+      if (method === "PATCH" && path.includes("/tables/participants/rows/")) {
+        const row = rows.find((item) => path.endsWith(`/rows/${item.$id}`));
+        Object.assign(row, body.data);
+        return jsonResponse(200, { ...row });
+      }
+      if (method === "PATCH" && path.endsWith("/tables/threads/rows/thread-1")) {
+        return jsonResponse(200, { $id: "thread-1", ...body.data });
+      }
+      if (method === "POST" && path.endsWith("/tables/messages/rows")) {
+        return jsonResponse(201, { $id: body.rowId, ...body.data });
+      }
+      return jsonResponse(500, { message: `Unexpected ${method} ${path}` });
+    };
+    try {
+      const result = await invokeHandler(action === "sendMessage"
+        ? { threadId: "thread-1", text: "ciao" }
+        : { action, threadId: "thread-1", pinned: true });
+      assert.equal(result.status, 200);
+      for (const row of rows) {
+        assert.equal(row.notificationsEnabled, false);
+        assert.equal(row.muted, true);
+        if (action === "updateParticipant" || row.userId === "user-b") {
+          assert.equal(row.lastReadAt, latestRead);
+        } else {
+          assert.equal(row.lastReadAt, result.payload.createdAt);
+        }
+      }
+      if (action === "updateParticipant") {
+        assert.equal(rows[0].pinned, true);
+        assert.equal(result.payload.notificationsEnabled, false);
+        assert.equal(result.payload.lastReadAt, latestRead);
+      }
+    } finally {
+      restoreEnv(originalEnv);
+      globalThis.fetch = originalFetch;
+    }
+  });
+}
+
 async function invokeHandler(body, headers = {
   "x-appwrite-key": "server-key",
   "x-appwrite-user-jwt": "valid-jwt",
