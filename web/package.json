@@ -13,7 +13,7 @@
     "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
-    "appwrite": "^14.0.0",
+    "appwrite": "^28.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.2"
