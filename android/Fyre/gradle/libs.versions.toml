@@ -18,7 +18,7 @@ accompanistPermissions = "0.37.3"
 documentFile = "1.0.1"
 media3 = "1.4.1"
 workRuntimeKtx = "2.10.2"
-okhttp = "4.12.0"
+okhttp = "5.5.0"
 coroutinesTest = "1.9.0"
 
 [libraries]
