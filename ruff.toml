@@ -1,0 +1,13 @@
+target-version = "py311"
+
+[lint]
+select = ["ALL"]
+# Use formatter-compatible conventions; per-file copyright headers are optional.
+ignore = ["D203", "D213", "CPY001", "COM812"]
+
+[lint.per-file-ignores]
+# These files are standalone scripts, not a Python package.
+"scripts/*.py" = ["INP001"]
+# CLI output is intentional; tests use the standard-library unittest framework.
+"scripts/upload-maintenance.py" = ["T201"]
+"scripts/*_test.py" = ["PT009", "PT027"]
