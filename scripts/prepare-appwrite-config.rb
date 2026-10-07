@@ -14,6 +14,8 @@ TABLE_IDS = {
   "threads" => "APPWRITE_THREADS_TABLE_ID",
   "threadparticipants" => "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID",
   "messages" => "APPWRITE_MESSAGES_TABLE_ID",
+  "attachmentoperations" => "APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID",
+  "cleanuphealth" => "APPWRITE_CLEANUP_HEALTH_TABLE_ID",
   "swipe" => "APPWRITE_SWIPES_TABLE_ID",
   "matches" => "APPWRITE_MATCHES_TABLE_ID",
   "relationships" => "APPWRITE_RELATIONSHIPS_TABLE_ID"
@@ -30,6 +32,7 @@ FUNCTION_IDS = {
   "manageeventadmin" => "APPWRITE_EVENT_ADMIN_FUNCTION_ID",
   "createorgetthread" => "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID",
   "sendmessage" => "APPWRITE_SEND_MESSAGE_FUNCTION_ID",
+  "cleanupattachments" => "APPWRITE_CLEANUP_ATTACHMENTS_FUNCTION_ID",
   "recordswipe" => "APPWRITE_RECORD_SWIPE_FUNCTION_ID",
   "discoverprofiles" => "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID",
   "manageprofile" => "APPWRITE_MANAGE_PROFILE_FUNCTION_ID",
@@ -159,6 +162,8 @@ def validate_table_security_model!(tables)
     "threads" => [],
     "threadparticipants" => [],
     "messages" => [],
+    "attachmentoperations" => [],
+    "cleanuphealth" => [],
     "swipe" => [],
     "matches" => [],
     "relationships" => []
@@ -199,7 +204,12 @@ def validate_functions!(functions)
   functions.each do |function|
     function_id = function.fetch("$id")
     abort("Function #{function_id} must use the node-22 runtime") unless function["runtime"] == "node-22"
-    abort("Function #{function_id} must be executable only by authenticated users") unless function["execute"] == ["users"]
+    if function_id == "cleanupattachments"
+      abort("Cleanup must not allow client executions") unless function["execute"] == []
+      abort("Cleanup must run hourly") unless function["schedule"] == "0 * * * *"
+    else
+      abort("Function #{function_id} must be executable only by authenticated users") unless function["execute"] == ["users"]
+    end
     abort("Function #{function_id} must keep production execution logging disabled") unless function["logging"] == false
 
     variables = function.fetch("vars", {})
@@ -235,6 +245,7 @@ def validate_function_scopes!(functions)
     "manageeventadmin" => %w[rows.read rows.write users.read],
     "createorgetthread" => %w[rows.read rows.write tokens.write],
     "sendmessage" => %w[files.read files.write rows.read rows.write],
+    "cleanupattachments" => %w[files.read files.write rows.read rows.write],
     "recordswipe" => %w[rows.read rows.write],
     "discoverprofiles" => %w[rows.read tokens.write],
     "manageprofile" => %w[files.read files.write rows.read rows.write],
@@ -310,6 +321,10 @@ functions.each do |function|
   function["vars"] = function.fetch("vars", {}).each_with_object({}) do |(key, fallback), resolved|
     resolved[key] = environment.fetch(key, fallback)
   end
+end
+
+functions.group_by { |function| function.fetch("path") }.each_value do |shared|
+  abort("Functions sharing a package must share environment variables") unless shared.map { |function| function.fetch("vars") }.uniq.length == 1
 end
 
 root_config["projectId"] = environment.fetch("APPWRITE_PROJECT_ID")

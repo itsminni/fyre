@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
+import { attachmentOperations, isManagedAttachment } from "./attachmentOperations.js";
 import { makeChatMessageContract } from "./contracts.js";
+
+const attachments = attachmentOperations(request);
 
 const DEFAULT_MATCH_SUBJECT = "Match";
 const APPWRITE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/;
@@ -28,6 +31,7 @@ export default async ({ req, res, error }) => {
     const currentUserId = await resolveCurrentUserId(config, req, body);
     const action = asString(body.action) ?? "sendMessage";
     const threadId = appwriteIdentifier(body.threadId);
+    const operationId = appwriteIdentifier(body.operationId);
     const text = boundedOptionalString(body.text, MAX_MESSAGE_TEXT_LENGTH);
     const rawReplyToMessageId = asString(body.replyToMessageId);
     const replyToMessageId = appwriteIdentifier(rawReplyToMessageId);
@@ -44,13 +48,22 @@ export default async ({ req, res, error }) => {
 
     if (
       !threadId
+      || (body.operationId != null && !operationId)
       || (typeof body.text === "string" && body.text.trim().length > MAX_MESSAGE_TEXT_LENGTH)
       || (body.replyToMessageId != null && body.replyToMessageId !== "" && !replyToMessageId)
       || (body.attachmentFileId != null && body.attachmentFileId !== "" && !attachmentFileId)
       || !["text", "image", "video", "audio", "file"].includes(requestedMessageType)
-      || (action !== "sendMessage" && action !== "updateParticipant")
+      || !["sendMessage", "updateParticipant", "reserveAttachment", "reconcileAttachment"].includes(action)
     ) {
       return res.json({ message: "Missing payload" }, 400);
+    }
+
+    if (action === "reconcileAttachment") {
+      if (!isManagedAttachment(attachmentFileId) || !config.chatAttachmentsBucketId) {
+        return res.json({ message: "Invalid managed attachment" }, 400);
+      }
+      // Ownership of the reservation is enough to clean up after an unmatch or block.
+      return res.json(await attachments.reconcile(config, currentUserId, threadId, attachmentFileId), 200);
     }
 
     const participantRows = await listRows(config, config.threadParticipantsTableId, [
@@ -102,7 +115,7 @@ export default async ({ req, res, error }) => {
       }, 200);
     }
 
-    if (!text && !attachmentFileId) {
+    if (action === "sendMessage" && !text && !attachmentFileId) {
       return res.json({ message: "Missing payload" }, 400);
     }
 
@@ -114,6 +127,23 @@ export default async ({ req, res, error }) => {
       return res.json({ message: "Conversation unavailable" }, 403);
     }
 
+    if (action === "reserveAttachment") {
+      if (!operationId) return res.json({ message: "Missing operation identifier" }, 400);
+      return res.json(await attachments.reserve(config, currentUserId, threadId, messageOperationRowId(currentUserId, threadId, operationId)), 200);
+    }
+
+    // The database row ID is the uniqueness boundary, including concurrent calls.
+    // Legacy clients may omit operationId and retain their existing behavior.
+    const messageId = operationId
+      ? messageOperationRowId(currentUserId, threadId, operationId)
+      : uniqueId();
+    if (operationId) {
+      const existing = await getRowIfExists(config, config.messagesTableId, messageId);
+      if (existing) {
+        return replayMessage(res, existing, { messageId, threadId, currentUserId, text, replyToMessageId, attachmentFileId });
+      }
+    }
+
     if (replyToMessageId) {
       const reply = await getRowIfExists(config, config.messagesTableId, replyToMessageId);
       if (!isReplyInThread(reply, replyToMessageId, threadId)) {
@@ -121,6 +151,9 @@ export default async ({ req, res, error }) => {
       }
     }
 
+    if (isManagedAttachment(attachmentFileId)) {
+      await attachments.validateReservation(config, currentUserId, threadId, attachmentFileId, messageId);
+    }
     await repairConversationAccess(config, threadId, currentUserId, participantRows, sharedPermissions);
 
     if (attachmentFileId) {
@@ -155,6 +188,11 @@ export default async ({ req, res, error }) => {
           permissions
         });
       } catch (err) {
+        // Cleanup may win after the initial reservation check but before Storage
+        // is read or updated. Preserve the conflict needed for a client retry.
+        if (err?.statusCode === 404 && isManagedAttachment(attachmentFileId)) {
+          await attachments.validateReservation(config, currentUserId, threadId, attachmentFileId, messageId);
+        }
         if (err?.statusCode === 403) {
           throw err;
         }
@@ -165,10 +203,9 @@ export default async ({ req, res, error }) => {
     }
 
     const now = new Date().toISOString();
-    const messageId = uniqueId();
     const messagePermissions = messageRowPermissions(participantIds);
     try {
-      await createRow(config, config.messagesTableId, messageId, {
+      await attachments.createMessage(config, messageId, {
         threadId,
         senderUserId: currentUserId,
         text,
@@ -184,7 +221,13 @@ export default async ({ req, res, error }) => {
         createdAt: now
       }, messagePermissions);
     } catch (err) {
-      throw new Error(`Failed creating row in ${config.messagesTableId}: ${err?.message ?? err}`);
+      if (operationId && err?.statusCode === 409) {
+        const existing = await getRowIfExists(config, config.messagesTableId, messageId);
+        if (existing) {
+          return replayMessage(res, existing, { messageId, threadId, currentUserId, text, replyToMessageId, attachmentFileId });
+        }
+      }
+      throw err;
     }
 
     // Update the thread preview immediately so inbox ordering stays in sync with the latest message.
@@ -254,7 +297,28 @@ export default async ({ req, res, error }) => {
   }
 };
 
-function getConfig(req) {
+export function messageOperationRowId(userId, threadId, operationId) {
+  return "m_" + createHash("sha256").update(`${userId}\n${threadId}\n${operationId}`).digest("hex").slice(0, 32);
+}
+
+function replayMessage(res, row, request) {
+  if (row.$id !== request.messageId
+      || row.threadId !== request.threadId
+      || row.senderUserId !== request.currentUserId
+      || asString(row.text) !== request.text
+      || asString(row.replyToMessageId) !== request.replyToMessageId
+      || asString(row.attachmentFileId) !== request.attachmentFileId) {
+    return res.json({ message: "Operation identifier already used for a different message" }, 409);
+  }
+  const payload = makeChatMessageContract({ ...row, messageId: row.$id });
+  if (!payload) {
+    throw new Error("Invalid stored message");
+  }
+  // Replays must not move the inbox preview or advance read timestamps.
+  return res.json(payload, 200);
+}
+
+export function getConfig(req) {
   return {
     endpoint: requiredEnv("APPWRITE_FUNCTION_API_ENDPOINT"),
     projectId: requiredIdentifierEnv("APPWRITE_FUNCTION_PROJECT_ID"),
@@ -264,6 +328,9 @@ function getConfig(req) {
     threadsTableId: requiredIdentifierEnv("APPWRITE_THREADS_TABLE_ID"),
     threadParticipantsTableId: requiredIdentifierEnv("APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"),
     messagesTableId: requiredIdentifierEnv("APPWRITE_MESSAGES_TABLE_ID"),
+    attachmentOperationsTableId: optionalIdentifierEnv("APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID"),
+    avatarsBucketId: optionalIdentifierEnv("APPWRITE_AVATARS_BUCKET_ID"),
+    cleanupHealthTableId: optionalIdentifierEnv("APPWRITE_CLEANUP_HEALTH_TABLE_ID"),
     chatAttachmentsBucketId: optionalIdentifierEnv("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID"),
     relationshipsTableId: requiredIdentifierEnv("APPWRITE_RELATIONSHIPS_TABLE_ID")
   };
@@ -617,7 +684,7 @@ async function updateRow(config, tableId, rowId, data, permissions) {
   return request(config, "PATCH", `/tablesdb/${pathSegment(config.databaseId)}/tables/${pathSegment(tableId)}/rows/${pathSegment(rowId)}`, body);
 }
 
-async function request(config, method, path, body, queries = []) {
+export async function request(config, method, path, body, queries = []) {
   const url = new URL(`${config.endpoint}${path}`);
   for (const query of queries) {
     url.searchParams.append("queries[]", query);
@@ -625,6 +692,7 @@ async function request(config, method, path, body, queries = []) {
 
   const response = await fetch(url, {
     method,
+    signal: config.requestTimeoutMs ? AbortSignal.timeout(config.requestTimeoutMs) : undefined,
     headers: {
       "Content-Type": "application/json",
       "X-Appwrite-Project": config.projectId,

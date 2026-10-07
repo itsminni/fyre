@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import handler, {
   canonicalAttachmentMetadata,
+  messageOperationRowId,
   hasFileOwnership,
   isReplyInThread,
   relationshipAllowsMessaging,
@@ -18,6 +20,7 @@ const ENV_KEYS = [
   "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID",
   "APPWRITE_MESSAGES_TABLE_ID",
   "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID",
+  "APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID",
   "APPWRITE_RELATIONSHIPS_TABLE_ID"
 ];
 
@@ -582,4 +585,252 @@ function restoreEnv(snapshot) {
       process.env[key] = snapshot[key];
     }
   }
+}
+
+
+test("operation IDs are stable and scoped to the sender and conversation", () => {
+  const id = messageOperationRowId("user-a", "thread-1", "550e8400-e29b-41d4-a716-446655440000");
+  assert.equal(id, "m_" + createHash("sha256").update("user-a\nthread-1\n550e8400-e29b-41d4-a716-446655440000").digest("hex").slice(0, 32));
+  assert.notEqual(id, messageOperationRowId("user-b", "thread-1", "550e8400-e29b-41d4-a716-446655440000"));
+  assert.notEqual(id, messageOperationRowId("user-a", "thread-2", "550e8400-e29b-41d4-a716-446655440000"));
+});
+
+test("retry after a lost response returns the original message without updating preview or read state", async () => {
+  await withMessageStore(async (store) => {
+    const body = { threadId: "thread-1", text: "hello", operationId: "operation-1" };
+    const first = await invokeHandler(body);
+    const writesAfterFirst = store.writes.length;
+    const retry = await invokeHandler(body);
+    assert.equal(first.status, 200);
+    assert.deepEqual(retry, first);
+    assert.equal(store.rows.size, 1);
+    assert.equal(store.writes.length, writesAfterFirst);
+  });
+});
+
+test("concurrent retries create exactly one row and return the same canonical result", async () => {
+  await withMessageStore(async (store) => {
+    const body = { threadId: "thread-1", text: "hello", operationId: "operation-1" };
+    const responses = await Promise.all([invokeHandler(body), invokeHandler(body)]);
+    assert.equal(responses[0].status, 200);
+    assert.deepEqual(responses[0], responses[1]);
+    assert.equal(store.rows.size, 1);
+    assert.equal(store.messageCreates, 2, "exercise the database conflict path, not only the initial lookup");
+    assert.equal(store.writes.filter((request) => request.path.endsWith("/threads/rows/thread-1") && request.body?.data?.lastMessageAt).length, 1);
+  });
+});
+
+test("two intentional identical messages retain separate operation IDs", async () => {
+  await withMessageStore(async (store) => {
+    const first = await invokeHandler({ threadId: "thread-1", text: "hello", operationId: "operation-1" });
+    const second = await invokeHandler({ threadId: "thread-1", text: "hello", operationId: "operation-2" });
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.notEqual(first.payload.messageId, second.payload.messageId);
+    assert.equal(store.rows.size, 2);
+  });
+});
+
+test("reusing an operation for changed text, reply or attachment returns conflict without mutation", async () => {
+  await withMessageStore(async (store) => {
+    const body = { threadId: "thread-1", text: "hello", operationId: "operation-1" };
+    await invokeHandler(body);
+    const writesAfterFirst = store.writes.length;
+    for (const changed of [{ text: "changed" }, { replyToMessageId: "another-message" }, { attachmentFileId: "another-file" }]) {
+      assert.equal((await invokeHandler({ ...body, ...changed })).status, 409);
+    }
+    assert.equal(store.rows.size, 1);
+    assert.equal(store.writes.length, writesAfterFirst);
+  });
+});
+
+test("a retry still verifies current conversation authorization", async () => {
+  await withMessageStore(async (store) => {
+    const body = { threadId: "thread-1", text: "hello", operationId: "operation-1" };
+    await invokeHandler(body);
+    store.blocked = true;
+    const replay = await invokeHandler(body);
+    assert.equal(replay.status, 403);
+    assert.equal(store.rows.size, 1);
+  });
+});
+
+test("attachment replay returns stored metadata without sharing or recreating the attachment", async () => {
+  await withMessageStore(async (store) => {
+    const body = { threadId: "thread-1", attachmentFileId: "file-1", messageType: "file", operationId: "operation-1" };
+    const first = await invokeHandler(body);
+    const writesAfterFirst = store.writes.length;
+    const retry = await invokeHandler(body);
+    assert.equal(first.status, 200);
+    assert.equal(first.payload.attachmentName, "document.pdf");
+    assert.deepEqual(retry, first);
+    assert.equal(store.writes.length, writesAfterFirst);
+    assert.equal(store.rows.size, 1);
+  });
+});
+
+test("malformed operation IDs are rejected and legacy clients remain compatible", async () => {
+  await withMessageStore(async (store) => {
+    for (const operationId of ["", "a/b", "x".repeat(37), 123, {}]) {
+      assert.equal((await invokeHandler({ threadId: "thread-1", text: "hello", operationId })).status, 400);
+    }
+    assert.equal(store.rows.size, 0);
+    const first = await invokeHandler({ threadId: "thread-1", text: "hello" });
+    const second = await invokeHandler({ threadId: "thread-1", text: "hello" });
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.notEqual(first.payload.messageId, second.payload.messageId);
+    assert.equal(store.rows.size, 2);
+  });
+});
+
+async function withMessageStore(run) {
+  const originalEnv = snapshotEnv();
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  Object.assign(process.env, {
+    APPWRITE_FUNCTION_API_ENDPOINT: "https://appwrite.test/v1",
+    APPWRITE_FUNCTION_PROJECT_ID: "project",
+    APPWRITE_DATABASE_ID: "db",
+    APPWRITE_THREADS_TABLE_ID: "threads",
+    APPWRITE_THREAD_PARTICIPANTS_TABLE_ID: "participants",
+    APPWRITE_MESSAGES_TABLE_ID: "messages",
+    APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID: "attachments",
+    APPWRITE_RELATIONSHIPS_TABLE_ID: "relationships"
+  });
+  const store = { rows: new Map(), reservations: new Map(), writes: [], messageCreates: 0, blocked: false, userId: "user-a" };
+  console.log = () => {};
+  globalThis.fetch = async (input, options = {}) => {
+    const path = new URL(String(input)).pathname;
+    const method = options.method ?? "GET";
+    const body = options.body ? JSON.parse(options.body) : null;
+    if (method !== "GET") store.writes.push({ method, path, body });
+    if (path === "/v1/account") return jsonResponse(200, { $id: store.userId });
+    if (method === "GET" && path.includes("/uploads/rows/")) {
+      const row = store.reservations.get(path.split("/").at(-1));
+      return jsonResponse(row ? 200 : 404, row ?? {});
+    }
+    if (method === "POST" && path.endsWith("/uploads/rows")) {
+      if (store.reservations.has(body.rowId)) return jsonResponse(409, {});
+      const row = { $id: body.rowId, ...body.data, $permissions: body.permissions };
+      store.reservations.set(body.rowId, row);
+      return jsonResponse(201, row);
+    }
+    if (method === "GET" && path.includes("/storage/buckets/attachments/files/u_")) {
+      if (store.beforeFileRead) await store.beforeFileRead(path.split("/").at(-1));
+      return jsonResponse(404, {});
+    }
+    if (method === "GET" && path.endsWith("/participants/rows")) return jsonResponse(200, { rows: participantRows("thread-1") });
+    if (method === "GET" && path.includes("/relationships/rows/")) {
+      const relationship = matchedRelationship("user-a", "user-b", "thread-1");
+      if (store.blocked) relationship.userAState = "blocked";
+      return jsonResponse(200, relationship);
+    }
+    if (method === "GET" && path.includes("/messages/rows/")) {
+      const row = store.rows.get(path.split("/").at(-1));
+      return row ? jsonResponse(200, row) : jsonResponse(404, {});
+    }
+    if (method === "POST" && path.endsWith("/messages/rows")) {
+      store.messageCreates += 1;
+      if (store.rows.has(body.rowId)) return jsonResponse(409, { message: "Row already exists" });
+      const row = { $id: body.rowId, ...body.data };
+      store.rows.set(body.rowId, row);
+      return jsonResponse(201, row);
+    }
+    if (path.endsWith("/storage/buckets/attachments/files/file-1")) {
+      return jsonResponse(200, { $id: "file-1", name: "document.pdf", mimeType: "application/pdf", sizeOriginal: 100,
+        $permissions: ['read("user:user-a")', 'update("user:user-a")', 'delete("user:user-a")'] });
+    }
+    if (method === "GET" && path.endsWith("/threads/rows/thread-1")) return jsonResponse(200, { $id: "thread-1", status: "active" });
+    if (method === "PATCH" && path.includes("/tables/")) return jsonResponse(200, { $id: path.split("/").at(-1), ...body.data });
+    return jsonResponse(500, { message: `Unexpected ${method} ${path}` });
+  };
+  try { await run(store); } finally {
+    restoreEnv(originalEnv);
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+  }
+}
+
+test("message identities match the shared client fixtures", () => {
+  const fixtures = JSON.parse(readFileSync(new URL("../../../shared/contracts/fixtures/message-identity.json", import.meta.url), "utf8"));
+  for (const entry of fixtures) {
+    assert.equal(messageOperationRowId(entry.userId, entry.threadId, entry.operationId), entry.messageId);
+  }
+});
+
+
+test("attachment reservation is private, operation-bound and checks relationship access", async () => {
+  await withMessageStore(async (store) => {
+    process.env.APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID = "uploads";
+    const body = { action: "reserveAttachment", threadId: "thread-1", operationId: "operation-1" };
+    const reserved = await invokeHandler(body);
+    assert.equal(reserved.status, 200);
+    assert.equal(reserved.payload.supported, true);
+    assert.match(reserved.payload.fileId, /^u_[a-f0-9]{32}$/);
+    const row = store.reservations.get(reserved.payload.fileId);
+    assert.equal(row.messageId, messageOperationRowId("user-a", "thread-1", "operation-1"));
+    assert.deepEqual(row.$permissions, []);
+    store.blocked = true;
+    assert.equal((await invokeHandler(body)).status, 403);
+    assert.equal(store.reservations.size, 1);
+  });
+});
+
+test("attachment cleanup remains authorized for its owner after relationship revocation", async () => {
+  await withMessageStore(async (store) => {
+    process.env.APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID = "uploads";
+    const reserved = await invokeHandler({ action: "reserveAttachment", threadId: "thread-1", operationId: "operation-1" });
+    store.blocked = true;
+    const body = { action: "reconcileAttachment", threadId: "thread-1", attachmentFileId: reserved.payload.fileId };
+    const cleaned = await invokeHandler(body);
+    assert.equal(cleaned.status, 200);
+    assert.equal(cleaned.payload.status, "discarded");
+    const writes = store.writes.length;
+    store.userId = "user-b";
+    assert.equal((await invokeHandler(body)).status, 403);
+    assert.equal(store.writes.length, writes);
+  });
+});
+
+test("managed attachment bound to another send is rejected before changing file permissions", async () => {
+  await withMessageStore(async (store) => {
+    process.env.APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID = "uploads";
+    const reserved = await invokeHandler({ action: "reserveAttachment", threadId: "thread-1", operationId: "operation-1" });
+    const writes = store.writes.length;
+    const response = await invokeHandler({ threadId: "thread-1", operationId: "operation-2", attachmentFileId: reserved.payload.fileId });
+    assert.equal(response.status, 409);
+    assert.equal(store.writes.length, writes);
+  });
+});
+
+test("older configuration advertises unsupported reservations without writing rows", async () => {
+  await withMessageStore(async (store) => {
+    delete process.env.APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID;
+    const response = await invokeHandler({ action: "reserveAttachment", threadId: "thread-1", operationId: "operation-1" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.payload, { supported: false });
+    assert.equal(store.writes.length, 0);
+  });
+});
+
+for (const duringRead of [false, true]) {
+  test(`discarded storage file returns a retryable conflict (${duringRead ? "concurrent cleanup" : "prior cleanup"})`, async () => {
+    await withMessageStore(async (store) => {
+      process.env.APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID = "uploads";
+      const operationId = "operation-1", threadId = "thread-1";
+      const reserved = await invokeHandler({ action: "reserveAttachment", threadId, operationId });
+      const fileId = reserved.payload.fileId;
+      const discard = async () => {
+        const result = await invokeHandler({ action: "reconcileAttachment", threadId, attachmentFileId: fileId });
+        assert.equal(result.status, 200);
+      };
+      if (duringRead) store.beforeFileRead = async () => { store.beforeFileRead = null; await discard(); };
+      else await discard();
+      const result = await invokeHandler({ threadId, operationId, attachmentFileId: fileId });
+      assert.equal(result.status, 409);
+      assert.equal(store.rows.size, 0);
+      assert.equal(store.writes.some(w => w.path.includes("/storage/") && w.method === "PUT"), false);
+    });
+  });
 }

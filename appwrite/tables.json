@@ -231,5 +231,37 @@
       {"key": "relationships_user_a", "type": "key", "columns": ["userAId"], "orders": ["ASC"]},
       {"key": "relationships_user_b", "type": "key", "columns": ["userBId"], "orders": ["ASC"]}
     ]
+  },
+  {
+    "$id": "attachmentoperations",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Attachment operations",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "nextCheckAt", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "ownerUserId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "threadId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "fileId", "type": "varchar", "size": 36, "required": true, "array": false, "default": null},
+      {"key": "messageId", "type": "varchar", "size": 36, "required": false, "array": false, "default": null},
+      {"key": "kind", "type": "string", "size": 16, "format": "enum", "elements": ["reserved", "committed", "discarded"], "required": true, "array": false, "default": null}
+    ],
+    "indexes": [{"key": "attachment_cleanup_due", "type": "key", "columns": ["kind", "nextCheckAt"], "orders": ["ASC", "ASC"]}]
+  },
+  {
+    "$id": "cleanuphealth",
+    "$permissions": [],
+    "databaseId": "fyre",
+    "name": "Upload cleanup health",
+    "enabled": true,
+    "rowSecurity": true,
+    "columns": [
+      {"key": "startedAt", "type": "datetime", "required": true, "array": false, "default": null},
+      {"key": "finishedAt", "type": "datetime", "required": false, "array": false, "default": null},
+      {"key": "state", "type": "string", "size": 16, "format": "enum", "elements": ["running", "healthy", "attention", "error"], "required": true, "array": false, "default": null},
+      {"key": "summary", "type": "varchar", "size": 8192, "required": true, "array": false, "default": null}
+    ],
+    "indexes": []
   }
 ]

@@ -8,7 +8,8 @@ const ENV = {
   APPWRITE_FUNCTION_PROJECT_ID: "project",
   APPWRITE_DATABASE_ID: "database",
   APPWRITE_PROFILES_TABLE_ID: "profiles",
-  APPWRITE_AVATARS_BUCKET_ID: "avatars"
+  APPWRITE_AVATARS_BUCKET_ID: "avatars",
+  APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID: "uploads"
 };
 
 test("upsert binds profile identity to the verified account and grants read-only owner access", async () => {
@@ -305,3 +306,26 @@ async function withEnvironment(run) {
     }
   }
 }
+
+test("profile upload reservation binds the verified account and is private", async () => {
+  await withEnvironment(async () => {
+    const writes = [];
+    globalThis.fetch = async (input, init = {}) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/account") return jsonResponse(200, { $id: "user-a", email: "owner@example.com" });
+      if (path.endsWith("/uploads/rows") && init.method === "POST") {
+        const body = JSON.parse(init.body); writes.push(body);
+        return jsonResponse(201, { $id: body.rowId, ...body.data });
+      }
+      throw new Error("Unexpected request");
+    };
+    const result = await invoke({ action: "reserveUpload" });
+    assert.equal(result.status, 200);
+    assert.match(result.payload.fileId, /^p_[a-f0-9]{32}$/);
+    assert.deepEqual(writes[0].permissions, []);
+    assert.equal(writes[0].data.ownerUserId, "user-a");
+    assert.equal(writes[0].data.messageId, "user-a");
+    const forged = await invoke({ action: "reserveUpload", currentUserId: "other" });
+    assert.equal(forged.status, 403); assert.equal(writes.length, 1);
+  });
+});

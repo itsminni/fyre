@@ -1,0 +1,26 @@
+[
+  {
+    "userId": "user-a",
+    "threadId": "thread-1",
+    "operationId": "550e8400-e29b-41d4-a716-446655440000",
+    "messageId": "m_dc1cadf0e3305e63598ad72921a25860"
+  },
+  {
+    "userId": "user-b",
+    "threadId": "thread-1",
+    "operationId": "550e8400-e29b-41d4-a716-446655440000",
+    "messageId": "m_14999f3b6928d6ede79fb046045682bb"
+  },
+  {
+    "userId": "user-a",
+    "threadId": "thread-2",
+    "operationId": "550e8400-e29b-41d4-a716-446655440000",
+    "messageId": "m_f7ee420876734c457fbbd24028c77fe1"
+  },
+  {
+    "userId": "user-a",
+    "threadId": "thread-1",
+    "operationId": "11111111-2222-4333-8444-555555555555",
+    "messageId": "m_fda0c11273f1420dc9b5985b4acee314"
+  }
+]

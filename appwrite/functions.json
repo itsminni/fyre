@@ -106,8 +106,12 @@
       "APPWRITE_THREADS_TABLE_ID": "threads",
       "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID": "threadparticipants",
       "APPWRITE_MESSAGES_TABLE_ID": "messages",
+      "APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID": "attachmentoperations",
       "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID": "chat-attachments",
-      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships"
+      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships",
+      "APPWRITE_PROFILES_TABLE_ID": "profiles",
+      "APPWRITE_AVATARS_BUCKET_ID": "avatars",
+      "APPWRITE_CLEANUP_HEALTH_TABLE_ID": "cleanuphealth"
     }
   },
   {
@@ -161,8 +165,8 @@
     "$id": "manageprofile",
     "name": "Manage profile",
     "runtime": "node-22",
-    "path": "../functions/manageprofile",
-    "entrypoint": "src/main.js",
+    "path": "../functions/sendmessage",
+    "entrypoint": "src/profile.js",
     "commands": "",
     "execute": ["users"],
     "events": [],
@@ -173,8 +177,15 @@
     "scopes": ["rows.read", "rows.write", "files.read", "files.write"],
     "vars": {
       "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_THREADS_TABLE_ID": "threads",
+      "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID": "threadparticipants",
+      "APPWRITE_MESSAGES_TABLE_ID": "messages",
+      "APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID": "attachmentoperations",
+      "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID": "chat-attachments",
+      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships",
       "APPWRITE_PROFILES_TABLE_ID": "profiles",
-      "APPWRITE_AVATARS_BUCKET_ID": "avatars"
+      "APPWRITE_AVATARS_BUCKET_ID": "avatars",
+      "APPWRITE_CLEANUP_HEALTH_TABLE_ID": "cleanuphealth"
     }
   },
   {
@@ -196,6 +207,33 @@
       "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID": "threadparticipants",
       "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships",
       "APPWRITE_MATCHES_TABLE_ID": "matches"
+    }
+  },
+  {
+    "$id": "cleanupattachments",
+    "name": "Clean up chat attachments",
+    "runtime": "node-22",
+    "path": "../functions/sendmessage",
+    "entrypoint": "src/cleanup.js",
+    "commands": "",
+    "execute": [],
+    "events": [],
+    "schedule": "0 * * * *",
+    "timeout": 60,
+    "enabled": true,
+    "logging": false,
+    "scopes": ["rows.read", "rows.write", "files.read", "files.write"],
+    "vars": {
+      "APPWRITE_DATABASE_ID": "fyre",
+      "APPWRITE_THREADS_TABLE_ID": "threads",
+      "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID": "threadparticipants",
+      "APPWRITE_MESSAGES_TABLE_ID": "messages",
+      "APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID": "attachmentoperations",
+      "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID": "chat-attachments",
+      "APPWRITE_RELATIONSHIPS_TABLE_ID": "relationships",
+      "APPWRITE_PROFILES_TABLE_ID": "profiles",
+      "APPWRITE_AVATARS_BUCKET_ID": "avatars",
+      "APPWRITE_CLEANUP_HEALTH_TABLE_ID": "cleanuphealth"
     }
   }
 ]
