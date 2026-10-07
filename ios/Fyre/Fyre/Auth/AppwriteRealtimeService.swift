@@ -102,28 +102,38 @@ struct AppwriteRealtimeEvent {
 }
 
 @MainActor
-final class AppwriteRealtimeSubscription {
+protocol RealtimeConnection: AnyObject {
+    func start()
+    func cancel()
+}
+
+@MainActor
+private final class AppwriteRealtimeConnection: RealtimeConnection {
     private let configuration: AppwriteConfiguration
     private let channels: [String]
     private let onEvent: (AppwriteRealtimeEvent) -> Void
     private let onError: (Error) -> Void
+    private let onConnected: () -> Void
     private let session: URLSession
 
     private var socketTask: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var isCancelled = false
+    private var reconnectAttempt = 0
 
     init(
         configuration: AppwriteConfiguration,
         channels: [String],
         onEvent: @escaping (AppwriteRealtimeEvent) -> Void,
-        onError: @escaping (Error) -> Void
+        onError: @escaping (Error) -> Void,
+        onConnected: @escaping () -> Void
     ) {
         self.configuration = configuration
         self.channels = Array(Set(channels)).sorted()
         self.onEvent = onEvent
         self.onError = onError
+        self.onConnected = onConnected
 
         let sessionConfiguration = URLSessionConfiguration.default
         sessionConfiguration.httpCookieStorage = HTTPCookieStorage.shared
@@ -150,6 +160,7 @@ final class AppwriteRealtimeSubscription {
         reconnectTask?.cancel()
         socketTask?.cancel(with: .goingAway, reason: nil)
         socketTask = nil
+        session.invalidateAndCancel()
     }
 
     private func connect() {
@@ -169,12 +180,13 @@ final class AppwriteRealtimeSubscription {
         while !Task.isCancelled && !isCancelled {
             do {
                 let message = try await task.receive()
+                guard socketTask === task else { return }
                 guard let event = parse(message: message) else {
                     continue
                 }
                 onEvent(event)
             } catch {
-                guard !isCancelled else { return }
+                guard !isCancelled, socketTask === task else { return }
                 socketTask = nil
                 onError(error)
                 scheduleReconnect()
@@ -183,7 +195,9 @@ final class AppwriteRealtimeSubscription {
         }
     }
 
-    private func scheduleReconnect(after delayNanoseconds: UInt64 = 1_000_000_000) {
+    private func scheduleReconnect() {
+        let delayNanoseconds = UInt64(min(30, 1 << min(reconnectAttempt, 5))) * 1_000_000_000
+        reconnectAttempt += 1
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: delayNanoseconds)
@@ -239,19 +253,12 @@ final class AppwriteRealtimeSubscription {
             return nil
         }
 
-        let payload = object["payload"] as? [String: Any]
-            ?? object["data"] as? [String: Any]
-            ?? [:]
-
-        let timestamp = Self.dateFormatter.date(from: object["timestamp"] as? String ?? "")
-            ?? Self.fallbackDateFormatter.date(from: object["timestamp"] as? String ?? "")
-        return AppwriteRealtimeEvent(
-            events: object["events"] as? [String] ?? [],
-            channels: object["channels"] as? [String] ?? [],
-            timestamp: timestamp,
-            payload: payload,
-            raw: object
-        )
+        if object["type"] as? String == "connected" {
+            reconnectAttempt = 0
+            onConnected()
+            return nil
+        }
+        return RealtimePayload.parse(object)
     }
 
     private static let dateFormatter: ISO8601DateFormatter = {
@@ -278,12 +285,8 @@ enum AppwriteRealtimeService {
             return nil
         }
 
-        let subscription = AppwriteRealtimeSubscription(
+        let subscription = SharedRealtimeHub.shared.subscribe(
             configuration: configuration,
-            channels: [
-                configuration.messagesRealtimeChannel,
-                configuration.threadParticipantsRealtimeChannel
-            ],
             onEvent: { event in
                 guard event.isMutation,
                       event.stringValue(forKey: "threadId") == threadId else {
@@ -293,7 +296,6 @@ enum AppwriteRealtimeService {
             },
             onError: onError
         )
-        subscription.start()
         return subscription
     }
 
@@ -307,18 +309,8 @@ enum AppwriteRealtimeService {
             return nil
         }
 
-        var channels = [
-            configuration.messagesRealtimeChannel,
-            configuration.threadsRealtimeChannel,
-            configuration.threadParticipantsRealtimeChannel
-        ]
-        if let matchesChannel = configuration.matchesRealtimeChannel {
-            channels.append(matchesChannel)
-        }
-
-        let subscription = AppwriteRealtimeSubscription(
+        let subscription = SharedRealtimeHub.shared.subscribe(
             configuration: configuration,
-            channels: channels,
             onEvent: { event in
                 guard event.isMutation else { return }
                 onEvent(event)
@@ -326,7 +318,6 @@ enum AppwriteRealtimeService {
             },
             onError: onError
         )
-        subscription.start()
         return subscription
     }
 
@@ -339,24 +330,14 @@ enum AppwriteRealtimeService {
             return nil
         }
 
-        var channels = [
-            configuration.messagesRealtimeChannel,
-            configuration.threadParticipantsRealtimeChannel
-        ]
-        if let matchesChannel = configuration.matchesRealtimeChannel {
-            channels.append(matchesChannel)
-        }
-
-        let subscription = AppwriteRealtimeSubscription(
+        let subscription = SharedRealtimeHub.shared.subscribe(
             configuration: configuration,
-            channels: channels,
             onEvent: { event in
                 guard event.isMutation else { return }
                 onEvent(event)
             },
             onError: onError
         )
-        subscription.start()
         return subscription
     }
 }
@@ -377,5 +358,111 @@ extension AppwriteConfiguration {
     var matchesRealtimeChannel: String? {
         guard let matchesTableId, !matchesTableId.isEmpty else { return nil }
         return "tablesdb.\(databaseId).tables.\(matchesTableId).rows"
+    }
+}
+
+
+// The token owns only its listener; cancelling one screen never tears down other listeners.
+@MainActor
+final class AppwriteRealtimeSubscription {
+    private var onCancel: (() -> Void)?
+    init(onCancel: @escaping () -> Void) { self.onCancel = onCancel }
+    func cancel() { onCancel?(); onCancel = nil }
+}
+
+@MainActor
+final class SharedRealtimeHub {
+    static let shared = SharedRealtimeHub()
+    private struct Listener {
+        let accountId: String?
+        let event: (AppwriteRealtimeEvent) -> Void
+        let error: (Error) -> Void
+    }
+    private var listeners: [UUID: Listener] = [:]
+    typealias ConnectionFactory = @MainActor (AppwriteConfiguration, [String], @escaping (AppwriteRealtimeEvent) -> Void, @escaping (Error) -> Void, @escaping () -> Void) -> any RealtimeConnection
+    private let connectionFactory: ConnectionFactory
+    private var connection: (any RealtimeConnection)?
+
+    init(connectionFactory: @escaping ConnectionFactory = { configuration, channels, event, error, connected in
+        AppwriteRealtimeConnection(configuration: configuration, channels: channels, onEvent: event, onError: error, onConnected: connected)
+    }) {
+        self.connectionFactory = connectionFactory
+    }
+    private var configuration: AppwriteConfiguration?
+    private var accountId: String?
+    private var isActive = false
+    private var generation: UInt = 0
+
+    private var sessionRevision: UInt = 0
+
+    func configure(accountId: String?, isActive: Bool, sessionRevision: UInt) {
+        guard self.accountId != accountId || self.isActive != isActive || self.sessionRevision != sessionRevision else { return }
+        self.sessionRevision = sessionRevision
+        self.accountId = accountId
+        listeners = listeners.filter { $0.value.accountId == accountId }
+        self.isActive = isActive
+        stopConnection()
+        connectIfNeeded()
+    }
+
+    func subscribe(configuration: AppwriteConfiguration, accountId: String? = nil, onEvent: @escaping (AppwriteRealtimeEvent) -> Void,
+                   onError: @escaping (Error) -> Void) -> AppwriteRealtimeSubscription {
+        self.configuration = configuration
+        let id = UUID()
+        listeners[id] = Listener(accountId: accountId ?? UserStore.shared.currentUser?.appwriteUserId, event: onEvent, error: onError)
+        connectIfNeeded()
+        return AppwriteRealtimeSubscription { [weak self] in
+            guard let self else { return }
+            self.listeners.removeValue(forKey: id)
+            if self.listeners.isEmpty { self.stopConnection() }
+        }
+    }
+
+    private func stopConnection() {
+        generation &+= 1
+        connection?.cancel()
+        connection = nil
+    }
+
+    private func connectIfNeeded() {
+        guard isActive, let accountId, connection == nil, let configuration,
+              listeners.values.contains(where: { $0.accountId == accountId }) else { return }
+        let currentGeneration = generation
+        var channels = [configuration.messagesRealtimeChannel, configuration.threadParticipantsRealtimeChannel,
+                        configuration.threadsRealtimeChannel]
+        if let matches = configuration.matchesRealtimeChannel { channels.append(matches) }
+        connection = connectionFactory(configuration, channels, { [weak self] event in
+            guard let self, self.generation == currentGeneration else { return }
+            for listener in Array(self.listeners.values) where listener.accountId == self.accountId { listener.event(event) }
+        }, { [weak self] error in
+            guard let self, self.generation == currentGeneration else { return }
+            for listener in Array(self.listeners.values) where listener.accountId == self.accountId { listener.error(error) }
+        }, { [weak self] in
+            guard let self, self.generation == currentGeneration else { return }
+            NotificationCenter.default.post(name: .fyreRealtimeDidReconnect, object: nil)
+        })
+        connection?.start()
+    }
+}
+
+extension Notification.Name {
+    static let fyreRealtimeDidReconnect = Notification.Name("fyreRealtimeDidReconnect")
+}
+
+enum RealtimePayload {
+    static func parse(_ object: [String: Any]) -> AppwriteRealtimeEvent? {
+        let envelope = object["data"] as? [String: Any] ?? object
+        guard let events = envelope["events"] as? [String], !events.isEmpty,
+              let payload = envelope["payload"] as? [String: Any] else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let rawTimestamp = envelope["timestamp"] as? String
+        var timestamp = rawTimestamp.flatMap { formatter.date(from: $0) }
+        if timestamp == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            timestamp = rawTimestamp.flatMap { formatter.date(from: $0) }
+        }
+        return AppwriteRealtimeEvent(events: events, channels: envelope["channels"] as? [String] ?? [],
+                                     timestamp: timestamp, payload: payload, raw: object)
     }
 }

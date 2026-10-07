@@ -32,6 +32,11 @@ struct DiscoverProfileDTO: Identifiable, Sendable {
     let relationshipState: RelationshipStateDTO
 }
 
+struct DiscoverPageDTO: Sendable {
+    let profiles: [DiscoverProfileDTO]
+    let nextCursor: String?
+}
+
 struct ThreadDTO: Identifiable, Sendable {
     let id: UUID
     let remoteId: String
@@ -45,6 +50,13 @@ struct ThreadDTO: Identifiable, Sendable {
     let notificationsEnabled: Bool
     let relationshipState: RelationshipStateDTO
     let messages: [MessageDTO]
+    var olderMessagesCursor: String? = nil
+    var remoteUnreadCount: Int? = nil
+}
+
+struct MessagePageDTO: Sendable {
+    let messages: [MessageDTO]
+    let nextCursor: String?
 }
 
 enum MessageTypeDTO: String, Sendable, Codable {
@@ -65,7 +77,7 @@ struct MessageAttachmentDTO: Sendable, Hashable, Codable {
     let duration: Int?
 }
 
-struct OutgoingAttachmentDTO: Sendable {
+nonisolated struct OutgoingAttachmentDTO: Sendable, Equatable {
     let data: Data
     let fileName: String
     let mimeType: String
@@ -116,10 +128,12 @@ extension APIError: LocalizedError {
 // Protocol used by the live Appwrite adapter and by focused test doubles.
 protocol BackendAPI: Sendable {
     func fetchDiscoverProfiles() async throws -> [DiscoverProfileDTO]
+    func fetchDiscoverPage(after cursor: String?) async throws -> DiscoverPageDTO
     func fetchThreads() async throws -> [ThreadDTO]
     func fetchThread(threadId: String) async throws -> ThreadDTO?
+    func fetchMessagePage(threadId: String, before cursor: String) async throws -> MessagePageDTO
     func createOrGetThread(otherUserId: String) async throws -> ThreadDTO
-    func sendMessage(threadId: String, text: String, replyToMessageId: String?, attachment: OutgoingAttachmentDTO?) async throws -> MessageDTO
+    func sendMessage(threadId: String, attempt: OutgoingMessageAttempt) async throws -> MessageDTO
     func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO?
     func updateRelationship(threadId: String, action: RelationshipActionDTO) async throws
     func updateThreadNotifications(threadId: String, enabled: Bool) async throws
@@ -132,4 +146,10 @@ extension Notification.Name {
     // Thread list and chat detail use this loose signal to refresh after sends, matches, and new threads.
     static let fyreThreadsDidChange = Notification.Name("fyreThreadsDidChange")
     static let fyreThreadRemoved = Notification.Name("fyreThreadRemoved")
+}
+
+extension BackendAPI {
+    func fetchDiscoverPage(after cursor: String?) async throws -> DiscoverPageDTO {
+        DiscoverPageDTO(profiles: try await fetchDiscoverProfiles(), nextCursor: nil)
+    }
 }

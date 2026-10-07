@@ -168,9 +168,9 @@
 "account.notifications.events.hint" = "Remind you the day before an event you joined.";
 "account.notifications.openSettings" = "Open iPhone Settings";
 "account.section.events" = "My event registrations";
-"account.events.empty" = "No upcoming event activity yet.";
+"account.events.empty" = "No event activity yet.";
 "account.events.openAll" = "Events";
-"account.events.title" = "All upcoming events";
+"account.events.title" = "Event history";
 
 "profile.gender" = "Gender";
 "profile.gender.unspecified" = "Select gender";
@@ -334,3 +334,35 @@
 "events.unavailable.description" = "The live event could not be loaded. Try again shortly.";
 
 "common.cancel" = "Cancel";
+
+"attachment.error.empty" = "The selected file is empty.";
+"attachment.error.tooLarge" = "The file is too large. Choose a smaller file.";
+"attachment.error.unreadable" = "The selected file could not be read.";
+
+"startup.configuration.title" = "App unavailable";
+"startup.configuration.message" = "This version of the app is not configured correctly. Please contact support.";
+"startup.session.title" = "Unable to verify your session";
+"startup.session.message" = "Check your connection and try again.";
+"startup.retry" = "Try again";
+
+// Chat history pagination
+"chat.history.load" = "Load earlier messages";
+"chat.history.error" = "Couldn’t load earlier messages.";
+"chat.history.retry" = "Try again";
+
+"notifications.destinationUnavailable" = "This notification is unavailable. Open the chat or event from its list.";
+
+"home.discovery.continue" = "Continue searching for profiles";
+
+"upload.progress" = "Uploading attachments";
+"upload.saving" = "Saving…";
+
+"chat.accessibility.avatar" = "Open profile picture";
+"chat.accessibility.options" = "More options";
+"chat.accessibility.deleteRecording" = "Delete recording";
+"chat.accessibility.record" = "Record voice message";
+"chat.accessibility.stopRecording" = "Stop recording";
+"chat.accessibility.send" = "Send message";
+"common.back" = "Back";
+
+"chat.accessibility.attach" = "Add attachment";

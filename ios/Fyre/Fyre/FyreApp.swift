@@ -32,22 +32,45 @@ struct FyreApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+#if DEBUG
+                if ChatHistoryPreview.isEnabled {
+                    NavigationStack {
+                        ChatDetailView(thread: ChatHistoryPreview.thread)
+                            .environment(\.dynamicTypeSize, ProcessInfo.processInfo.arguments.contains("-uitest-accessibility") ? .accessibility5 : .large)
+                    }
+                    .environment(ChatHistoryPreview.services)
+                } else {
+                    ContentView()
+                }
+#else
+                ContentView()
+#endif
+            }
                 .preferredColorScheme(preferredColorScheme)
                 .environment(store)
                 .environmentObject(router)
                 .environment(services)
+                .task(id: "\(pushUserId ?? "guest"):\(scenePhase == .active):\(store.sessionRevision)") {
+                    SharedRealtimeHub.shared.configure(accountId: pushUserId, isActive: scenePhase == .active, sessionRevision: store.sessionRevision)
+                }
                 .task(id: scenePhase) {
                     handleScenePhaseChange(scenePhase)
                 }
                 .task(id: notificationsRefreshKey) {
+#if DEBUG
+                    guard !ChatHistoryPreview.isEnabled else { return }
+#endif
                     await notificationCoordinator.refresh(
                         currentUserId: store.currentUser?.appwriteUserId,
                         upcomingEvents: store.currentUserUpcomingEventHistory
                     )
                 }
                 .task(id: pushRefreshKey) {
-                    await pushNotificationCoordinator.sync(currentUserId: store.currentUser?.appwriteUserId)
+                    await pushNotificationCoordinator.sync(
+                        currentUserId: pushUserId,
+                        enabled: notificationsEnabled
+                    )
                 }
         }
     }
@@ -64,11 +87,19 @@ struct FyreApp: App {
     }
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {
+#if DEBUG
+        guard !ChatHistoryPreview.isEnabled else { return }
+#endif
         presenceHeartbeatTask?.cancel()
 
         switch phase {
         case .active:
+            UIApplication.shared.registerForRemoteNotifications()
             presenceHeartbeatTask = Task {
+                await pushNotificationCoordinator.sync(
+                    currentUserId: pushUserId,
+                    enabled: notificationsEnabled
+                )
                 while !Task.isCancelled {
                     await services.backend.markCurrentUserPresence(isOnline: true)
                     try? await Task.sleep(nanoseconds: 25_000_000_000)
@@ -100,8 +131,13 @@ struct FyreApp: App {
         ].joined(separator: "|")
     }
 
+    private var pushUserId: String? {
+        guard store.isSessionBootstrapComplete, store.sessionBootstrapFailure == nil else { return nil }
+        return store.currentUser?.appwriteUserId
+    }
+
     private var pushRefreshKey: String {
-        store.currentUser?.appwriteUserId ?? "guest"
+        "\(pushUserId ?? "guest"):\(notificationsEnabled)"
     }
 }
 
@@ -111,6 +147,7 @@ final class FyreAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         _ = launchOptions
+        _ = LocalNotificationCoordinator.shared
         application.registerForRemoteNotifications()
         return true
     }

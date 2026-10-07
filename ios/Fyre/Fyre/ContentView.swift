@@ -20,6 +20,31 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(.systemBackground).ignoresSafeArea())
                     .accessibilityIdentifier("session.bootstrap.loading")
+            case let .bootstrapFailed(failure):
+                VStack(spacing: 20) {
+                    Image(systemName: failure == .configuration ? "exclamationmark.triangle" : "wifi.exclamationmark")
+                        .font(.largeTitle)
+                    Text(L10n.tr(failure == .configuration ? "startup.configuration.title" : "startup.session.title"))
+                        .font(.title2.bold())
+                    Text(L10n.tr(failure == .configuration ? "startup.configuration.message" : "startup.session.message"))
+                        .foregroundStyle(.secondary)
+#if DEBUG
+                    if failure == .configuration, let detail = store.configurationFailureDetail {
+                        Text(detail).font(.caption).foregroundStyle(.secondary)
+                    }
+#endif
+                    if failure == .unavailable {
+                        Button(L10n.tr("startup.retry")) {
+                            Task { await bootstrap() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("session.bootstrap.retry")
+                    }
+                }
+                .multilineTextAlignment(.center)
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("session.bootstrap.failed")
             case .main:
                 if store.isProfileComplete {
                     MainTabView()
@@ -84,9 +109,14 @@ struct ContentView: View {
             router.sync(isLoggedIn: isLoggedIn)
         }
         .task {
-            await store.restoreRemoteSessionIfNeeded()
-            router.completeBootstrap(isLoggedIn: store.isLoggedIn)
+            await bootstrap()
         }
+    }
+    @MainActor
+    private func bootstrap() async {
+        router.beginBootstrap()
+        await store.restoreRemoteSessionIfNeeded()
+        router.completeBootstrap(isLoggedIn: store.isLoggedIn, failure: store.sessionBootstrapFailure)
     }
 }
 

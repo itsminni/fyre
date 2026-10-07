@@ -50,16 +50,18 @@ private struct UnavailableBackendAPI: BackendAPI {
         throw APIError.configuration(reason)
     }
 
+    func fetchMessagePage(threadId: String, before cursor: String) async throws -> MessagePageDTO {
+        throw APIError.configuration(reason)
+    }
+
     func createOrGetThread(otherUserId: String) async throws -> ThreadDTO {
         _ = otherUserId
         throw APIError.configuration(reason)
     }
 
-    func sendMessage(threadId: String, text: String, replyToMessageId: String?, attachment: OutgoingAttachmentDTO?) async throws -> MessageDTO {
+    func sendMessage(threadId: String, attempt: OutgoingMessageAttempt) async throws -> MessageDTO {
         _ = threadId
-        _ = text
-        _ = replyToMessageId
-        _ = attachment
+        _ = attempt
         throw APIError.configuration(reason)
     }
 

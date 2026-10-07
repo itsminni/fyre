@@ -36,6 +36,7 @@ struct ProfileSetupView: View {
     @State private var pendingAvatarCrop: PendingProfileAvatarCrop?
     @State private var errorMessage: String?
     @State private var isSaving = false
+    @State private var uploadControl: UploadControl?
     @State private var showEventRemovalAlert = false
     @State private var hasHydratedFromUser = false
     @State private var draggingProfilePhotoIndex: Int?
@@ -171,6 +172,8 @@ struct ProfileSetupView: View {
                     Toggle(L10n.tr("profile.smokes"), isOn: $smokes)
                     Toggle(L10n.tr("profile.drinks"), isOn: $drinks)
                 }
+
+                if let uploadControl { Section { UploadProgressView(control: uploadControl) } }
 
                 if let errorMessage {
                     Section {
@@ -326,8 +329,14 @@ struct ProfileSetupView: View {
 
         var appendedImages: [Data] = []
         for item in items.prefix(remainingCapacity) {
-            if let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty {
-                appendedImages.append(data)
+            do {
+                guard let picked = try await item.loadTransferable(type: BoundedPickedAttachment.self) else {
+                    throw AttachmentReadError.unreadable
+                }
+                appendedImages.append(try BoundedAttachment.profilePhotoData(from: picked.data))
+            } catch {
+                errorMessage = error.localizedDescription
+                return
             }
         }
 
@@ -577,6 +586,9 @@ struct ProfileSetupView: View {
         }
 
         isSaving = true
+        let control = UploadControl()
+        uploadControl = control
+        defer { uploadControl = nil; isSaving = false }
 
         if let err = await store.updateProfile(
             firstName: firstName,
@@ -597,9 +609,10 @@ struct ProfileSetupView: View {
             excludeSmokers: excludeSmokers,
             excludeDrinkers: excludeDrinkers,
             smokes: smokes,
-            drinks: drinks
+            drinks: drinks,
+            control: control
         ) {
-            errorMessage = err
+            errorMessage = control.isCancelled ? nil : err
             isSaving = false
             return
         }
@@ -671,8 +684,8 @@ struct PendingProfileAvatarCrop: Identifiable {
 
 @MainActor
 func loadPendingProfileAvatarCrop(from item: PhotosPickerItem) async -> PendingProfileAvatarCrop? {
-    guard let data = try? await item.loadTransferable(type: Data.self),
-          let image = UIImage(data: data)?.normalizedForProfileAvatarCrop()
+    guard let picked = try? await item.loadTransferable(type: BoundedPickedAttachment.self),
+          let image = BoundedAttachment.previewImage(from: picked.data)?.normalizedForProfileAvatarCrop()
     else {
         return nil
     }

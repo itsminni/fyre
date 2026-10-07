@@ -130,13 +130,15 @@ enum ChatBubblePalette: String, CaseIterable, Identifiable {
         switch self {
         case .default:
             if isOutgoing {
-                return colorScheme == .dark ? .white : Color(red: 0.29, green: 0.15, blue: 0.07)
+                return colorScheme == .dark ? .black : Color(red: 0.29, green: 0.15, blue: 0.07)
             }
             return .primary
         case .graphite:
             return colorScheme == .dark ? .white : .primary
         default:
-            return .white
+            // These saturated fills have at least 4.8:1 contrast against black;
+            // white falls below 4.5:1 on every palette.
+            return .black
         }
     }
 

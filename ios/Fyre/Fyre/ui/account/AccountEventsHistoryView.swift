@@ -10,19 +10,12 @@ import SwiftUI
 struct EventHistoryRow: View {
     let item: EventHistoryItem
 
-    // Reuse a single formatter because each row needs the same date presentation.
-    private static let eventDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.eventTitle)
                 .font(.subheadline.weight(.semibold))
-            Text(Self.eventDateFormatter.string(from: item.eventDate))
+            Text(EventDatePresentation.full( item.eventDate))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Text(statusText(item.status))
@@ -52,16 +45,18 @@ struct AccountEventsHistoryView: View {
 
     var body: some View {
         List {
-            if store.currentUserUpcomingEventHistory.isEmpty {
+            if store.eventRefreshFailed { Text(L10n.tr("events.error.requestFailed")).foregroundStyle(.secondary) }
+            if store.currentUserEventHistory.isEmpty {
                 Text(L10n.tr("account.events.empty"))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(store.currentUserUpcomingEventHistory) { item in
+                ForEach(store.currentUserEventHistory) { item in
                     EventHistoryRow(item: item)
                 }
             }
         }
         .navigationTitle(L10n.tr("account.events.title"))
+        .refreshable { await store.refreshRemoteMainEventState() }
         .task {
             // Refresh once on open so the history screen reflects server-side event changes.
             await store.refreshRemoteMainEventState()

@@ -113,9 +113,9 @@
 "account.segment.settings" = "Impostazioni";
 "account.segment.events" = "Eventi";
 "account.section.events" = "Le mie iscrizioni eventi";
-"account.events.empty" = "Nessuna attività eventi futuri.";
+"account.events.empty" = "Nessuna attività eventi.";
 "account.events.openAll" = "Eventi";
-"account.events.title" = "Tutti gli eventi futuri";
+"account.events.title" = "Cronologia eventi";
 "account.theme" = "Tema";
 "account.theme.system" = "Sistema";
 "account.theme.light" = "Chiaro";
@@ -334,3 +334,35 @@
 "events.unavailable.description" = "Non è stato possibile caricare l'evento live. Riprova tra poco.";
 
 "common.cancel" = "Annulla";
+
+"attachment.error.empty" = "Il file selezionato è vuoto.";
+"attachment.error.tooLarge" = "Il file è troppo grande. Scegliere un file più piccolo.";
+"attachment.error.unreadable" = "Impossibile leggere il file selezionato.";
+
+"startup.configuration.title" = "App non disponibile";
+"startup.configuration.message" = "Questa versione dell’app non è configurata correttamente. Contattare l’assistenza.";
+"startup.session.title" = "Impossibile verificare la sessione";
+"startup.session.message" = "Controllare la connessione e riprovare.";
+"startup.retry" = "Riprova";
+
+// Chat history pagination
+"chat.history.load" = "Carica messaggi precedenti";
+"chat.history.error" = "Impossibile caricare i messaggi precedenti.";
+"chat.history.retry" = "Riprova";
+
+"notifications.destinationUnavailable" = "La destinazione della notifica non è disponibile. Riapri la chat o l’evento dall’elenco.";
+
+"home.discovery.continue" = "Ci sono altri profili da cercare";
+
+"upload.progress" = "Caricamento allegati";
+"upload.saving" = "Salvataggio…";
+
+"chat.accessibility.avatar" = "Apri foto profilo";
+"chat.accessibility.options" = "Altre opzioni";
+"chat.accessibility.deleteRecording" = "Elimina registrazione";
+"chat.accessibility.record" = "Registra messaggio vocale";
+"chat.accessibility.stopRecording" = "Interrompi registrazione";
+"chat.accessibility.send" = "Invia messaggio";
+"common.back" = "Indietro";
+
+"chat.accessibility.attach" = "Aggiungi allegato";

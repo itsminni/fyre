@@ -13,6 +13,7 @@ struct MainEventRemoteState: Sendable {
     let currentStatus: EventHistoryStatus?
     let history: [EventHistoryItem]
     let adminState: EventAdminState?
+    var availableEvents: [EventSummary] = []
 }
 
 struct EventServerCounters: Equatable, Sendable {
@@ -355,16 +356,21 @@ struct AppwritePaginationState: Sendable {
 actor AppwriteService {
     let configuration: AppwriteConfiguration
     let session: URLSession
+    var completedMessageSends: [String: MessageDTO] = [:]
+    var completedMessageSendOrder: [String] = []
+    var lastReconciledUpload: [String: String] = [:]
+    var pendingMessageUploads: [String: PendingMessageUpload] = [:]
+    var inFlightMessageSends: [String: InFlightMessageSend] = [:]
     var cachedFunctionJWT: (value: String, expiresAt: Date)?
 
-    init(configuration: AppwriteConfiguration) {
+    init(configuration: AppwriteConfiguration, session: URLSession? = nil) {
         self.configuration = configuration
 
         let sessionConfiguration = URLSessionConfiguration.default
         sessionConfiguration.httpCookieStorage = HTTPCookieStorage.shared
         sessionConfiguration.httpCookieAcceptPolicy = .always
         sessionConfiguration.httpShouldSetCookies = true
-        session = URLSession(configuration: sessionConfiguration)
+        self.session = session ?? URLSession(configuration: sessionConfiguration)
     }
 
     func signUp(email: String, password: String) async throws -> User {
@@ -430,7 +436,7 @@ actor AppwriteService {
         _ = try await sendRequest(
             method: "DELETE",
             pathComponents: ["account", "push-targets", targetId],
-            expectedStatusCodes: [204]
+            expectedStatusCodes: [204, 404]
         )
     }
 
@@ -438,47 +444,46 @@ actor AppwriteService {
         clearCookies()
     }
 
-    func updateProfile(for user: User) async throws -> User {
+    func updateProfile(for user: User, control: UploadControl? = nil) async throws -> User {
         let accountId = try await resolvedRequiredAccountId(from: user)
         var updatedUser = user
         updatedUser.appwriteUserId = accountId
-
-        var uploadedFileIds: [String] = []
-        if let avatarData = updatedUser.primaryProfileImageData,
-           updatedUser.avatarFileId?.isEmpty ?? true {
-            let avatarFileIds = try await uploadProfilePhotos([avatarData])
-            uploadedFileIds.append(contentsOf: avatarFileIds)
-            updatedUser.avatarFileId = avatarFileIds.first
-            updatedUser.profileImageData = avatarData
+        let avatar = (updatedUser.avatarFileId?.isEmpty ?? true) ? updatedUser.primaryProfileImageData : nil
+        let gallery = updatedUser.resolvedPhotoFileIds.isEmpty ? updatedUser.resolvedProfilePhotoDataItems : []
+        let images = [avatar].compactMap { $0 } + gallery
+        // Upload one batch so cancellation also cleans an avatar if a later gallery upload fails.
+        let uploadedFileIds = try await uploadProfilePhotos(images, control: control)
+        if let avatar {
+            updatedUser.avatarFileId = uploadedFileIds.first
+            updatedUser.profileImageData = avatar
+        }
+        if !gallery.isEmpty {
+            updatedUser.photoFileIds = Array(uploadedFileIds.dropFirst(avatar == nil ? 0 : 1))
         }
 
-        if !updatedUser.resolvedProfilePhotoDataItems.isEmpty,
-           updatedUser.resolvedPhotoFileIds.isEmpty {
-            let galleryFileIds = try await uploadProfilePhotos(updatedUser.resolvedProfilePhotoDataItems)
-            uploadedFileIds.append(contentsOf: galleryFileIds)
-            updatedUser.photoFileIds = galleryFileIds
-        }
-
+        var writeStarted = false
         do {
+            try await control?.beginCommit()
+            writeStarted = true
             updatedUser = try await ensureProfileRow(for: updatedUser)
             await repairAvatarPermissions(for: updatedUser)
             return updatedUser
         } catch {
-            for fileId in uploadedFileIds {
-                try? await deleteAvatar(fileId: fileId)
+            if !writeStarted || isDefinitiveWriteRejection(error) {
+                for fileId in uploadedFileIds where !writeStarted || !ManagedAttachmentContract.isManagedProfile(fileId) { try? await deleteAvatar(fileId: fileId) }
             }
             throw error
         }
     }
 
-    func updateProfileImage(_ imageData: Data?, for user: User) async throws -> User {
+    func updateProfileImage(_ imageData: Data?, for user: User, control: UploadControl? = nil) async throws -> User {
         let accountId = try await resolvedRequiredAccountId(from: user)
         let previousAvatarFileId = user.avatarFileId
         let sanitizedImage = imageData.flatMap { $0.isEmpty ? nil : $0 }
         let nextAvatarFileId: String?
 
         if let sanitizedImage {
-            nextAvatarFileId = (try await uploadProfilePhotos([sanitizedImage])).first
+            nextAvatarFileId = (try await uploadProfilePhotos([sanitizedImage], control: control)).first
         } else {
             nextAvatarFileId = nil
         }
@@ -488,17 +493,22 @@ actor AppwriteService {
         updatedUser.avatarFileId = nextAvatarFileId
         updatedUser.profileImageData = sanitizedImage
 
+        var writeStarted = false
         do {
+            try await control?.beginCommit()
+            writeStarted = true
             updatedUser = try await ensureProfileRow(for: updatedUser)
             await repairAvatarPermissions(for: updatedUser)
         } catch {
-            if let nextAvatarFileId {
+            if !writeStarted || isDefinitiveWriteRejection(error), let nextAvatarFileId,
+               !writeStarted || !ManagedAttachmentContract.isManagedProfile(nextAvatarFileId) {
                 try? await deleteAvatar(fileId: nextAvatarFileId)
             }
             throw error
         }
 
         if let previousAvatarFileId,
+           !ManagedAttachmentContract.isManagedProfile(previousAvatarFileId),
            previousAvatarFileId != nextAvatarFileId,
            !updatedUser.resolvedPhotoFileIds.contains(previousAvatarFileId) {
             try? await deleteAvatar(fileId: previousAvatarFileId)
@@ -507,12 +517,12 @@ actor AppwriteService {
         return updatedUser
     }
 
-    func updateProfileImages(_ imageDataItems: [Data], for user: User) async throws -> User {
+    func updateProfileImages(_ imageDataItems: [Data], for user: User, control: UploadControl? = nil) async throws -> User {
         let accountId = try await resolvedRequiredAccountId(from: user)
         let previousFileIds = user.resolvedPhotoFileIds
         let previousAvatarFileId = user.avatarFileId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let sanitizedImages = imageDataItems.filter { !$0.isEmpty }
-        let nextFileIds = try await uploadProfilePhotos(sanitizedImages)
+        let nextFileIds = try await uploadProfilePhotos(sanitizedImages, control: control)
 
         var updatedUser = user
         updatedUser.appwriteUserId = accountId
@@ -525,19 +535,24 @@ actor AppwriteService {
             updatedUser.avatarFileId = nextFileIds.first
         }
 
+        var writeStarted = false
         do {
+            try await control?.beginCommit()
+            writeStarted = true
             updatedUser = try await ensureProfileRow(for: updatedUser)
             await repairAvatarPermissions(for: updatedUser)
         } catch {
-            for fileId in nextFileIds {
-                try? await deleteAvatar(fileId: fileId)
+            if !writeStarted || isDefinitiveWriteRejection(error) {
+                for fileId in nextFileIds where !writeStarted || !ManagedAttachmentContract.isManagedProfile(fileId) {
+                    try? await deleteAvatar(fileId: fileId)
+                }
             }
             throw error
         }
 
         let obsoleteFileIds = Set(previousFileIds).subtracting(Set(nextFileIds))
         for fileId in obsoleteFileIds {
-            if fileId != updatedUser.avatarFileId {
+            if fileId != updatedUser.avatarFileId, !ManagedAttachmentContract.isManagedProfile(fileId) {
                 try? await deleteAvatar(fileId: fileId)
             }
         }
@@ -545,9 +560,18 @@ actor AppwriteService {
         return updatedUser
     }
 
-    func fetchMainEventState(for user: User?) async throws -> MainEventRemoteState? {
+    func fetchUserEventHistory(for user: User?) async throws -> [EventHistoryItem] {
+        let accountId = try await resolvedAccountId(from: user)
+        return try await makeEventHistory(for: accountId, events: [])
+    }
+
+    func fetchMainEventState(for user: User?, selectedEventId: String? = nil) async throws -> MainEventRemoteState? {
         let upcomingEvents = try await fetchUpcomingEventRows()
-        guard let mainEvent = upcomingEvents.first else { return nil }
+        guard !upcomingEvents.isEmpty else { return nil }
+        let selected = selectedEventId.flatMap { id in upcomingEvents.first { stringValue(forKey: "$id", in: $0) == id } }
+        guard let mainEvent = selectedEventId == nil ? upcomingEvents.first : selected else {
+            throw AppwriteServiceError.api(statusCode: 404, message: "Event unavailable", type: "event_not_found")
+        }
 
         let eventId = stringValue(forKey: "$id", in: mainEvent) ?? ""
         let accountId = try await resolvedAccountId(from: user)
@@ -604,7 +628,12 @@ actor AppwriteService {
             snapshot: snapshot,
             currentStatus: currentStatus,
             history: history,
-            adminState: adminState
+            adminState: adminState,
+            availableEvents: upcomingEvents.compactMap { row in
+                guard let id = stringValue(forKey: "$id", in: row) else { return nil }
+                return EventSummary(id: id, snapshot: makeMainEventSnapshot(eventRow: row),
+                                    status: history.first { $0.remoteEventId == id }?.status)
+            }
         )
     }
 
@@ -713,6 +742,19 @@ actor AppwriteService {
         )
 
         return try await completeEventAdminStateAfterMutation(response, eventId: eventId)
+    }
+
+    func fetchDiscoverPage(after cursor: String?) async throws -> DiscoverPageDTO {
+        guard let functionId = configuration.discoverProfilesFunctionId else {
+            throw AppwriteServiceError.missingConfiguration("APPWRITE_DISCOVER_PROFILES_FUNCTION_ID")
+        }
+        let response = try await executeUserFunction(functionId: functionId, body: cursor.map { ["profileCursor": $0] } ?? [:])
+        guard let profiles = response["profiles"] as? [[String: Any]] else { throw AppwriteServiceError.invalidResponse }
+        let next: String?
+        if response["nextCursor"] == nil || response["nextCursor"] is NSNull { next = nil }
+        else if let value = response["nextCursor"] as? String, !value.isEmpty, value != cursor { next = value }
+        else { throw AppwriteServiceError.invalidResponse }
+        return DiscoverPageDTO(profiles: profiles.compactMap(makeDiscoverProfileDTO(from:)), nextCursor: next)
     }
 
     func fetchDiscoverProfiles() async throws -> [DiscoverProfileDTO] {
@@ -946,6 +988,16 @@ actor AppwriteService {
             }
         }
 
+        let missingIds = Set(registrations.compactMap { stringValue(forKey: "eventId", in: $0) }).subtracting(eventsById.keys)
+        let sortedIds = missingIds.sorted()
+        for start in stride(from: 0, to: sortedIds.count, by: 50) {
+            let ids = Array(sortedIds[start..<min(start + 50, sortedIds.count)])
+            let rows = try await listRows(tableId: configuration.eventsTableId, queries: [AppwriteQuery.equal("$id", values: ids)])
+            for row in rows {
+                if let id = stringValue(forKey: "$id", in: row) { eventsById[id] = row }
+            }
+        }
+
         return registrations.compactMap { registration in
             guard let eventId = stringValue(forKey: "eventId", in: registration),
                   let event = eventsById[eventId],
@@ -962,7 +1014,8 @@ actor AppwriteService {
                 timestamp: dateValue(forKey: "$updatedAt", in: registration)
                     ?? dateValue(forKey: "createdAt", in: registration)
                     ?? dateValue(forKey: "$createdAt", in: registration)
-                    ?? eventDate
+                    ?? eventDate,
+                remoteEventId: eventId
             )
         }
         .sorted(by: { $0.timestamp > $1.timestamp })
@@ -1312,6 +1365,15 @@ actor AppwriteService {
         return nil
     }
 
+    // One bounded request; callers own pagination rather than draining the table.
+    func listRowsPage(tableId: String, queries: [String]) async throws -> [String: Any] {
+        try await sendJSONObjectRequest(
+            method: "GET",
+            pathComponents: ["tablesdb", configuration.databaseId, "tables", tableId, "rows"],
+            queryItems: queries.map { URLQueryItem(name: "queries[]", value: $0) }
+        )
+    }
+
     func listRows(
         tableId: String,
         queries: [String],
@@ -1359,54 +1421,32 @@ actor AppwriteService {
         return collectedRows
     }
 
-    private func uploadAvatar(data: Data, fileId: String, ownerUserId: String) async throws {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var request = URLRequest(
-            url: url(
-                pathComponents: [
-                    "storage",
-                    "buckets",
-                    configuration.avatarsBucketId,
-                    "files"
-                ]
-            )
+    private func uploadAvatar(data: Data, fileId: String, ownerUserId: String, control: UploadControl? = nil, completedBefore: Int = 0, totalBytes: Int? = nil) async throws {
+        try await uploadFile(
+            data: data, bucketId: configuration.avatarsBucketId, fileId: fileId,
+            fileName: "avatar-\(fileId).jpg", mimeType: "image/jpeg",
+            permissions: avatarPermissions(ownerUserId: ownerUserId), limit: BoundedAttachment.avatarLimit,
+            control: control, completedBefore: completedBefore, totalBytes: totalBytes
         )
-        request.httpMethod = "POST"
-        request.setValue(configuration.projectId, forHTTPHeaderField: "X-Appwrite-Project")
-        request.setValue("1.8.0", forHTTPHeaderField: "X-Appwrite-Response-Format")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let permissions = avatarPermissions(ownerUserId: ownerUserId)
-        request.httpBody = makeMultipartBody(
-            boundary: boundary,
-            fileId: fileId,
-            fileName: "avatar-\(fileId).jpg",
-            mimeType: "image/jpeg",
-            fileData: data,
-            permissions: permissions
-        )
-
-        let (responseData, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AppwriteServiceError.invalidResponse
-        }
-
-        guard httpResponse.statusCode == 201 else {
-            throw makeAPIError(from: responseData, statusCode: httpResponse.statusCode)
-        }
     }
 
-    private func uploadProfilePhotos(_ photoDataItems: [Data]) async throws -> [String] {
+    private func uploadProfilePhotos(_ photoDataItems: [Data], control: UploadControl? = nil) async throws -> [String] {
         guard !photoDataItems.isEmpty else {
             return []
         }
 
         let ownerUserId = try await resolvedRequiredAccountId(from: nil)
         var uploadedFileIds: [String] = []
+        var completedBytes = 0
+        let totalBytes = photoDataItems.reduce(0) { $0 + $1.count }
 
         do {
             for data in photoDataItems {
-                let fileId = makeRandomIdentifier()
-                try await uploadAvatar(data: data, fileId: fileId, ownerUserId: ownerUserId)
+                try BoundedAttachment.validate(data, limit: BoundedAttachment.avatarLimit)
+                try await control?.checkCancellation()
+                let fileId = try await reserveProfileUpload() ?? makeRandomIdentifier()
+                try await uploadAvatar(data: data, fileId: fileId, ownerUserId: ownerUserId, control: control, completedBefore: completedBytes, totalBytes: totalBytes)
+                completedBytes += data.count
                 uploadedFileIds.append(fileId)
             }
 
@@ -1417,6 +1457,23 @@ actor AppwriteService {
             }
             throw error
         }
+    }
+
+    private func reserveProfileUpload() async throws -> String? {
+        let functionId = configuration.manageProfileFunctionId
+        let response: [String: Any]
+        do {
+            response = try await executeUserFunction(functionId: functionId, body: ["action": "reserveUpload"])
+        } catch let error as AppwriteServiceError {
+            if case let .api(status, _, type) = error, status == 400, type == "function" { return nil }
+            throw error
+        }
+        if response["supported"] as? Bool == false { return nil }
+        guard response["supported"] as? Bool == true,
+              let fileId = response["fileId"] as? String, ManagedAttachmentContract.isManagedProfile(fileId) else {
+            throw AppwriteServiceError.invalidResponse
+        }
+        return fileId
     }
 
     func avatarPermissions(ownerUserId: String) -> [String] {
@@ -2062,6 +2119,9 @@ actor AppwriteService {
         fileData: Data,
         permissions: [String] = []
     ) -> Data {
+        let fileName = fileName.replacingOccurrences(of: "\r", with: "_")
+            .replacingOccurrences(of: "\n", with: "_")
+            .replacingOccurrences(of: "\"", with: "_")
         var parts = [
             Data("--\(boundary)\r\n".utf8),
             Data("Content-Disposition: form-data; name=\"fileId\"\r\n\r\n".utf8),
@@ -2220,6 +2280,14 @@ enum AppwriteQuery {
 
     nonisolated static func orderAsc(_ field: String) -> String {
         query(method: "orderAsc", column: field)
+    }
+
+    nonisolated static func orderDesc(_ field: String) -> String {
+        query(method: "orderDesc", column: field)
+    }
+
+    nonisolated static func greaterThan(_ field: String, value: String) -> String {
+        query(method: "greaterThan", column: field, values: [value])
     }
 
     nonisolated static func limit(_ value: Int) -> String {

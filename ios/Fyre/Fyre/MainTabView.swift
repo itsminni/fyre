@@ -65,10 +65,14 @@ struct MainTabView: View {
         let thread: ChatThread
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppServices.self) private var services
     @Environment(UserStore.self) private var store
+    @State private var notificationRouter = NotificationRouter.shared
+    @State private var notificationUnavailable = false
     @State private var selectedTab: MainTab = .home
     @State private var threadToOpen: ChatThread?
+    @State private var eventToOpen: String?
     @State private var unreadMessageCount = 0
     @State private var unreadMatchThreadIds = Set<String>()
     @State private var matchBanner: MatchBanner?
@@ -99,7 +103,7 @@ struct MainTabView: View {
                 .badge(messagesBadgeCount)
                 .tag(MainTab.messages)
 
-                EventsView()
+                EventsView(eventToOpen: $eventToOpen)
                     .tabItem {
                         Label(L10n.tr("tab.events"), systemImage: "calendar.badge.plus")
                     }
@@ -123,14 +127,24 @@ struct MainTabView: View {
                 .zIndex(1)
             }
         }
-        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: matchBanner)
+        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: matchBanner)
+        .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
         .task {
             RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
             await refreshUnreadMessageCount()
         }
+        .task(id: "\(notificationRouter.revision):\(store.sessionRevision):\(store.currentUser?.appwriteUserId ?? "guest")") {
+            await openPendingNotification()
+        }
+        .alert(L10n.tr("notifications.destinationUnavailable"), isPresented: $notificationUnavailable) {
+            Button(L10n.tr("common.done"), role: .cancel) { }
+        }
         .onAppear {
             RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
             startRealtime()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fyreRealtimeDidReconnect)) { _ in
+            scheduleUnreadBadgeReload()
         }
         .onDisappear {
             stopRealtime()
@@ -151,6 +165,57 @@ struct MainTabView: View {
         }
     }
 
+    @MainActor
+    private func openPendingNotification() async {
+        guard store.isSessionBootstrapComplete, store.sessionBootstrapFailure == nil,
+              let accountId = store.currentUser?.appwriteUserId,
+              let route = notificationRouter.pending else { return }
+        let revision = notificationRouter.revision
+        let session = store.sessionRevision
+        guard route.accountId == nil || route.accountId == accountId else {
+            notificationRouter.consume(revision: revision)
+            notificationUnavailable = true
+            return
+        }
+        do {
+            switch route.destination {
+            case let .thread(id):
+                guard let dto = try await services.backend.fetchThread(threadId: id),
+                      dto.participantUserIds.contains(accountId) else { throw URLError(.noPermissionsToReadFile) }
+                guard session == store.sessionRevision, accountId == store.currentUser?.appwriteUserId,
+                      revision == notificationRouter.revision, !Task.isCancelled else { return }
+                let thread = ChatThread(
+                    id: dto.id,
+                    remoteId: dto.remoteId,
+                    name: dto.name,
+                    avatar: dto.avatar,
+                    isOnline: dto.isOnline,
+                    lastSeenAt: dto.lastSeenAt,
+                    currentUserReadAt: dto.currentUserReadAt,
+                    otherParticipantReadAt: dto.otherParticipantReadAt,
+                    participantUserIds: dto.participantUserIds,
+                    notificationsEnabled: dto.notificationsEnabled,
+                    relationshipState: dto.relationshipState,
+                    messages: dto.messages.map(ChatMessage.init(dto:)),
+                    olderMessagesCursor: dto.olderMessagesCursor,
+                    remoteUnreadCount: dto.remoteUnreadCount
+                )
+                openMessageThread(thread)
+            case let .event(id):
+                // SelectedEventView verifies the event against the server before showing its detail.
+                guard session == store.sessionRevision, accountId == store.currentUser?.appwriteUserId,
+                      revision == notificationRouter.revision, !Task.isCancelled else { return }
+                selectedTab = .events
+                eventToOpen = id
+            }
+            notificationRouter.consume(revision: revision)
+        } catch {
+            guard session == store.sessionRevision, revision == notificationRouter.revision, !Task.isCancelled else { return }
+            notificationRouter.consume(revision: revision)
+            notificationUnavailable = true
+        }
+    }
+
     private func handleMatchedThread(_ thread: ChatThread) {
         RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
         _ = markMatchThreadSeen(thread.remoteId)
@@ -166,8 +231,10 @@ struct MainTabView: View {
         unreadMatchThreadIds.remove(thread.remoteId)
         dismissMatchBanner()
         selectedTab = .messages
+        let session = store.sessionRevision
         Task { @MainActor in
             await Task.yield()
+            guard session == store.sessionRevision else { return }
             threadToOpen = thread
         }
     }
@@ -265,9 +332,11 @@ struct MainTabView: View {
     @MainActor
     private func openRealtimeMatchedThread(threadId: String) async {
         guard !unreadMatchThreadIds.contains(threadId) else { return }
+        let session = store.sessionRevision
 
         do {
             guard let dto = try await services.backend.fetchThread(threadId: threadId) else { return }
+            guard session == store.sessionRevision, !Task.isCancelled else { return }
             let thread = ChatThread(
                 id: dto.id,
                 remoteId: dto.remoteId,
@@ -280,7 +349,9 @@ struct MainTabView: View {
                 participantUserIds: dto.participantUserIds,
                 notificationsEnabled: dto.notificationsEnabled,
                 relationshipState: dto.relationshipState,
-                messages: dto.messages.map(ChatMessage.init(dto:))
+                messages: dto.messages.map(ChatMessage.init(dto:)),
+                olderMessagesCursor: dto.olderMessagesCursor,
+                remoteUnreadCount: dto.remoteUnreadCount
             )
             RecentChatThreadStore.upsert(thread)
             unreadMatchThreadIds.insert(thread.remoteId)
@@ -296,8 +367,10 @@ struct MainTabView: View {
 
     @MainActor
     private func refreshUnreadMessageCount() async {
+        let session = store.sessionRevision
         do {
             let threads = try await services.backend.fetchThreads()
+            guard session == store.sessionRevision, !Task.isCancelled else { return }
             unreadMessageCount = threads.reduce(0) { total, thread in
                 total + unreadMessageCount(in: thread)
             }
@@ -310,7 +383,8 @@ struct MainTabView: View {
     }
 
     private func unreadMessageCount(in thread: ThreadDTO) -> Int {
-        thread.messages.filter { message in
+        if let count = thread.remoteUnreadCount { return count }
+        return thread.messages.filter { message in
             guard !message.isMe else { return false }
             guard let currentUserReadAt = thread.currentUserReadAt else { return true }
             return message.sentAt > currentUserReadAt
@@ -336,7 +410,9 @@ struct MainTabView: View {
                 participantUserIds: dto.participantUserIds,
                 notificationsEnabled: dto.notificationsEnabled,
                 relationshipState: dto.relationshipState,
-                messages: dto.messages.map(ChatMessage.init(dto:))
+                messages: dto.messages.map(ChatMessage.init(dto:)),
+                olderMessagesCursor: dto.olderMessagesCursor,
+                remoteUnreadCount: dto.remoteUnreadCount
             )
 
             RecentChatThreadStore.upsert(thread)

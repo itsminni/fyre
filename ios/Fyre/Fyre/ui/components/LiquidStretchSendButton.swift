@@ -10,6 +10,7 @@ import UIKit
 
 // Send button stretches toward drag direction for a "liquid" feel.
 struct LiquidStretchSendButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     let isEnabled: Bool
     let action: () -> Void
@@ -61,6 +62,9 @@ struct LiquidStretchSendButton: View {
                 }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(L10n.tr("chat.accessibility.send"))
+        .accessibilityIdentifier("chat.send")
+        .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.55)
         .simultaneousGesture(
@@ -76,7 +80,7 @@ struct LiquidStretchSendButton: View {
     }
 
     private var supportsLiquidInteraction: Bool {
-        guard allowsLiquidInteraction else {
+        guard allowsLiquidInteraction, !reduceMotion else {
             return false
         }
 

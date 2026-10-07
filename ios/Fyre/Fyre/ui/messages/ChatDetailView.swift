@@ -30,6 +30,14 @@ private extension Color {
     }
 }
 
+private struct ChatMessageFramesPreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
 private struct ChatScrollViewportHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
@@ -146,7 +154,7 @@ private enum AttachmentPickerMode {
     }
 }
 
-private enum ChatAttachmentValidationError: LocalizedError {
+enum ChatAttachmentValidationError: LocalizedError {
     case unsupportedFormat
 
     var errorDescription: String? {
@@ -214,7 +222,10 @@ struct ChatDetailView: View {
     }
 
     @Environment(AppServices.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("settings_chat_background_style") private var chatBackgroundStyle = ChatBackgroundStyle.defaultDark.rawValue
     @AppStorage("settings_chat_background_brightness") private var chatBackgroundBrightness = 0.0
@@ -235,6 +246,15 @@ struct ChatDetailView: View {
     @State private var threadNotificationsEnabled: Bool
     @State private var relationshipState: RelationshipStateDTO
     @State private var messages: [ChatMessage]
+    @State private var olderMessagesCursor: String?
+    @State private var isLoadingOlderMessages = false
+    @State private var historyLoadFailed = false
+    @State private var historyLoadTask: Task<Void, Never>?
+    @State private var isRefreshingThread = false
+    @State private var latestHistoryAnchor: ChatMessage?
+    @State private var visibleMessageID: UUID?
+    @State private var historyScrollRestoreID: UUID?
+    @State private var isHistoryScrollReady = false
     @State private var draft = ""
     @State private var pendingAttachment: PendingChatAttachment?
     @State private var pickedAttachmentItem: PhotosPickerItem?
@@ -245,6 +265,8 @@ struct ChatDetailView: View {
     @State private var replyingToMessage: ChatMessage?
     @State private var sendErrorMessage: String?
     @State private var isSending = false
+    @State private var uploadControl: UploadControl?
+    @State private var failedSendAttempt: OutgoingMessageAttempt?
     @State private var realtimeSubscription: AppwriteRealtimeSubscription?
     @State private var realtimeReloadTask: Task<Void, Never>?
     @State private var reconciliationPollingTask: Task<Void, Never>?
@@ -274,6 +296,8 @@ struct ChatDetailView: View {
         _threadNotificationsEnabled = State(initialValue: thread.notificationsEnabled)
         _relationshipState = State(initialValue: thread.relationshipState)
         _messages = State(initialValue: thread.messages)
+        _olderMessagesCursor = State(initialValue: thread.olderMessagesCursor)
+        _latestHistoryAnchor = State(initialValue: thread.messages.last(where: { !$0.remoteId.hasPrefix("local-") }))
     }
 
     var body: some View {
@@ -281,8 +305,20 @@ struct ChatDetailView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        if olderMessagesCursor != nil {
+                            historyLoadControl
+                        }
                         ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
                             messageRow(message, at: index)
+                                .id(message.id)
+                                .background {
+                                    GeometryReader { geometry in
+                                        Color.clear.preference(
+                                            key: ChatMessageFramesPreferenceKey.self,
+                                            value: [message.id: geometry.frame(in: .named("chatScrollView"))]
+                                        )
+                                    }
+                                }
                         }
                     }
                     .padding(.top, messageListTopInset)
@@ -291,6 +327,23 @@ struct ChatDetailView: View {
                     Color.clear
                         .frame(height: 1)
                         .background(ChatBottomAnchorReader())
+                }
+                .onPreferenceChange(ChatMessageFramesPreferenceKey.self) { frames in
+                    visibleMessageID = frames.filter { $0.value.maxY > 0 && $0.value.minY < scrollViewportHeight }
+                        .min { $0.value.minY < $1.value.minY }?.key
+                    if isHistoryScrollReady, !historyLoadFailed,
+                       let firstID = messages.first?.id, let frame = frames[firstID],
+                       frame.minY >= 0, frame.minY < 180 {
+                        loadOlderMessages()
+                    }
+                }
+                .onChange(of: historyScrollRestoreID) { _, id in
+                    guard let id else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        proxy.scrollTo(id, anchor: .top)
+                        historyScrollRestoreID = nil
+                    }
                 }
                 .coordinateSpace(name: "chatScrollView")
                 .background(ChatScrollViewportHeightReader())
@@ -302,7 +355,8 @@ struct ChatDetailView: View {
                     guard abs(bottomAnchorMinY - value) > 0.5 else { return }
                     bottomAnchorMinY = value
                 }
-                .onAppear {
+                .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
+        .onAppear {
                     scrollToLatestMessage(using: proxy, animated: false)
                     settleInitialScroll(using: proxy)
                     markThreadAsRead()
@@ -378,7 +432,10 @@ struct ChatDetailView: View {
         .task {
             await reloadThread()
             startRealtime()
-            startReconciliationPolling()
+        }
+        .task(id: scenePhase) {
+            if scenePhase == .active { startReconciliationPolling() }
+            else { stopReconciliationPolling() }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             updateKeyboardOverlap(from: notification)
@@ -402,6 +459,9 @@ struct ChatDetailView: View {
             CameraCaptureView { image in
                 handleCapturedImage(image)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fyreRealtimeDidReconnect)) { _ in
+            scheduleRealtimeReload()
         }
         .onDisappear {
             stopRealtime()
@@ -475,7 +535,6 @@ struct ChatDetailView: View {
                         bubbleVerticalPadding: bubbleVerticalPadding
                     )
                 }
-                .id(message.id)
                 .scaleEffect(
                     isAnimating(message) ? 0.94 : 1,
                     anchor: messageTransitionAnchor
@@ -512,7 +571,7 @@ struct ChatDetailView: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Back")
+        .accessibilityLabel(L10n.tr("common.back"))
     }
 
     private var chatHeaderPrincipal: some View {
@@ -529,7 +588,7 @@ struct ChatDetailView: View {
                 )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open avatar")
+            .accessibilityLabel(L10n.tr("chat.accessibility.avatar"))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(threadName)
@@ -537,7 +596,7 @@ struct ChatDetailView: View {
                     .lineLimit(1)
 
                 if threadIsOnline {
-                    Text("Online")
+                    Text(L10n.tr("messages.online"))
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(Color.green)
                 }
@@ -577,7 +636,7 @@ struct ChatDetailView: View {
                 verticalOffset: usesIOS18LegacyChatChrome ? -0.5 : 0
             )
         }
-        .accessibilityLabel("More options")
+        .accessibilityLabel(L10n.tr("chat.accessibility.options"))
     }
 
     private func legacyHeaderControlLabel(
@@ -673,10 +732,16 @@ struct ChatDetailView: View {
         let attachment = pendingAttachment
         let sendsVoiceOnlyMessage = attachment?.type == .audio
         let text = sendsVoiceOnlyMessage ? "" : draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canInteractWithThread, !text.isEmpty || pendingAttachment != nil else { return }
+        guard canSendMessage else { return }
         audioPlayback.stop()
         let replyTarget = replyingToMessage
-        let optimisticMessageID = UUID()
+        let transfer = UploadControl()
+        uploadControl = transfer
+        let attempt = OutgoingMessageAttempt(
+            draft: OutgoingMessageDraft(text: text, replyToMessageId: replyTarget?.remoteId, attachment: attachment?.outgoingAttachment),
+            retrying: failedSendAttempt, uploadControl: transfer
+        )
+        let optimisticMessageID = attempt.operationId
         let optimisticMessage = makeOptimisticOutgoingMessage(
             id: optimisticMessageID,
             text: text,
@@ -698,13 +763,12 @@ struct ChatDetailView: View {
         upsertMessage(optimisticMessage)
         replyingToMessage = nil
 
+        let session = UserStore.shared.sessionRevision
         Task {
             do {
                 let dto = try await services.backend.sendMessage(
                     threadId: thread.remoteId,
-                    text: text,
-                    replyToMessageId: replyTarget?.remoteId,
-                    attachment: attachment?.outgoingAttachment
+                    attempt: attempt
                 )
                 let message = ChatMessage(
                     id: dto.id,
@@ -719,14 +783,19 @@ struct ChatDetailView: View {
                     replyPreviewText: dto.replyPreviewText ?? replyTarget.map(replyPreviewText(for:))
                 )
                 await MainActor.run {
+                    guard session == UserStore.shared.sessionRevision else { return }
+                    failedSendAttempt = nil
                     reconcileOptimisticMessage(id: optimisticMessageID, with: message)
                     let snapshot = currentThreadSnapshot
                     RecentChatThreadStore.upsert(snapshot)
                     NotificationCenter.default.post(name: .fyreThreadsDidChange, object: snapshot)
+                    uploadControl = nil
                     isSending = false
                 }
             } catch {
                 await MainActor.run {
+                    guard session == UserStore.shared.sessionRevision else { return }
+                    failedSendAttempt = attempt
                     messages.removeAll { $0.id == optimisticMessageID }
                     if let fileId = optimisticMessage.attachment?.fileId {
                         localAudioDataByFileId.removeValue(forKey: fileId)
@@ -740,6 +809,8 @@ struct ChatDetailView: View {
 #else
                     sendErrorMessage = L10n.tr("chat.error.sendFailed")
 #endif
+                    if error is CancellationError { sendErrorMessage = nil }
+                    uploadControl = nil
                     isSending = false
                 }
             }
@@ -824,14 +895,10 @@ struct ChatDetailView: View {
     }
 
     private func reconcileOptimisticMessage(id: UUID, with confirmed: ChatMessage) {
-        if let existingIndex = messages.firstIndex(where: { $0.id == id }) {
-            transferLocalAttachmentCache(from: messages[existingIndex], to: confirmed)
-            messages[existingIndex] = confirmed
-            messages.sort { $0.sentAt < $1.sentAt }
-            return
+        if let optimistic = messages.first(where: { $0.id == id }) {
+            transferLocalAttachmentCache(from: optimistic, to: confirmed)
         }
-
-        upsertMessage(confirmed)
+        messages = ChatMessageReconciliation.confirm(confirmed, optimisticId: id, in: messages)
     }
 
     private func copyMessageText(_ text: String) {
@@ -1025,7 +1092,8 @@ struct ChatDetailView: View {
     private var modernComposerOverlay: some View {
         VStack(alignment: .leading, spacing: 6) {
             composerStatusAndReplyContent
-            modernComposerRow
+            if dynamicTypeSize.isAccessibilitySize { accessibilityComposerRow }
+            else { modernComposerRow }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
@@ -1036,7 +1104,8 @@ struct ChatDetailView: View {
     private var legacyComposerOverlay: some View {
         VStack(alignment: .leading, spacing: 8) {
             composerStatusAndReplyContent
-            legacyComposerRow
+            if dynamicTypeSize.isAccessibilitySize { accessibilityComposerRow }
+            else { legacyComposerRow }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, usesIOS18LegacyChatChrome ? 8 : 12)
@@ -1045,6 +1114,7 @@ struct ChatDetailView: View {
 
     @ViewBuilder
     private var composerStatusAndReplyContent: some View {
+        if let uploadControl, isSending { UploadProgressView(control: uploadControl) }
         if let playbackErrorMessage = audioPlayback.playbackErrorMessage {
             Text(playbackErrorMessage)
                 .font(.caption)
@@ -1228,7 +1298,7 @@ struct ChatDetailView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Delete voice recording")
+            .accessibilityLabel(L10n.tr("chat.accessibility.deleteRecording"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1236,12 +1306,12 @@ struct ChatDetailView: View {
     private func microphoneInlineButton(size: CGFloat, foreground: Color) -> some View {
         Button(action: handleMicrophoneButtonTap) {
             Image(systemName: "mic.fill")
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: min(22, size * 0.65), weight: .semibold))
                 .foregroundStyle(foreground)
                 .frame(width: size, height: size)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Record voice message")
+        .accessibilityLabel(L10n.tr("chat.accessibility.record"))
         .disabled(isSending || pendingAttachment != nil)
     }
 
@@ -1262,7 +1332,7 @@ struct ChatDetailView: View {
                 }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Stop voice recording")
+        .accessibilityLabel(L10n.tr("chat.accessibility.stopRecording"))
         .disabled(isSending)
     }
 
@@ -1275,7 +1345,7 @@ struct ChatDetailView: View {
     }
 
     private var messageMaxWidth: CGFloat {
-        UIScreen.main.bounds.width * 0.72
+        UIScreen.main.bounds.width * (dynamicTypeSize.isAccessibilitySize ? 0.92 : 0.72)
     }
 
     private var showsScrollToLatestButton: Bool {
@@ -1308,7 +1378,7 @@ struct ChatDetailView: View {
     @ViewBuilder
     private func composerAttachmentButton() -> some View {
         Image(systemName: "plus")
-            .font(.headline.weight(.semibold))
+            .font(.system(size: 20, weight: .semibold))
             .frame(width: 30, height: 30)
     }
 
@@ -1322,6 +1392,41 @@ struct ChatDetailView: View {
 
     private var modernSendButtonSharedStretchProgress: CGFloat {
         min(0.18, composerLayoutMetrics.progress * 0.18)
+    }
+
+    private var accessibilityComposerRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let pendingAttachment { composerIntegratedAttachmentPreview(pendingAttachment) }
+            if voiceRecorder.isRecording {
+                recordingComposerStatusView
+            } else if !hasPendingAudioAttachment {
+                TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
+                    .accessibilityIdentifier("chat.composer")
+                    .focused($isInputFocused)
+                    .textFieldStyle(.plain)
+                    .submitLabel(.send)
+                    .onSubmit(sendMessage)
+                    .lineLimit(1...3)
+                    .padding(10)
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            }
+            HStack {
+                Menu { attachmentMenuActions } label: {
+                    Image(systemName: "plus").font(.system(size: 22, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(L10n.tr("chat.accessibility.attach"))
+                Spacer(minLength: 8)
+                if voiceRecorder.isRecording { voiceRecordingStopButton(size: 44) }
+                else {
+                    microphoneInlineButton(size: 44, foreground: .primary)
+                    LiquidStretchSendButton(isEnabled: canSendMessage, action: sendMessage, size: 44,
+                                            gradientColors: sendButtonGradientColors, allowsLiquidInteraction: false)
+                }
+            }
+        }
+        .padding(4)
+        .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 14))
     }
 
     @ViewBuilder
@@ -1353,6 +1458,7 @@ struct ChatDetailView: View {
                     Spacer(minLength: 0)
                 } else {
                     TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
+                        .accessibilityIdentifier("chat.composer")
                         .foregroundStyle(shouldUseDarkComposerChrome ? Color.white : Color.primary)
                         .focused($isInputFocused)
                         .textFieldStyle(.plain)
@@ -1419,6 +1525,7 @@ struct ChatDetailView: View {
                     Spacer(minLength: 0)
                 } else {
                     TextField(L10n.tr("chat.message.placeholder"), text: $draft, axis: .vertical)
+                        .accessibilityIdentifier("chat.composer")
                         .foregroundStyle(.primary)
                         .focused($isInputFocused)
                         .textFieldStyle(.plain)
@@ -1474,6 +1581,8 @@ struct ChatDetailView: View {
                 }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(L10n.tr("chat.accessibility.send"))
+        .accessibilityIdentifier("chat.send")
         .disabled(!canSendMessage)
         .opacity(canSendMessage ? 1 : 0.72)
     }
@@ -1741,11 +1850,7 @@ struct ChatDetailView: View {
     }
 
     private func messageLinkColor(isOutgoing: Bool) -> Color {
-        if isOutgoing {
-            return colorScheme == .dark ? .white : Color(red: 0.70, green: 0.24, blue: 0.08)
-        }
-
-        return Color(uiColor: .systemBlue)
+        messageTextColor(isOutgoing: isOutgoing)
     }
 
     private func attributedMessageText(_ text: String, isOutgoing: Bool) -> AttributedString {
@@ -1998,12 +2103,12 @@ struct ChatDetailView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(sender)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(isOutgoing ? .white.opacity(0.82) : .secondary)
+                .foregroundStyle(messageTextColor(isOutgoing: isOutgoing))
                 .lineLimit(1)
 
             Text(text)
                 .font(.callout)
-                .foregroundStyle(isOutgoing ? .white.opacity(0.94) : .primary.opacity(0.90))
+                .foregroundStyle(messageTextColor(isOutgoing: isOutgoing))
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
         }
@@ -2692,9 +2797,63 @@ struct ChatDetailView: View {
         shouldShowTimestamp(for: index) ? 4 : 0
     }
 
+    private var historyLoadControl: some View {
+        VStack(spacing: 8) {
+            if isLoadingOlderMessages {
+                ProgressView()
+            } else {
+                if historyLoadFailed {
+                    Text(L10n.tr("chat.history.error"))
+                        .accessibilityIdentifier("chat.historyLoadError")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button(L10n.tr(historyLoadFailed ? "chat.history.retry" : "chat.history.load")) {
+                    loadOlderMessages()
+                }
+                .font(.footnote)
+                .accessibilityIdentifier("chat.loadOlderMessages")
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    private func loadOlderMessages() {
+        guard let cursor = olderMessagesCursor, !isLoadingOlderMessages else { return }
+        isLoadingOlderMessages = true
+        historyLoadFailed = false
+        historyLoadTask = Task { @MainActor in
+            defer { isLoadingOlderMessages = false }
+            do {
+                let page = try await services.backend.fetchMessagePage(threadId: thread.remoteId, before: cursor)
+                try Task.checkCancellation()
+                // Preserve the row being read, including when the user moves during the request.
+                // Restore it after the prepended rows have been laid out.
+                let anchor = visibleMessageID ?? messages.first?.id
+                messages = ChatHistoryPagination.prepend(page.messages.map(ChatMessage.init(dto:)), to: messages)
+                olderMessagesCursor = page.nextCursor
+                historyScrollRestoreID = anchor
+                RecentChatThreadStore.upsert(currentThreadSnapshot)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                historyLoadFailed = true
+            }
+        }
+    }
+
     private func reloadThread() async {
+        guard !isRefreshingThread else { return }
+        isRefreshingThread = true
+        defer { isRefreshingThread = false }
+        let session = UserStore.shared.sessionRevision
+        let previousNewest = latestHistoryAnchor
         do {
-            guard let dto = try await services.backend.fetchThread(threadId: thread.remoteId) else {
+            let fetched = try await services.backend.fetchThread(threadId: thread.remoteId)
+            guard session == UserStore.shared.sessionRevision, !Task.isCancelled else { return }
+            guard let dto = fetched else {
                 await MainActor.run {
                     if canInteractWithThread {
                         let snapshot = currentThreadSnapshot
@@ -2710,8 +2869,27 @@ struct ChatDetailView: View {
                 return
             }
 
+            var recentMessages = dto.messages.map(ChatMessage.init(dto:))
+            var recentCursor = dto.olderMessagesCursor
+            // After a long offline interval, bridge only the missed range before merging
+            // with loaded history. A disjoint latest page must never leave a silent gap.
+            while ChatHistoryPagination.needsBridge(recent: recentMessages, previousNewest: previousNewest, cursor: recentCursor),
+                  let cursor = recentCursor {
+                try Task.checkCancellation()
+                let page = try await services.backend.fetchMessagePage(threadId: thread.remoteId, before: cursor)
+                guard page.nextCursor != cursor else { throw AppwriteServiceError.invalidResponse }
+                recentMessages = ChatHistoryPagination.prepend(page.messages.map(ChatMessage.init(dto:)), to: recentMessages)
+                recentCursor = page.nextCursor
+            }
+            try Task.checkCancellation()
+            guard session == UserStore.shared.sessionRevision else { return }
+            olderMessagesCursor = ChatHistoryPagination.cursorAfterRefresh(
+                current: messages, currentCursor: olderMessagesCursor,
+                refreshed: recentMessages, refreshedCursor: recentCursor
+            )
+            latestHistoryAnchor = dto.messages.last.map(ChatMessage.init(dto:))
             let refreshedMessages = mergedMessagesKeepingLocalPending(
-                remoteMessages: dto.messages.map(ChatMessage.init(dto:))
+                remoteMessages: recentMessages, hasOlder: recentCursor != nil
             )
             let refreshedThread = ChatThread(
                 id: dto.id,
@@ -2725,7 +2903,9 @@ struct ChatDetailView: View {
                 participantUserIds: dto.participantUserIds,
                 notificationsEnabled: dto.notificationsEnabled,
                 relationshipState: dto.relationshipState,
-                messages: refreshedMessages
+                messages: refreshedMessages,
+                olderMessagesCursor: olderMessagesCursor,
+                remoteUnreadCount: dto.remoteUnreadCount
             )
 
             await MainActor.run {
@@ -2746,6 +2926,7 @@ struct ChatDetailView: View {
                 relationshipState = dto.relationshipState
                 RecentChatThreadStore.upsert(refreshedThread)
             }
+            guard session == UserStore.shared.sessionRevision else { return }
             await services.backend.markThreadRead(threadId: thread.remoteId)
         } catch {
 #if DEBUG
@@ -2767,31 +2948,24 @@ struct ChatDetailView: View {
             participantUserIds: thread.participantUserIds,
             notificationsEnabled: threadNotificationsEnabled,
             relationshipState: relationshipState,
-            messages: messages
+            messages: messages,
+            olderMessagesCursor: olderMessagesCursor
         )
     }
 
-    private func mergedMessagesKeepingLocalPending(remoteMessages: [ChatMessage]) -> [ChatMessage] {
-        var merged = remoteMessages
-        let remoteIds = Set(remoteMessages.map(\.remoteId))
-
-        for localMessage in messages where !remoteIds.contains(localMessage.remoteId) {
-            guard localMessage.isMe else { continue }
-
-            let matchingRemoteMessage = remoteMessages.first { remoteMessage in
-                remoteMessage.isMe
-                    && remoteMessage.text == localMessage.text
-                    && remoteMessage.replyToRemoteId == localMessage.replyToRemoteId
-                    && abs(remoteMessage.sentAt.timeIntervalSince(localMessage.sentAt)) < 30
-            }
-            if let matchingRemoteMessage {
-                transferLocalAttachmentCache(from: localMessage, to: matchingRemoteMessage)
-            } else {
-                merged.append(localMessage)
+    private func mergedMessagesKeepingLocalPending(remoteMessages: [ChatMessage], hasOlder: Bool) -> [ChatMessage] {
+        for localMessage in messages where localMessage.isMe {
+            let confirmedId = ChatMessageReconciliation.confirmedID(
+                for: localMessage, userId: UserStore.shared.currentUser?.appwriteUserId, threadId: thread.remoteId
+            )
+            if let remoteMessage = remoteMessages.first(where: { $0.remoteId == confirmedId }) {
+                transferLocalAttachmentCache(from: localMessage, to: remoteMessage)
             }
         }
-
-        return merged.sorted { $0.sentAt < $1.sentAt }
+        return ChatHistoryPagination.mergeRecent(
+            remoteMessages, into: messages, hasOlder: hasOlder,
+            userId: UserStore.shared.currentUser?.appwriteUserId, threadId: thread.remoteId
+        )
     }
 
     private func transferLocalAttachmentCache(from localMessage: ChatMessage, to remoteMessage: ChatMessage) {
@@ -2817,6 +2991,9 @@ struct ChatDetailView: View {
     }
 
     private func startRealtime() {
+#if DEBUG
+        guard !ChatHistoryPreview.isEnabled else { return }
+#endif
         guard realtimeSubscription == nil else { return }
 
         realtimeSubscription = AppwriteRealtimeService.makeChatSubscription(
@@ -2834,6 +3011,8 @@ struct ChatDetailView: View {
     }
 
     private func stopRealtime() {
+        historyLoadTask?.cancel()
+        historyLoadTask = nil
         realtimeReloadTask?.cancel()
         realtimeReloadTask = nil
         realtimeSubscription?.cancel()
@@ -2867,7 +3046,18 @@ struct ChatDetailView: View {
     }
 
     private func handleRealtimeEvent(_ event: AppwriteRealtimeEvent) {
-        if event.isCreate, let message = makeRealtimeMessage(from: event) {
+        if event.isDelete, let remoteId = event.stringValue(forKey: "$id"),
+           event.stringValue(forKey: "threadId") == thread.remoteId {
+            messages.removeAll { $0.remoteId == remoteId }
+            if olderMessagesCursor == remoteId {
+                olderMessagesCursor = messages.first(where: { !$0.remoteId.hasPrefix("local-") })?.remoteId
+            }
+            scheduleRealtimeReload()
+            return
+        }
+        if event.isCreate || event.isUpdate, let message = makeRealtimeMessage(from: event),
+           event.stringValue(forKey: "threadId") == thread.remoteId,
+           event.stringValue(forKey: "senderUserId") != nil {
             upsertMessage(message)
             if message.replyToRemoteId != nil {
                 scheduleRealtimeReload()
@@ -2931,16 +3121,21 @@ struct ChatDetailView: View {
     }
 
     private func upsertMessage(_ message: ChatMessage) {
-        if let existingIndex = messages.firstIndex(where: { $0.remoteId == message.remoteId }) {
+        if let existingIndex = messages.firstIndex(where: {
+            $0.remoteId == message.remoteId || ChatMessageReconciliation.confirmedID(
+                for: $0, userId: UserStore.shared.currentUser?.appwriteUserId, threadId: thread.remoteId
+            ) == message.remoteId
+        }) {
+            transferLocalAttachmentCache(from: messages[existingIndex], to: message)
             messages[existingIndex] = message
-            messages.sort { $0.sentAt < $1.sentAt }
+            messages.sort(by: ChatHistoryPagination.precedes)
             return
         }
 
         animatingMessageIDs.insert(message.id)
         withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
             messages.append(message)
-            messages.sort { $0.sentAt < $1.sentAt }
+            messages.sort(by: ChatHistoryPagination.precedes)
         }
         settleMessageAnimation(for: message.id)
     }
@@ -3130,8 +3325,11 @@ struct ChatDetailView: View {
     private func settleInitialScroll(using proxy: ScrollViewProxy) {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 140_000_000)
-            guard !showsScrollToLatestButton, let latestID = messages.last?.id else { return }
-            proxy.scrollTo(latestID, anchor: .bottom)
+            if let latestID = messages.last?.id {
+                proxy.scrollTo(latestID, anchor: .bottom)
+            }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            isHistoryScrollReady = true
         }
     }
 
@@ -3150,7 +3348,7 @@ struct ChatDetailView: View {
 
     private func loadPendingAttachment(from item: PhotosPickerItem) async {
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
+            guard let picked = try await item.loadTransferable(type: BoundedPickedAttachment.self) else {
                 throw ChatAttachmentValidationError.unsupportedFormat
             }
             guard let contentType = item.supportedContentTypes.first(where: {
@@ -3160,8 +3358,8 @@ struct ChatDetailView: View {
             }
 
             let resolved = try PendingChatAttachment.from(
-                data: data,
-                fileName: item.itemIdentifier ?? "attachment",
+                data: picked.data,
+                fileName: picked.fileName,
                 contentType: contentType
             )
             await MainActor.run {
@@ -3189,7 +3387,7 @@ struct ChatDetailView: View {
                 }
             }
 
-            let data = try Data(contentsOf: url)
+            let data = try BoundedAttachment.read(url)
             let contentType = UTType(filenameExtension: url.pathExtension) ?? .data
             pendingAttachment = try PendingChatAttachment.from(
                 data: data,
@@ -3209,9 +3407,12 @@ struct ChatDetailView: View {
     private func handleCapturedImage(_ image: UIImage?) {
         guard let image else { return }
 
+        let scale = min(1, 2048 / max(image.size.width, image.size.height))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         let rendererFormat = image.imageRendererFormat
-        let normalized = UIGraphicsImageRenderer(size: image.size, format: rendererFormat).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: image.size))
+        rendererFormat.scale = 1
+        let normalized = UIGraphicsImageRenderer(size: size, format: rendererFormat).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
 
         guard let data = normalized.jpegData(compressionQuality: 0.96) else {
@@ -3273,1210 +3474,4 @@ struct ChatDetailView: View {
         formatter.setLocalizedDateFormatFromTemplate("EEE d MMMM y")
         return formatter
     }()
-}
-
-@MainActor
-private final class ChatAudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDelegate {
-    let objectWillChange: ObservableObjectPublisher
-
-    @Published private(set) var activeKey: String?
-    @Published private(set) var loadingKey: String?
-    @Published private(set) var currentTime: TimeInterval = 0
-    @Published private(set) var duration: TimeInterval = 0
-    @Published private(set) var playbackErrorMessage: String?
-
-    private var player: AVAudioPlayer?
-    private var progressTimer: Timer?
-
-    override init() {
-        objectWillChange = ObservableObjectPublisher()
-        super.init()
-    }
-
-    func togglePendingAttachment(_ attachment: PendingChatAttachment, key: String) async {
-        await toggleAudioData(attachment.data, key: key)
-    }
-
-    func toggleAudioData(_ data: Data, key: String) async {
-        if activeKey == key {
-            stop()
-            return
-        }
-
-        do {
-            playbackErrorMessage = nil
-            try configurePlaybackSession()
-            let player = try AVAudioPlayer(data: data)
-            try play(player: player, key: key)
-        } catch {
-            playbackErrorMessage = L10n.tr("chat.voice.playbackFailed")
-#if DEBUG
-            debugPrint("Pending audio playback failed")
-#endif
-        }
-    }
-
-    func reportPlaybackUnavailable() {
-        playbackErrorMessage = AttachmentPreviewError.unavailable.localizedDescription
-    }
-
-    func toggleRemoteAttachment(
-        _ attachment: MessageAttachmentDTO,
-        key: String,
-        loader: @escaping () async throws -> Data?
-    ) async {
-        if activeKey == key {
-            stop()
-            return
-        }
-
-        loadingKey = key
-
-        do {
-            playbackErrorMessage = nil
-            guard let data = try await loader(), !data.isEmpty else {
-                loadingKey = nil
-                playbackErrorMessage = AttachmentPreviewError.unavailable.localizedDescription
-                return
-            }
-
-            try configurePlaybackSession()
-            let player = try AVAudioPlayer(data: data)
-            loadingKey = nil
-            try play(player: player, key: key)
-        } catch {
-            loadingKey = nil
-            playbackErrorMessage = L10n.tr("chat.voice.playbackFailed")
-#if DEBUG
-            debugPrint("Remote audio playback failed")
-#endif
-        }
-    }
-
-    func stop() {
-        player?.stop()
-        player = nil
-        activeKey = nil
-        loadingKey = nil
-        currentTime = 0
-        duration = 0
-        stopProgressTimer()
-    }
-
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        _ = flag
-        stop()
-    }
-
-    private func play(player: AVAudioPlayer, key: String) throws {
-        stop()
-        self.player = player
-        self.player?.delegate = self
-        self.player?.prepareToPlay()
-        currentTime = 0
-        duration = player.duration
-        guard self.player?.play() == true else {
-            throw ChatVoicePlaybackError.startFailed
-        }
-        activeKey = key
-        startProgressTimer()
-    }
-
-    private func configurePlaybackSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
-        try session.setActive(true)
-    }
-
-    func currentTime(for key: String) -> TimeInterval {
-        activeKey == key ? currentTime : 0
-    }
-
-    func displayDuration(for key: String, fallbackDuration: Int?) -> TimeInterval {
-        if activeKey == key, duration > 0 {
-            return duration
-        }
-
-        return TimeInterval(max(0, fallbackDuration ?? 0))
-    }
-
-    private func startProgressTimer() {
-        stopProgressTimer()
-        progressTimer = Timer.scheduledTimer(timeInterval: 0.08, target: self, selector: #selector(updatePlaybackProgress), userInfo: nil, repeats: true)
-    }
-
-    private func stopProgressTimer() {
-        progressTimer?.invalidate()
-        progressTimer = nil
-    }
-
-    @objc
-    private func updatePlaybackProgress() {
-        guard let player else { return }
-        currentTime = player.currentTime
-        duration = player.duration
-    }
-}
-
-private enum ChatVoicePlaybackError: LocalizedError {
-    case startFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .startFailed:
-            return L10n.tr("chat.voice.playbackFailed")
-        }
-    }
-}
-
-@MainActor
-private final class ChatVoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
-    let objectWillChange: ObservableObjectPublisher
-
-    @Published private(set) var isRecording = false
-    @Published private(set) var elapsedDuration: TimeInterval = 0
-
-    var elapsedDurationLabel: String {
-        let totalSeconds = max(0, Int(elapsedDuration.rounded()))
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        return String(format: "%d:%02d", minutes, seconds)
-    }
-
-    private var recorder: AVAudioRecorder?
-    private var recordingURL: URL?
-    private var timer: Timer?
-
-    override init() {
-        objectWillChange = ObservableObjectPublisher()
-        super.init()
-    }
-
-    func start() async throws {
-        guard !isRecording else { return }
-
-        let session = AVAudioSession.sharedInstance()
-        let granted = await requestPermission(session: session)
-        guard granted else {
-            throw ChatVoiceRecordingError.permissionDenied
-        }
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("voice-\(UUID().uuidString)")
-            .appendingPathExtension("m4a")
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ]
-
-        do {
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
-            try session.setActive(true)
-
-            let recorder = try AVAudioRecorder(url: url, settings: settings)
-            recorder.delegate = self
-            recorder.isMeteringEnabled = false
-
-            guard recorder.record() else {
-                throw ChatVoiceRecordingError.startFailed
-            }
-
-            self.recorder = recorder
-            recordingURL = url
-            elapsedDuration = 0
-            isRecording = true
-            startTimer()
-        } catch {
-            try? FileManager.default.removeItem(at: url)
-            try? deactivateSession()
-            throw error
-        }
-    }
-
-    func stop() throws -> PendingChatAttachment {
-        guard let recorder, let recordingURL else {
-            throw ChatVoiceRecordingError.noRecording
-        }
-        defer {
-            try? FileManager.default.removeItem(at: recordingURL)
-        }
-
-        let duration = max(1, Int(recorder.currentTime.rounded()))
-        recorder.stop()
-        stopTimer()
-        self.recorder = nil
-        self.recordingURL = nil
-        isRecording = false
-
-        let data = try Data(contentsOf: recordingURL)
-        try deactivateSession()
-
-        guard !data.isEmpty else {
-            throw ChatVoiceRecordingError.invalidRecording
-        }
-
-        return PendingChatAttachment.voiceMessage(
-            data: data,
-            fileName: recordingURL.lastPathComponent,
-            duration: duration
-        )
-    }
-
-    func cancel() {
-        let ownedRecordingURL = recordingURL
-        recorder?.stop()
-        recorder = nil
-        recordingURL = nil
-        isRecording = false
-        elapsedDuration = 0
-        stopTimer()
-        try? deactivateSession()
-        if let ownedRecordingURL {
-            try? FileManager.default.removeItem(at: ownedRecordingURL)
-        }
-    }
-
-    private func requestPermission(session: AVAudioSession) async -> Bool {
-        await withCheckedContinuation { continuation in
-            if #available(iOS 17.0, *) {
-                AVAudioApplication.requestRecordPermission { granted in
-                    continuation.resume(returning: granted)
-                }
-            } else {
-                session.requestRecordPermission { granted in
-                    continuation.resume(returning: granted)
-                }
-            }
-        }
-    }
-
-    private func startTimer() {
-        stopTimer()
-        timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(updateElapsedDuration), userInfo: nil, repeats: true)
-    }
-
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-    }
-
-    @objc
-    private func updateElapsedDuration() {
-        guard let recorder else { return }
-        elapsedDuration = recorder.currentTime
-    }
-
-    private func deactivateSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setActive(false, options: [.notifyOthersOnDeactivation])
-    }
-}
-
-private enum ChatVoiceRecordingError: LocalizedError {
-    case permissionDenied
-    case startFailed
-    case noRecording
-    case invalidRecording
-
-    var errorDescription: String? {
-        switch self {
-        case .permissionDenied:
-            return L10n.tr("chat.voice.permissionDenied")
-        case .startFailed:
-            return L10n.tr("chat.voice.startFailed")
-        case .noRecording, .invalidRecording:
-            return L10n.tr("chat.voice.stopFailed")
-        }
-    }
-}
-
-private struct PendingChatAttachment {
-    static let importerContentTypes: [UTType] = [
-        .jpeg,
-        .png,
-        .webP,
-        .heic,
-        .pdf,
-        .mpeg4Audio,
-        .mp3,
-        .wav,
-        .mpeg4Movie,
-        .quickTimeMovie
-    ]
-
-    let data: Data
-    let fileName: String
-    let mimeType: String
-    let type: MessageTypeDTO
-    let size: Int
-    let width: Int?
-    let height: Int?
-    let duration: Int?
-    let previewImage: UIImage?
-
-    var outgoingAttachment: OutgoingAttachmentDTO {
-        OutgoingAttachmentDTO(
-            data: data,
-            fileName: fileName,
-            mimeType: mimeType,
-            type: type,
-            size: size,
-            width: width,
-            height: height,
-            duration: duration
-        )
-    }
-
-    static func voiceMessage(data: Data, fileName: String, mimeType: String = "audio/mp4", duration: Int) -> PendingChatAttachment {
-        PendingChatAttachment(
-            data: data,
-            fileName: normalizedFileName(from: fileName, fileExtension: "m4a"),
-            mimeType: mimeType,
-            type: .audio,
-            size: data.count,
-            width: nil,
-            height: nil,
-            duration: duration,
-            previewImage: nil
-        )
-    }
-
-    static func supports(contentType: UTType) -> Bool {
-        contentType.conforms(to: .image)
-            || contentType.conforms(to: .quickTimeMovie)
-            || contentType.conforms(to: .mpeg4Movie)
-            || contentType.conforms(to: .mpeg4Audio)
-            || contentType.conforms(to: .mp3)
-            || contentType.conforms(to: .wav)
-            || contentType.conforms(to: .pdf)
-    }
-
-    static func from(data: Data, fileName: String, contentType: UTType) throws -> PendingChatAttachment {
-        let size = data.count
-
-        if contentType.conforms(to: .image), let image = UIImage(data: data) {
-            let jpegData = image.jpegData(compressionQuality: 0.96) ?? data
-            let jpegFileName = normalizedFileName(from: fileName, fileExtension: "jpg")
-            return PendingChatAttachment(
-                data: jpegData,
-                fileName: jpegFileName,
-                mimeType: "image/jpeg",
-                type: .image,
-                size: jpegData.count,
-                width: Int(image.size.width),
-                height: Int(image.size.height),
-                duration: nil,
-                previewImage: image
-            )
-        }
-
-        if contentType.conforms(to: .quickTimeMovie) {
-            return PendingChatAttachment(
-                data: data,
-                fileName: normalizedFileName(from: fileName, fileExtension: "mov"),
-                mimeType: "video/quicktime",
-                type: .video,
-                size: size,
-                width: nil,
-                height: nil,
-                duration: nil,
-                previewImage: nil
-            )
-        }
-
-        if contentType.conforms(to: .mpeg4Movie) {
-            return PendingChatAttachment(
-                data: data,
-                fileName: normalizedFileName(from: fileName, fileExtension: "mp4"),
-                mimeType: "video/mp4",
-                type: .video,
-                size: size,
-                width: nil,
-                height: nil,
-                duration: nil,
-                previewImage: nil
-            )
-        }
-
-        let audioFormat: (fileExtension: String, mimeType: String)? = whenAudioFormat(contentType)
-        if let audioFormat {
-            return PendingChatAttachment(
-                data: data,
-                fileName: normalizedFileName(from: fileName, fileExtension: audioFormat.fileExtension),
-                mimeType: audioFormat.mimeType,
-                type: .audio,
-                size: size,
-                width: nil,
-                height: nil,
-                duration: audioDuration(from: data),
-                previewImage: nil
-            )
-        }
-
-        if contentType.conforms(to: .pdf) {
-            return PendingChatAttachment(
-                data: data,
-                fileName: normalizedFileName(from: fileName, fileExtension: "pdf"),
-                mimeType: "application/pdf",
-                type: .file,
-                size: size,
-                width: nil,
-                height: nil,
-                duration: nil,
-                previewImage: nil
-            )
-        }
-
-        throw ChatAttachmentValidationError.unsupportedFormat
-    }
-
-    private static func whenAudioFormat(_ contentType: UTType) -> (fileExtension: String, mimeType: String)? {
-        if contentType.conforms(to: .mpeg4Audio) {
-            return ("m4a", "audio/mp4")
-        }
-        if contentType.conforms(to: .mp3) {
-            return ("mp3", "audio/mpeg")
-        }
-        if contentType.conforms(to: .wav) {
-            return ("wav", "audio/wav")
-        }
-        return nil
-    }
-
-    private static func normalizedFileName(from rawFileName: String, fileExtension: String) -> String {
-        let trimmed = rawFileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let invalidCharacters = CharacterSet(charactersIn: "/:\\")
-        let candidate = trimmed.components(separatedBy: invalidCharacters).last ?? ""
-        let baseName = (candidate as NSString).deletingPathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedBaseName = baseName.isEmpty ? "attachment-\(UUID().uuidString)" : baseName
-        return "\(resolvedBaseName).\(fileExtension)"
-    }
-
-    private static func audioDuration(from data: Data) -> Int? {
-        guard let player = try? AVAudioPlayer(data: data) else {
-            return nil
-        }
-
-        return max(1, Int(player.duration.rounded()))
-    }
-}
-
-private struct ChatDetailTabBarHidingModifier: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        content.toolbar(.hidden, for: .tabBar)
-    }
-}
-
-private struct CameraCaptureView: UIViewControllerRepresentable {
-    let onCapture: (UIImage?) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onCapture: onCapture, dismiss: dismiss)
-    }
-
-    func makeUIViewController(context: Context) -> FullScreenCameraPickerController {
-        let controller = FullScreenCameraPickerController()
-        controller.sourceType = .camera
-        controller.mediaTypes = ["public.image"]
-        controller.delegate = context.coordinator
-        controller.allowsEditing = false
-        controller.modalPresentationStyle = .fullScreen
-        controller.modalTransitionStyle = .coverVertical
-        controller.view.backgroundColor = .black
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: FullScreenCameraPickerController, context: Context) {}
-
-    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
-        private let onCapture: (UIImage?) -> Void
-        private let dismiss: DismissAction
-
-        init(onCapture: @escaping (UIImage?) -> Void, dismiss: DismissAction) {
-            self.onCapture = onCapture
-            self.dismiss = dismiss
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            dismiss()
-        }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            let image = info[.originalImage] as? UIImage
-            onCapture(image)
-            dismiss()
-        }
-    }
-}
-
-private final class FullScreenCameraPickerController: UIImagePickerController {
-    override var prefersStatusBarHidden: Bool { true }
-    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { .fade }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .black
-    }
-}
-
-private struct RemoteChatAttachmentImage: View {
-    @Environment(AppServices.self) private var services
-    let fileId: String
-    var localData: Data? = nil
-    @State private var image: UIImage?
-
-    var body: some View {
-        Group {
-            if let localImage {
-                Image(uiImage: localImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .antialiased(true)
-                    .scaledToFit()
-            } else if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .antialiased(true)
-                    .scaledToFit()
-            } else {
-                Rectangle()
-                    .fill(.white.opacity(0.06))
-                    .overlay {
-                        ProgressView()
-                    }
-            }
-        }
-        .task(id: fileId) {
-            guard localData == nil, image == nil, !isLocalAttachmentFileId(fileId) else { return }
-            do {
-                if let data = try await services.backend.fetchAttachmentData(fileId: fileId),
-                   let loadedImage = UIImage(data: data) {
-                    image = loadedImage.preparingForDisplay() ?? loadedImage
-                }
-            } catch {
-#if DEBUG
-                debugPrint("Attachment image load failed")
-#endif
-            }
-        }
-    }
-
-    private var localImage: UIImage? {
-        guard let localData,
-              let image = UIImage(data: localData) else {
-            return nil
-        }
-
-        return image.preparingForDisplay() ?? image
-    }
-}
-
-private struct RemoteChatAttachmentVideoPreview: View {
-    @Environment(AppServices.self) private var services
-    let fileId: String
-    var localData: Data? = nil
-    let title: String?
-    let duration: Int?
-    @State private var thumbnail: UIImage?
-    @State private var isLoading = false
-
-    var body: some View {
-        ZStack(alignment: .center) {
-            if let thumb = thumbnail {
-                Image(uiImage: thumb)
-                    .resizable()
-                    .interpolation(.high)
-                    .antialiased(true)
-                    .scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.white.opacity(0.06))
-                    .overlay {
-                        VStack(spacing: 6) {
-                            Image(systemName: "video.fill")
-                                .font(.title2)
-                                .foregroundStyle(.orange)
-
-                            if let dur = duration {
-                                Text("\(dur)s")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                            } else if isLoading {
-                                ProgressView()
-                            }
-                        }
-                    }
-            }
-
-            Circle()
-                .fill(Color.black.opacity(0.36))
-                .frame(width: 48, height: 48)
-                .overlay {
-                    Image(systemName: "play.fill")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.white)
-                }
-                .shadow(color: .black.opacity(0.24), radius: 6, y: 2)
-        }
-        .task(id: fileId) {
-            guard thumbnail == nil, !isLoading else { return }
-            isLoading = true
-            do {
-                let data: Data?
-                if let local = localData {
-                    data = local
-                } else if !isLocalAttachmentFileId(fileId) {
-                    data = try await services.backend.fetchAttachmentData(fileId: fileId)
-                } else {
-                    data = nil
-                }
-
-                if let data, !data.isEmpty {
-                    let tmpUrl = try writeTempVideo(data: data, baseName: title)
-                    defer {
-                        try? FileManager.default.removeItem(at: tmpUrl)
-                    }
-                    let asset = AVAsset(url: tmpUrl)
-                    let generator = AVAssetImageGenerator(asset: asset)
-                    generator.appliesPreferredTrackTransform = true
-                    let duration = try await asset.load(.duration)
-                    let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(duration)), preferredTimescale: 600)
-                    if let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) {
-                        thumbnail = UIImage(cgImage: cgImage).preparingForDisplay() ?? UIImage(cgImage: cgImage)
-                    }
-                }
-            } catch {
-#if DEBUG
-                debugPrint("Video thumbnail generation failed")
-#endif
-            }
-            isLoading = false
-        }
-    }
-
-    private func writeTempVideo(data: Data, baseName: String?) throws -> URL {
-        let fileManager = FileManager.default
-        let directory = fileManager.temporaryDirectory.appendingPathComponent("ChatAttachmentPreview", isDirectory: true)
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        let cleaned = (baseName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? baseName! : UUID().uuidString
-        let url = directory.appendingPathComponent("\(cleaned)-\(UUID().uuidString).mp4")
-        try data.write(to: url, options: .atomic)
-        return url
-    }
-}
-
-private func isLocalAttachmentFileId(_ fileId: String) -> Bool {
-    fileId.hasPrefix("local-")
-}
-
-private final class OwnedChatPreviewFile: @unchecked Sendable {
-    let url: URL
-
-    init(url: URL) {
-        self.url = url
-    }
-
-    func remove() {
-        try? FileManager.default.removeItem(at: url)
-    }
-
-    deinit {
-        remove()
-    }
-}
-
-private struct ChatAttachmentPreview: Identifiable {
-    enum Kind {
-        case image
-        case video
-        case file
-    }
-
-    let id = UUID()
-    let kind: Kind
-    let image: UIImage?
-    private let ownedTemporaryFile: OwnedChatPreviewFile?
-    let title: String
-
-    var fileURL: URL? {
-        ownedTemporaryFile?.url
-    }
-
-    func removeOwnedTemporaryFile() {
-        ownedTemporaryFile?.remove()
-    }
-
-    static func make(attachment: MessageAttachmentDTO, kind: Kind, data: Data) throws -> ChatAttachmentPreview {
-        switch kind {
-        case .image:
-            guard let image = UIImage(data: data) else {
-                throw AttachmentPreviewError.invalidData
-            }
-            return ChatAttachmentPreview(
-                kind: .image,
-                image: image,
-                ownedTemporaryFile: nil,
-                title: defaultTitle(for: .image)
-            )
-
-        case .video, .file:
-            let url = try writeTemporaryFile(
-                data: data,
-                fileName: attachment.name,
-                mimeType: attachment.mimeType
-            )
-            return ChatAttachmentPreview(
-                kind: kind,
-                image: nil,
-                ownedTemporaryFile: OwnedChatPreviewFile(url: url),
-                title: attachment.name ?? defaultTitle(for: kind)
-            )
-        }
-    }
-
-    private static func writeTemporaryFile(data: Data, fileName: String?, mimeType: String?) throws -> URL {
-        let fileManager = FileManager.default
-        let directory = fileManager.temporaryDirectory.appendingPathComponent("ChatAttachmentPreview", isDirectory: true)
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        let trimmedFileName = fileName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanedBaseName: String
-        if let trimmedFileName, !trimmedFileName.isEmpty {
-            cleanedBaseName = trimmedFileName
-        } else {
-            cleanedBaseName = UUID().uuidString
-        }
-        let baseNSString = cleanedBaseName as NSString
-        let stem = baseNSString.deletingPathExtension.isEmpty ? cleanedBaseName : baseNSString.deletingPathExtension
-        let ext = preferredExtension(fileName: fileName, mimeType: mimeType)
-        let url = directory.appendingPathComponent("\(stem)-\(UUID().uuidString).\(ext)")
-        try data.write(to: url, options: .atomic)
-        return url
-    }
-
-    private static func preferredExtension(fileName: String?, mimeType: String?) -> String {
-        if let fileName {
-            let ext = (fileName as NSString).pathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !ext.isEmpty { return ext }
-        }
-
-        if let mimeType,
-           let utType = UTType(mimeType: mimeType),
-           let ext = utType.preferredFilenameExtension {
-            return ext
-        }
-
-        return "dat"
-    }
-
-    private static func defaultTitle(for kind: Kind) -> String {
-        switch kind {
-        case .image:
-            return L10n.tr("chat.attachment.photo")
-        case .video:
-            return L10n.tr("chat.attachment.video")
-        case .file:
-            return L10n.tr("chat.attachment.file")
-        }
-    }
-}
-
-private enum AttachmentPreviewError: LocalizedError {
-    case unavailable
-    case invalidData
-
-    var errorDescription: String? {
-        switch self {
-        case .unavailable:
-            return "Unable to load attachment."
-        case .invalidData:
-            return "Invalid attachment data."
-        }
-    }
-}
-
-private struct ChatAttachmentPreviewSheet: View {
-    let preview: ChatAttachmentPreview
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                switch preview.kind {
-                case .image:
-                    if let image = preview.image {
-                        Color.black
-                            .overlay {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .padding()
-                            }
-                            .ignoresSafeArea()
-                    }
-                case .video:
-                    if let fileURL = preview.fileURL {
-                        VideoPlayer(player: AVPlayer(url: fileURL))
-                            .background(Color.black.ignoresSafeArea())
-                    }
-                case .file:
-                    if let fileURL = preview.fileURL {
-                        QuickLookPreview(fileURL: fileURL)
-                    }
-                }
-            }
-            .navigationTitle(preview.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(L10n.tr("common.done")) {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct MessageReadInfoSheet: View {
-    let message: ChatMessage
-    let readAt: Date?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section(L10n.tr("chat.messageInfo.content")) {
-                    messageContentView
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                }
-
-                Section {
-                    infoCard
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                }
-            }
-            .navigationTitle(L10n.tr("chat.messageInfo.title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(L10n.tr("common.done")) {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var messageContentView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let attachment = message.attachment {
-                messageAttachmentSummary(attachment)
-            }
-
-            let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedText.isEmpty {
-                Text(trimmedText)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(14)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-
-    private var infoCard: some View {
-        VStack(spacing: 0) {
-            infoRow(
-                title: L10n.tr("chat.messageInfo.sent"),
-                value: Self.dateFormatter.string(from: message.sentAt)
-            )
-            .padding(.horizontal, 14)
-            .padding(.vertical, 16)
-
-            Divider()
-                .padding(.leading, 14)
-
-            infoRow(
-                title: L10n.tr("chat.messageInfo.read"),
-                value: readAt.map { Self.dateFormatter.string(from: $0) } ?? L10n.tr("chat.messageInfo.unread")
-            )
-            .padding(.horizontal, 14)
-            .padding(.vertical, 16)
-        }
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-
-    @ViewBuilder
-    private func messageAttachmentSummary(_ attachment: MessageAttachmentDTO) -> some View {
-        switch message.messageType {
-        case .image:
-            HStack(spacing: 12) {
-                RemoteChatAttachmentImage(fileId: attachment.fileId)
-                    .frame(width: 76, height: 76)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(.white.opacity(0.10), lineWidth: 1)
-                    }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.tr("chat.attachment.photo"))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                }
-
-                Spacer(minLength: 0)
-            }
-
-        case .video, .audio, .file:
-            HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.white.opacity(0.06))
-                    .frame(width: 76, height: 76)
-                    .overlay {
-                        Image(systemName: attachmentSummaryIconName)
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(.orange)
-                    }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(attachmentSummaryTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-
-                    if let name = attachment.name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(name)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    } else if let mimeType = attachment.mimeType, !mimeType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(mimeType)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 0)
-            }
-
-        case .text:
-            EmptyView()
-        }
-    }
-
-    private var attachmentSummaryIconName: String {
-        switch message.messageType {
-        case .video:
-            return "video.fill"
-        case .audio:
-            return "waveform"
-        case .file:
-            return "doc.fill"
-        case .image, .text:
-            return "doc.fill"
-        }
-    }
-
-    private var attachmentSummaryTitle: String {
-        switch message.messageType {
-        case .video:
-            return L10n.tr("chat.attachment.video")
-        case .audio:
-            return L10n.tr("chat.attachment.audio")
-        case .file:
-            return L10n.tr("chat.attachment.file")
-        case .image, .text:
-            return L10n.tr("chat.attachment.file")
-        }
-    }
-
-    private func infoRow(title: String, value: String) -> some View {
-        HStack {
-            Text(title)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .multilineTextAlignment(.trailing)
-        }
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "it_IT")
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter
-    }()
-}
-
-private struct ChatAvatarPreviewSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let name: String
-    let avatarKey: String
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(uiColor: .systemBackground)
-                    .ignoresSafeArea()
-
-                ChatAvatarView(
-                    name: name,
-                    avatarKey: avatarKey,
-                    size: 240,
-                    isOnline: false,
-                    showsPresence: false
-                )
-                .padding(28)
-            }
-            .navigationTitle(name)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Chiudi") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-    }
-}
-
-private struct QuickLookPreview: UIViewControllerRepresentable {
-    let fileURL: URL
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(fileURL: fileURL)
-    }
-
-    func makeUIViewController(context: Context) -> QLPreviewController {
-        let controller = QLPreviewController()
-        controller.dataSource = context.coordinator
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: QLPreviewController, context: Context) {
-        context.coordinator.fileURL = fileURL
-        uiViewController.reloadData()
-    }
-
-    final class Coordinator: NSObject, QLPreviewControllerDataSource {
-        var fileURL: URL
-
-        init(fileURL: URL) {
-            self.fileURL = fileURL
-        }
-
-        func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-            1
-        }
-
-        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-            fileURL as NSURL
-        }
-    }
-}
-
-private enum MessageBubblePosition {
-    case single
-    case first
-    case middle
-    case last
-}
-
-private struct MessageBubbleShape: Shape {
-    let isOutgoing: Bool
-    let position: MessageBubblePosition
-    let cornerRadius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        UnevenRoundedRectangle(
-            cornerRadii: radii,
-            style: .continuous
-        )
-        .path(in: rect)
-    }
-
-    private var radii: RectangleCornerRadii {
-        if isOutgoing {
-            switch position {
-            case .single:
-                return RectangleCornerRadii(
-                    topLeading: cornerRadius,
-                    bottomLeading: cornerRadius,
-                    bottomTrailing: cornerRadius,
-                    topTrailing: cornerRadius
-                )
-            case .first:
-                return RectangleCornerRadii(
-                    topLeading: cornerRadius,
-                    bottomLeading: cornerRadius,
-                    bottomTrailing: 7,
-                    topTrailing: cornerRadius
-                )
-            case .middle:
-                return RectangleCornerRadii(
-                    topLeading: cornerRadius,
-                    bottomLeading: cornerRadius,
-                    bottomTrailing: 7,
-                    topTrailing: 7
-                )
-            case .last:
-                return RectangleCornerRadii(
-                    topLeading: cornerRadius,
-                    bottomLeading: cornerRadius,
-                    bottomTrailing: cornerRadius,
-                    topTrailing: 7
-                )
-            }
-        } else {
-            switch position {
-            case .single:
-                return RectangleCornerRadii(
-                    topLeading: cornerRadius,
-                    bottomLeading: cornerRadius,
-                    bottomTrailing: cornerRadius,
-                    topTrailing: cornerRadius
-                )
-            case .first:
-                return RectangleCornerRadii(
-                    topLeading: cornerRadius,
-                    bottomLeading: 7,
-                    bottomTrailing: cornerRadius,
-                    topTrailing: cornerRadius
-                )
-            case .middle:
-                return RectangleCornerRadii(
-                    topLeading: 7,
-                    bottomLeading: 7,
-                    bottomTrailing: cornerRadius,
-                    topTrailing: cornerRadius
-                )
-            case .last:
-                return RectangleCornerRadii(
-                    topLeading: 7,
-                    bottomLeading: cornerRadius,
-                    bottomTrailing: cornerRadius,
-                    topTrailing: cornerRadius
-                )
-            }
-        }
-    }
 }

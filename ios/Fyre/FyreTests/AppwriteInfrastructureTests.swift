@@ -520,6 +520,71 @@ final class AppwriteInfrastructureTests: XCTestCase {
         }
     }
 
+    func testLargeUploadUsesContiguousChunksAndExistingFileID() async throws {
+        let recorder = UploadRequestRecorder()
+        UploadURLProtocol.recorder = recorder
+        defer { UploadURLProtocol.recorder = nil }
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [UploadURLProtocol.self]
+        let service = AppwriteService(
+            configuration: try AppwriteConfiguration.load(dictionary: validConfigurationValues()),
+            session: URLSession(configuration: sessionConfiguration)
+        )
+        let chunkSize = 5 * 1024 * 1024
+        try await service.uploadFile(
+            data: Data(repeating: 7, count: chunkSize + 3), bucketId: "bucket", fileId: "upload-id",
+            fileName: "test.pdf", mimeType: "application/pdf", permissions: [], limit: BoundedAttachment.chatLimit
+        )
+        let requests = recorder.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "Content-Range"), "bytes 0-5242879/5242883")
+        XCTAssertNil(requests[0].value(forHTTPHeaderField: "X-Appwrite-ID"))
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Content-Range"), "bytes 5242880-5242882/5242883")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "X-Appwrite-ID"), "upload-id")
+    }
+
+    func testFailedUploadRemovesUnreferencedPartialFile() async throws {
+        let recorder = UploadRequestRecorder(failSecondChunk: true)
+        UploadURLProtocol.recorder = recorder
+        defer { UploadURLProtocol.recorder = nil }
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [UploadURLProtocol.self]
+        let service = AppwriteService(
+            configuration: try AppwriteConfiguration.load(dictionary: validConfigurationValues()),
+            session: URLSession(configuration: sessionConfiguration)
+        )
+        do {
+            try await service.uploadFile(
+                data: Data(repeating: 1, count: 5 * 1024 * 1024 + 1), bucketId: "bucket", fileId: "upload-id",
+                fileName: "test.pdf", mimeType: "application/pdf", permissions: [], limit: BoundedAttachment.chatLimit
+            )
+            XCTFail("Expected upload rejection")
+        } catch {
+            XCTAssertEqual((error as? AppwriteServiceError)?.statusCode, 400)
+        }
+        let requests = recorder.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["POST", "POST", "DELETE"])
+        XCTAssertEqual(requests.last?.url?.lastPathComponent, "upload-id")
+    }
+
+    func testSmallUploadUsesSingleRequestWithoutChunkHeaders() async throws {
+        let recorder = UploadRequestRecorder()
+        UploadURLProtocol.recorder = recorder
+        defer { UploadURLProtocol.recorder = nil }
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [UploadURLProtocol.self]
+        let service = AppwriteService(
+            configuration: try AppwriteConfiguration.load(dictionary: validConfigurationValues()),
+            session: URLSession(configuration: sessionConfiguration)
+        )
+        try await service.uploadFile(
+            data: Data([1, 2, 3]), bucketId: "bucket", fileId: "upload-id",
+            fileName: "test.pdf", mimeType: "application/pdf", permissions: [], limit: BoundedAttachment.chatLimit
+        )
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertNil(recorder.requests.first?.value(forHTTPHeaderField: "Content-Range"))
+    }
+
     private func validConfigurationValues() -> [String: Any] {
         [
             "APPWRITE_PROJECT_ID": "project-id",
@@ -545,4 +610,42 @@ final class AppwriteInfrastructureTests: XCTestCase {
             "APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID": "relationship-id"
         ]
     }
+}
+
+private final class UploadRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    nonisolated(unsafe) private var storedRequests: [URLRequest] = []
+    let failSecondChunk: Bool
+
+    init(failSecondChunk: Bool = false) { self.failSecondChunk = failSecondChunk }
+
+    nonisolated var requests: [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedRequests
+    }
+
+    nonisolated func receive(_ request: URLRequest) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        storedRequests.append(request)
+        if request.httpMethod == "DELETE" { return 204 }
+        if failSecondChunk && storedRequests.count == 2 { return 400 }
+        return 201
+    }
+}
+
+private final class UploadURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var recorder: UploadRequestRecorder?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let status = Self.recorder?.receive(request) ?? 500
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{\"$id\":\"upload-id\"}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

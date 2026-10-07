@@ -73,6 +73,8 @@ struct ChatThread: Identifiable, Hashable, Codable {
     let notificationsEnabled: Bool
     let relationshipState: RelationshipStateDTO
     let messages: [ChatMessage]
+    var olderMessagesCursor: String? = nil
+    var remoteUnreadCount: Int? = nil
 
     var lastMessage: String {
         guard let last = messages.last else { return "" }
@@ -97,7 +99,8 @@ struct ChatThread: Identifiable, Hashable, Codable {
     }
 
     var unreadCount: Int {
-        messages.filter { message in
+        if let remoteUnreadCount { return remoteUnreadCount }
+        return messages.filter { message in
             guard !message.isMe else { return false }
             guard let currentUserReadAt else { return true }
             return message.sentAt > currentUserReadAt
@@ -163,7 +166,9 @@ enum RecentChatThreadStore {
             participantUserIds: incoming.participantUserIds,
             notificationsEnabled: incoming.notificationsEnabled,
             relationshipState: incoming.relationshipState,
-            messages: existing.messages
+            messages: existing.messages,
+            olderMessagesCursor: existing.olderMessagesCursor,
+            remoteUnreadCount: incoming.remoteUnreadCount
         )
     }
 
@@ -180,6 +185,7 @@ struct MessagesView: View {
         let action: RelationshipActionDTO
     }
 
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(AppServices.self) private var services
     @Environment(UserStore.self) private var store
     @Environment(\.colorScheme) private var colorScheme
@@ -290,7 +296,8 @@ struct MessagesView: View {
                 )
             }
         }
-        .task(id: reloadToken) {
+        .task(id: "\(reloadToken):\(scenePhase)") {
+            guard scenePhase == .active else { return }
             while !Task.isCancelled {
                 await loadThreads()
                 do {
@@ -304,6 +311,9 @@ struct MessagesView: View {
             RecentChatThreadStore.configure(currentUserId: store.currentUser?.appwriteUserId)
             consumeExternalOpenThreadIfNeeded()
             startRealtime()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .fyreRealtimeDidReconnect)) { _ in
+            reloadToken = UUID()
         }
         .onDisappear {
             stopRealtime()
@@ -336,11 +346,12 @@ struct MessagesView: View {
     private func loadThreads() async {
         threadLoadGeneration &+= 1
         let generation = threadLoadGeneration
+        let session = store.sessionRevision
         let expectedUserId = store.currentUser?.appwriteUserId
         do {
             RecentChatThreadStore.configure(currentUserId: expectedUserId)
             let dtos = try await services.backend.fetchThreads()
-            guard generation == threadLoadGeneration,
+            guard generation == threadLoadGeneration, session == store.sessionRevision,
                   expectedUserId == store.currentUser?.appwriteUserId else { return }
             let existingNames = Dictionary(uniqueKeysWithValues: threads.map { ($0.remoteId, $0.name) })
             let fetchedThreads = dtos.map { dto in
@@ -365,7 +376,9 @@ struct MessagesView: View {
                     participantUserIds: dto.participantUserIds,
                     notificationsEnabled: dto.notificationsEnabled,
                     relationshipState: dto.relationshipState,
-                    messages: dto.messages.map(ChatMessage.init(dto:))
+                    messages: dto.messages.map(ChatMessage.init(dto:)),
+                    olderMessagesCursor: dto.olderMessagesCursor,
+                    remoteUnreadCount: dto.remoteUnreadCount
                 )
             }
             let fetchedRemoteIds = Set(fetchedThreads.map(\.remoteId))
@@ -377,7 +390,7 @@ struct MessagesView: View {
             fetchedThreads.forEach(RecentChatThreadStore.upsert)
             threads = mergedThreads(fetchedThreads: fetchedThreads)
         } catch {
-            guard generation == threadLoadGeneration,
+            guard generation == threadLoadGeneration, session == store.sessionRevision,
                   expectedUserId == store.currentUser?.appwriteUserId else { return }
 #if DEBUG
             debugPrint("Inbox refresh failed")
@@ -439,7 +452,7 @@ struct MessagesView: View {
             return true
         }
 
-        return cachedThread.messages.count > fetchedThread.messages.count
+        return hasOptimisticMessage(cachedThread)
             && cachedLastMessageDate == fetchedLastMessageDate
     }
 
@@ -509,7 +522,9 @@ struct MessagesView: View {
             participantUserIds: thread.participantUserIds,
             notificationsEnabled: enabled,
             relationshipState: thread.relationshipState,
-            messages: thread.messages
+            messages: thread.messages,
+            olderMessagesCursor: thread.olderMessagesCursor,
+            remoteUnreadCount: thread.remoteUnreadCount
         )
 
         upsertThread(updatedThread)

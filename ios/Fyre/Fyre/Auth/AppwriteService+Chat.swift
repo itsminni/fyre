@@ -121,6 +121,7 @@ extension AppwriteService {
             return []
         }
 
+        await reconcileMessageUploads(accountId: currentAccountId)
         let participantRows = try await listRows(
             tableId: configuration.threadParticipantsTableId,
             queries: [
@@ -128,28 +129,67 @@ extension AppwriteService {
             ]
         )
 
+        let ownParticipantsByThread = Dictionary(grouping: participantRows) { stringValue(forKey: "threadId", in: $0) ?? "" }
+        let threadIds = ownParticipantsByThread.keys.filter { !$0.isEmpty }.sorted()
         var threads: [(thread: ThreadDTO, lastActivity: Date)] = []
 
-        for participantRow in participantRows {
-            guard let threadId = stringValue(forKey: "threadId", in: participantRow),
-                  let thread = try await fetchThread(threadId: threadId, currentAccountId: currentAccountId) else {
-                continue
+        // Fetch both participants in bounded groups instead of rereading each thread separately.
+        for start in stride(from: 0, to: threadIds.count, by: 50) {
+            let batch = Array(threadIds[start..<min(start + 50, threadIds.count)])
+            let rows = try await listRows(tableId: configuration.threadParticipantsTableId, queries: [
+                AppwriteQuery.equal("threadId", values: batch)
+            ])
+            let participantsByThread = Dictionary(grouping: rows) { stringValue(forKey: "threadId", in: $0) ?? "" }
+            for threadId in batch {
+                try Task.checkCancellation()
+                guard let thread = try await fetchThread(
+                    threadId: threadId, currentAccountId: currentAccountId,
+                    knownParticipantRows: participantsByThread[threadId] ?? [], includeHistory: false
+                ) else { continue }
+                let participant = ownParticipantsByThread[threadId]?.first ?? [:]
+                let lastActivity = thread.messages.last?.sentAt
+                    ?? dateValue(forKey: "createdAt", in: participant)
+                    ?? dateValue(forKey: "$createdAt", in: participant)
+                    ?? .distantPast
+                threads.append((thread, lastActivity))
             }
-            let lastActivity = thread.messages
-                .map(\.sentAt)
-                .last
-                ?? dateValue(forKey: "createdAt", in: participantRow)
-                ?? dateValue(forKey: "$createdAt", in: participantRow)
-                ?? .distantPast
-            threads.append((thread, lastActivity))
         }
 
-        return threads
-            .sorted(by: { $0.lastActivity > $1.lastActivity })
-            .map(\.thread)
+        return threads.sorted {
+            $0.lastActivity == $1.lastActivity ? $0.thread.remoteId < $1.thread.remoteId : $0.lastActivity > $1.lastActivity
+        }.map(\.thread)
     }
 
-    func sendMessage(threadId: String, text: String, replyToMessageId: String?, attachment: OutgoingAttachmentDTO?) async throws -> MessageDTO {
+    func sendMessage(threadId: String, attempt: OutgoingMessageAttempt) async throws -> MessageDTO {
+        guard let accountId = try await fetchCurrentAccountId(required: true) else {
+            throw AppwriteServiceError.missingAccountId
+        }
+        let messageId = OutgoingMessageAttempt.remoteMessageId(
+            userId: accountId, threadId: threadId, operationId: attempt.operationId
+        )
+        if let completed = completedMessageSends[messageId] { return completed }
+        if let existing = inFlightMessageSends[messageId] {
+            guard existing.draft == attempt.draft else { throw messageOperationConflict() }
+            return try await existing.task.value
+        }
+        let task = Task {
+            try await self.performMessageSend(threadId: threadId, accountId: accountId, messageId: messageId, attempt: attempt)
+        }
+        inFlightMessageSends[messageId] = InFlightMessageSend(draft: attempt.draft, task: task)
+        defer { inFlightMessageSends.removeValue(forKey: messageId) }
+        let message = try await task.value
+        completedMessageSends[messageId] = message
+        completedMessageSendOrder.append(messageId)
+        if completedMessageSendOrder.count > 100 {
+            completedMessageSends.removeValue(forKey: completedMessageSendOrder.removeFirst())
+        }
+        return message
+    }
+
+    private func performMessageSend(threadId: String, accountId: String, messageId: String, attempt: OutgoingMessageAttempt) async throws -> MessageDTO {
+        let text = attempt.draft.text
+        let replyToMessageId = attempt.draft.replyToMessageId
+        let attachment = attempt.draft.attachment
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || attachment != nil else {
             throw AppwriteServiceError.api(statusCode: 400, message: "chat.error.sendFailed", type: "validation")
@@ -158,18 +198,43 @@ extension AppwriteService {
             throw AppwriteServiceError.missingConfiguration("APPWRITE_SEND_MESSAGE_FUNCTION_ID")
         }
 
-        let attemptedAt = Date()
+        let journalScope = uploadJournalScope(accountId: accountId)
+        if pendingMessageUploads[messageId] == nil,
+           let receipt = try await MessageUploadJournal.load(scope: journalScope)[messageId] {
+            guard receipt.threadId == threadId else { throw messageOperationConflict() }
+            if receipt.uploadCompleted == false {
+                let response = try await executeUserFunction(functionId: configuration.sendMessageFunctionId, body: [
+                    "action": "reconcileAttachment", "threadId": threadId, "attachmentFileId": receipt.attachment.fileId
+                ])
+                guard ManagedAttachmentContract.isReconciled(response, fileId: receipt.attachment.fileId, messageId: messageId) else {
+                    throw AppwriteServiceError.invalidResponse
+                }
+                if response["status"] as? String == "discarded" {
+                    try await MessageUploadJournal.remove(messageId: messageId, scope: journalScope)
+                } else {
+                    pendingMessageUploads[messageId] = PendingMessageUpload(attachment: receipt.attachment, mayBeReferenced: true)
+                }
+            } else {
+                pendingMessageUploads[messageId] = PendingMessageUpload(attachment: receipt.attachment, mayBeReferenced: true)
+            }
+        }
         let response: [String: Any]
         let uploadedAttachment: UploadedAttachment?
-        if let attachment {
-            let participantUserIds = try await fetchParticipantUserIds(threadId: threadId)
-            uploadedAttachment = try await uploadAttachmentIfNeeded(attachment, participantUserIds: participantUserIds)
+        if let cached = pendingMessageUploads[messageId] {
+            uploadedAttachment = cached.attachment
+        } else if let attachment {
+            uploadedAttachment = try await uploadAttachmentIfNeeded(attachment, currentUserId: accountId, control: attempt.uploadControl, threadId: threadId, operationId: attempt.operationId)
+            if let uploadedAttachment {
+                pendingMessageUploads[messageId] = PendingMessageUpload(attachment: uploadedAttachment)
+            }
         } else {
             uploadedAttachment = nil
         }
         var body: [String: Any] = [
             "threadId": threadId,
-            "text": trimmed
+            "text": trimmed,
+            "operationId": attempt.operationId.uuidString.lowercased(),
+            "currentUserId": accountId
         ]
         if let replyToMessageId, !replyToMessageId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             body["replyToMessageId"] = replyToMessageId
@@ -191,67 +256,141 @@ extension AppwriteService {
             }
         }
 
+        do { try await attempt.uploadControl?.beginCommit() }
+        catch {
+            if let pending = pendingMessageUploads[messageId], !pending.mayBeReferenced,
+               let bucketId = configuration.chatAttachmentsBucketId {
+                do {
+                    try await deleteUploadedFile(bucketId: bucketId, fileId: pending.attachment.fileId)
+                    try? await MessageUploadJournal.remove(messageId: messageId, scope: journalScope)
+                } catch {}
+                pendingMessageUploads.removeValue(forKey: messageId)
+            }
+            throw error
+        }
+        // Preserve files after any uncertain attempt: a later rejection can
+        // reflect changed permissions rather than prove the earlier send failed.
+        let wasAlreadySubmitted = pendingMessageUploads[messageId]?.mayBeReferenced ?? false
+        if let uploadedAttachment {
+            // Persist before starting the mutation, so a restart cannot turn an uncertain send into an orphan deletion.
+            do {
+                try await MessageUploadJournal.record(.init(messageId: messageId, threadId: threadId, attachment: uploadedAttachment, recordedAt: Date(), uploadCompleted: true), scope: journalScope)
+            } catch {
+                if !wasAlreadySubmitted, let bucketId = configuration.chatAttachmentsBucketId {
+                    try? await deleteUploadedFile(bucketId: bucketId, fileId: uploadedAttachment.fileId)
+                    pendingMessageUploads.removeValue(forKey: messageId)
+                }
+                throw error
+            }
+        }
+        pendingMessageUploads[messageId]?.mayBeReferenced = true
         do {
             response = try await executeUserFunction(
                 functionId: configuration.sendMessageFunctionId,
                 body: body
             )
-        } catch let error as AppwriteServiceError where error.statusCode == 500 {
-            if let recoveredMessage = try await recoverRecentlySentMessage(
-                threadId: threadId,
-                text: trimmed,
-                replyToMessageId: replyToMessageId,
-                attachmentFileId: uploadedAttachment?.fileId,
-                notBefore: attemptedAt.addingTimeInterval(-12)
+        } catch {
+            if !wasAlreadySubmitted, isDefinitiveWriteRejection(error),
+               !ManagedAttachmentContract.isManaged(uploadedAttachment?.fileId ?? "") {
+                if let fileId = uploadedAttachment?.fileId, let bucketId = configuration.chatAttachmentsBucketId {
+                    try? await deleteUploadedFile(bucketId: bucketId, fileId: fileId)
+                    pendingMessageUploads.removeValue(forKey: messageId)
+                    try? await MessageUploadJournal.remove(messageId: messageId, scope: journalScope)
+                }
+            } else if let recoveredMessage = try? await recoverSentMessage(
+                messageId: messageId, threadId: threadId, accountId: accountId,
+                text: trimmed, replyToMessageId: replyToMessageId, attachmentFileId: uploadedAttachment?.fileId
             ) {
+                pendingMessageUploads.removeValue(forKey: messageId)
+                try? await MessageUploadJournal.remove(messageId: messageId, scope: journalScope)
                 return recoveredMessage
+            }
+            // A scheduled cleanup may have discarded a retained receipt while
+            // the app was closed. Release it only after the backend confirms this,
+            // so the next retry can reserve a replacement for the same operation.
+            if case let AppwriteServiceError.api(status, _, _) = error, status == 409,
+               let uploadedAttachment, ManagedAttachmentContract.isManaged(uploadedAttachment.fileId),
+               let result = try? await executeUserFunction(functionId: configuration.sendMessageFunctionId, body: [
+                "action": "reconcileAttachment", "threadId": threadId, "attachmentFileId": uploadedAttachment.fileId
+               ]), result["status"] as? String == "discarded",
+               ManagedAttachmentContract.isReconciled(result, fileId: uploadedAttachment.fileId, messageId: messageId) {
+                try? await MessageUploadJournal.remove(messageId: messageId, matchingFileId: uploadedAttachment.fileId, scope: journalScope)
+                pendingMessageUploads.removeValue(forKey: messageId)
             }
             throw error
         }
 
         guard let remoteMessageId = stringValue(forKey: "messageId", in: response) else {
-            if let recoveredMessage = try await recoverRecentlySentMessage(
-                threadId: threadId,
-                text: trimmed,
-                replyToMessageId: replyToMessageId,
-                attachmentFileId: uploadedAttachment?.fileId,
-                notBefore: attemptedAt.addingTimeInterval(-12)
+            if let recoveredMessage = try await recoverSentMessage(
+                messageId: messageId, threadId: threadId, accountId: accountId,
+                text: trimmed, replyToMessageId: replyToMessageId, attachmentFileId: uploadedAttachment?.fileId
             ) {
+                pendingMessageUploads.removeValue(forKey: messageId)
+                try? await MessageUploadJournal.remove(messageId: messageId, scope: journalScope)
                 return recoveredMessage
             }
-
             throw AppwriteServiceError.invalidResponse
         }
-        let createdAt = dateValue(forKey: "createdAt", in: response) ?? Date()
-        let responseText = stringValue(forKey: "text", in: response) ?? trimmed
-        let responseMessageType = MessageTypeDTO(
-            rawValue: stringValue(forKey: "messageType", in: response)
-                ?? uploadedAttachment?.type.rawValue
-                ?? MessageTypeDTO.text.rawValue
-        ) ?? .text
+        // Decode the canonical server response, including the original timestamp
+        // and attachment metadata when this was a replay.
+        var row = response
+        row["$id"] = remoteMessageId
+        row["senderUserId"] = accountId
+        guard let message = makeMessageDTO(from: row, currentAccountId: accountId) else {
+            throw AppwriteServiceError.invalidResponse
+        }
+        pendingMessageUploads.removeValue(forKey: messageId)
+        try? await MessageUploadJournal.remove(messageId: messageId, scope: journalScope)
+        return message
+    }
 
-        return MessageDTO(
-            id: stableUUID(from: remoteMessageId),
-            remoteId: remoteMessageId,
-            text: responseText,
-            messageType: responseMessageType,
-            attachment: uploadedAttachment.map {
-                MessageAttachmentDTO(
-                    fileId: $0.fileId,
-                    name: $0.name,
-                    mimeType: $0.mimeType,
-                    size: $0.size,
-                    width: $0.width,
-                    height: $0.height,
-                    duration: $0.duration
-                )
-            },
-            isMe: true,
-            time: Self.messageTimeFormatter.string(from: createdAt),
-            sentAt: createdAt,
-            replyToRemoteId: replyToMessageId,
-            replyPreviewText: nil
-        )
+    private func uploadJournalScope(accountId: String) -> String {
+        "\(configuration.endpointURL)|\(configuration.projectId)|\(configuration.databaseId)|\(configuration.messagesTableId)|\(accountId)"
+    }
+
+    func reconcileMessageUploads(accountId: String, now: Date = Date()) async {
+        let scope = uploadJournalScope(accountId: accountId)
+        guard let receipts = try? await MessageUploadJournal.load(scope: scope) else { return }
+        let orderedIds = receipts.keys.sorted()
+        let previousId = lastReconciledUpload[scope] ?? ""
+        let nextIds = Array(orderedIds.filter { $0 > previousId }.prefix(20))
+        let batch = nextIds.isEmpty ? Array(orderedIds.prefix(20)) : nextIds
+        if let last = batch.last { lastReconciledUpload[scope] = last }
+        for id in batch {
+            guard let receipt = receipts[id] else { continue }
+            guard !Task.isCancelled else { return }
+            guard inFlightMessageSends[receipt.messageId] == nil else { continue }
+            let row = try? await fetchRowIfAccessible(tableId: configuration.messagesTableId, rowId: receipt.messageId)
+            let referenceConfirmed = row.map {
+                stringValue(forKey: "senderUserId", in: $0) == accountId
+                    && stringValue(forKey: "threadId", in: $0) == receipt.threadId
+                    && stringValue(forKey: "attachmentFileId", in: $0) == receipt.attachment.fileId
+            } ?? false
+            if referenceConfirmed {
+                // Keep the original attachment available for a retry of this operation,
+                // including after a restart. Only a successful send consumes its receipt.
+                continue
+            } else {
+                // Allow time for ordinary retries. Safety comes from the server decision,
+                // not from this delay or from an absent/inaccessible message row.
+                guard ManagedAttachmentContract.isManaged(receipt.attachment.fileId),
+                      let recordedAt = receipt.recordedAt, now.timeIntervalSince(recordedAt) >= 300,
+                      let response = try? await executeUserFunction(functionId: configuration.sendMessageFunctionId, body: [
+                        "action": "reconcileAttachment", "threadId": receipt.threadId, "attachmentFileId": receipt.attachment.fileId
+                      ]),
+                      ManagedAttachmentContract.isReconciled(response, fileId: receipt.attachment.fileId, messageId: receipt.messageId) else { continue }
+                if response["status"] as? String == "referenced" { continue }
+            }
+            // A retry may have uploaded a replacement while reconciliation awaited HTTP.
+            try? await MessageUploadJournal.remove(messageId: receipt.messageId, matchingFileId: receipt.attachment.fileId, scope: scope)
+            if pendingMessageUploads[receipt.messageId]?.attachment.fileId == receipt.attachment.fileId {
+                pendingMessageUploads.removeValue(forKey: receipt.messageId)
+            }
+        }
+    }
+
+    private func messageOperationConflict() -> AppwriteServiceError {
+        .api(statusCode: 409, message: "chat.error.sendFailed", type: "validation")
     }
 
     func submitSwipe(otherUserId: String, otherUserName _: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {
@@ -374,7 +513,82 @@ extension AppwriteService {
         }
     }
 
-    func fetchThread(threadId: String, currentAccountId: String? = nil) async throws -> ThreadDTO? {
+    func fetchMessagePage(threadId: String, before cursor: String) async throws -> MessagePageDTO {
+        guard let accountId = try await fetchCurrentAccountId(required: true) else {
+            throw AppwriteServiceError.missingAccountId
+        }
+        return try await fetchMessagePage(threadId: threadId, cursor: cursor, currentAccountId: accountId)
+    }
+
+    func fetchMessagePage(threadId: String, cursor: String? = nil, currentAccountId: String) async throws -> MessagePageDTO {
+        let pageSize = 50
+        var queries = [
+            AppwriteQuery.equal("threadId", values: [threadId]),
+            AppwriteQuery.orderDesc("createdAt"),
+            AppwriteQuery.orderDesc("$id"),
+            AppwriteQuery.limit(pageSize + 1)
+        ]
+        if let cursor { queries.append(AppwriteQuery.cursorAfter(cursor)) }
+        let payload = try await listRowsPage(tableId: configuration.messagesTableId, queries: queries)
+        guard let rows = payload["rows"] as? [[String: Any]] else { throw AppwriteServiceError.invalidResponse }
+        let pageRows = Array(rows.prefix(pageSize))
+        let pageIds = Set(pageRows.compactMap { stringValue(forKey: "$id", in: $0) })
+        let replyIds = Set(pageRows.compactMap { stringValue(forKey: "replyToMessageId", in: $0) }).subtracting(pageIds)
+        var replyRows = pageRows
+        if !replyIds.isEmpty {
+            // Resolve only referenced rows, including replies outside this history page.
+            let replies = try await listRowsPage(tableId: configuration.messagesTableId, queries: [
+                AppwriteQuery.equal("threadId", values: [threadId]),
+                AppwriteQuery.equal("$id", values: replyIds.sorted()),
+                AppwriteQuery.limit(pageSize)
+            ])
+            replyRows += replies["rows"] as? [[String: Any]] ?? []
+        }
+        var lookup: [String: String] = [:]
+        for row in replyRows {
+            if let id = stringValue(forKey: "$id", in: row) { lookup[id] = stringValue(forKey: "text", in: row) ?? "" }
+        }
+        let messages = pageRows.reversed().compactMap {
+            makeMessageDTO(from: $0, currentAccountId: currentAccountId, replyLookup: lookup)
+        }
+        return MessagePageDTO(messages: messages, nextCursor: rows.count > pageSize ? pageRows.last?["$id"] as? String : nil)
+    }
+
+    // Inbox rows need a real latest message for attachment labels, sorting and empty-match detection.
+    // Reply previews and the rest of the history are resolved only when opening the conversation.
+    func fetchMessagePreview(threadId: String, currentAccountId: String) async throws -> MessagePageDTO {
+        let payload = try await listRowsPage(tableId: configuration.messagesTableId, queries: [
+            AppwriteQuery.equal("threadId", values: [threadId]),
+            AppwriteQuery.orderDesc("createdAt"),
+            AppwriteQuery.orderDesc("$id"),
+            AppwriteQuery.limit(1)
+        ])
+        guard let rows = payload["rows"] as? [[String: Any]],
+              let total = intValue(forKey: "total", in: payload) else { throw AppwriteServiceError.invalidResponse }
+        let messages = rows.prefix(1).compactMap { makeMessageDTO(from: $0, currentAccountId: currentAccountId) }
+        return MessagePageDTO(messages: messages, nextCursor: total > 1 ? messages.first?.remoteId : nil)
+    }
+
+    func fetchUnreadMessageCount(threadId: String, senderId: String, readAt: Date?) async throws -> Int {
+        var queries = [
+            AppwriteQuery.equal("threadId", values: [threadId]),
+            AppwriteQuery.equal("senderUserId", values: [senderId]),
+            AppwriteQuery.limit(1)
+        ]
+        if let readAt {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            queries.append(AppwriteQuery.greaterThan("createdAt", value: formatter.string(from: readAt)))
+        }
+        let payload = try await listRowsPage(tableId: configuration.messagesTableId, queries: queries)
+        guard let total = intValue(forKey: "total", in: payload) else { throw AppwriteServiceError.invalidResponse }
+        return total
+    }
+
+    func fetchThread(
+        threadId: String, currentAccountId: String? = nil,
+        knownParticipantRows: [[String: Any]]? = nil, includeHistory: Bool = true
+    ) async throws -> ThreadDTO? {
         let resolvedCurrentAccountId: String
         if let currentAccountId {
             resolvedCurrentAccountId = currentAccountId
@@ -384,12 +598,15 @@ extension AppwriteService {
             return nil
         }
 
-        let participantRows = try await listRows(
-            tableId: configuration.threadParticipantsTableId,
-            queries: [
-                AppwriteQuery.equal("threadId", values: [threadId]),
-            ]
-        )
+        let participantRows: [[String: Any]]
+        if let knownParticipantRows {
+            participantRows = knownParticipantRows
+        } else {
+            participantRows = try await listRows(
+                tableId: configuration.threadParticipantsTableId,
+                queries: [AppwriteQuery.equal("threadId", values: [threadId])]
+            )
+        }
 
         let participantUserIds = Array(Set(participantRows.compactMap { stringValue(forKey: "userId", in: $0) })).sorted()
         guard participantUserIds.contains(resolvedCurrentAccountId) else {
@@ -408,29 +625,19 @@ extension AppwriteService {
             .first(where: { stringValue(forKey: "userId", in: $0) == otherUserId })
             .flatMap { dateValue(forKey: "lastReadAt", in: $0) }
 
-        let messageRows = try await listRows(
-            tableId: configuration.messagesTableId,
-            queries: [
-                AppwriteQuery.equal("threadId", values: [threadId]),
-                AppwriteQuery.orderAsc("createdAt"),
-            ]
-        )
-
-        let replyLookup: [String: String] = Dictionary(uniqueKeysWithValues: messageRows.compactMap { row -> (String, String)? in
-            guard let remoteId = stringValue(forKey: "$id", in: row) else { return nil }
-            return (remoteId, stringValue(forKey: "text", in: row) ?? "")
-        })
-
-        let messages = messageRows.compactMap { row in
-            makeMessageDTO(from: row, currentAccountId: resolvedCurrentAccountId, replyLookup: replyLookup)
+        let page: MessagePageDTO
+        if includeHistory {
+            page = try await fetchMessagePage(threadId: threadId, currentAccountId: resolvedCurrentAccountId)
+        } else {
+            page = try await fetchMessagePreview(threadId: threadId, currentAccountId: resolvedCurrentAccountId)
         }
+        let unreadCount = try await fetchUnreadMessageCount(
+            threadId: threadId, senderId: otherUserId, readAt: currentUserReadAt
+        )
 
         let presenceUpdatedAt = chatPeerDate(peer.presenceUpdatedAt)
         let lastSeenAt = chatPeerDate(peer.lastSeenAt)
         let isOnline = presenceUpdatedAt.map { Date().timeIntervalSince($0) <= 70 } ?? false
-        let sortedMessages = messages.sorted { lhs, rhs in
-            lhs.sentAt < rhs.sentAt
-        }
 
         return ThreadDTO(
             id: stableUUID(from: threadId),
@@ -444,7 +651,9 @@ extension AppwriteService {
             participantUserIds: participantUserIds,
             notificationsEnabled: notificationsEnabled,
             relationshipState: .matched,
-            messages: sortedMessages
+            messages: page.messages,
+            olderMessagesCursor: page.nextCursor,
+            remoteUnreadCount: unreadCount
         )
     }
 }
@@ -512,81 +721,38 @@ private extension AppwriteService {
         return true
     }
 
-    func recoverRecentlySentMessage(threadId: String, text: String, replyToMessageId: String?, attachmentFileId: String?, notBefore: Date) async throws -> MessageDTO? {
-        guard let currentAccountId = try await fetchCurrentAccountId(required: false) else {
-            return nil
-        }
-
-        let rows = try await listRows(
-            tableId: configuration.messagesTableId,
-            queries: [
-                AppwriteQuery.equal("threadId", values: [threadId]),
-                AppwriteQuery.orderAsc("createdAt"),
-            ]
-        )
-
-        for row in rows.reversed() {
-            guard stringValue(forKey: "senderUserId", in: row) == currentAccountId else {
-                continue
-            }
-
-            let rowText = stringValue(forKey: "text", in: row) ?? ""
-            let rowAttachmentFileId = stringValue(forKey: "attachmentFileId", in: row)
-            guard rowText == text, rowAttachmentFileId == attachmentFileId else {
-                continue
-            }
-
-            let createdAt = dateValue(forKey: "createdAt", in: row)
-                ?? dateValue(forKey: "$createdAt", in: row)
-                ?? .distantPast
-            guard createdAt >= notBefore else {
-                continue
-            }
-
-            guard let remoteId = stringValue(forKey: "$id", in: row) else {
-                continue
-            }
-
-            return MessageDTO(
-                id: stableUUID(from: remoteId),
-                remoteId: remoteId,
-                text: rowText,
-                messageType: MessageTypeDTO(rawValue: stringValue(forKey: "messageType", in: row) ?? "text") ?? .text,
-                attachment: makeMessageAttachment(from: row),
-                isMe: true,
-                time: Self.messageTimeFormatter.string(from: createdAt),
-                sentAt: createdAt,
-                replyToRemoteId: replyToMessageId,
-                replyPreviewText: nil
-            )
-        }
-
-        return nil
+    func recoverSentMessage(messageId: String, threadId: String, accountId: String, text: String, replyToMessageId: String?, attachmentFileId: String?) async throws -> MessageDTO? {
+        guard let row = try await fetchRowIfAccessible(tableId: configuration.messagesTableId, rowId: messageId),
+              stringValue(forKey: "$id", in: row) == messageId,
+              stringValue(forKey: "threadId", in: row) == threadId,
+              stringValue(forKey: "senderUserId", in: row) == accountId,
+              (stringValue(forKey: "text", in: row) ?? "") == text,
+              stringValue(forKey: "replyToMessageId", in: row) == replyToMessageId,
+              stringValue(forKey: "attachmentFileId", in: row) == attachmentFileId else { return nil }
+        return makeMessageDTO(from: row, currentAccountId: accountId)
     }
 
-    func fetchParticipantUserIds(threadId: String) async throws -> [String] {
-        let rows = try await listRows(
-            tableId: configuration.threadParticipantsTableId,
-            queries: [
-                AppwriteQuery.equal("threadId", values: [threadId]),
-            ]
-        )
-
-        return Array(Set(rows.compactMap { stringValue(forKey: "userId", in: $0) })).sorted()
-    }
-
-    func uploadAttachmentIfNeeded(_ attachment: OutgoingAttachmentDTO?, participantUserIds: [String]) async throws -> UploadedAttachment? {
+    func uploadAttachmentIfNeeded(_ attachment: OutgoingAttachmentDTO?, currentUserId: String, control: UploadControl? = nil, threadId: String? = nil, operationId: UUID? = nil) async throws -> UploadedAttachment? {
         guard let attachment else { return nil }
         guard let bucketId = configuration.chatAttachmentsBucketId, !bucketId.isEmpty else {
             throw AppwriteServiceError.missingConfiguration("APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID")
         }
 
-        guard let currentUserId = try await fetchCurrentAccountId(required: true),
-              !currentUserId.isEmpty else {
-            throw AppwriteServiceError.missingAccountId
+        try BoundedAttachment.validate(attachment.data, limit: BoundedAttachment.chatLimit)
+        try await control?.checkCancellation()
+        let fileId: String
+        if let threadId, let operationId,
+           let reserved = try await reserveAttachment(threadId: threadId, operationId: operationId) { fileId = reserved }
+        else { fileId = makeRandomIdentifier() }
+        let uploaded = UploadedAttachment(fileId: fileId, name: attachment.fileName, mimeType: attachment.mimeType,
+                                          size: attachment.size, width: attachment.width, height: attachment.height,
+                                          duration: attachment.duration, type: attachment.type)
+        if ManagedAttachmentContract.isManaged(fileId), let threadId, let operationId {
+            let messageId = OutgoingMessageAttempt.remoteMessageId(userId: currentUserId, threadId: threadId, operationId: operationId)
+            // Persist before sending bytes, including partially uploaded files after a process exit.
+            try await MessageUploadJournal.record(.init(messageId: messageId, threadId: threadId, attachment: uploaded, recordedAt: Date(), uploadCompleted: false),
+                                                  scope: uploadJournalScope(accountId: currentUserId))
         }
-        let fileId = makeRandomIdentifier()
-        _ = participantUserIds
         // Client-side uploads can only grant permissions the current user is allowed to assign.
         // The send message Function widens read access to the other participants after it validates the thread.
         let permissions = [
@@ -601,19 +767,30 @@ private extension AppwriteService {
             fileId: fileId,
             fileName: attachment.fileName,
             mimeType: attachment.mimeType,
-            permissions: permissions
+            permissions: permissions,
+            control: control
         )
 
-        return UploadedAttachment(
-            fileId: fileId,
-            name: attachment.fileName,
-            mimeType: attachment.mimeType,
-            size: attachment.size,
-            width: attachment.width,
-            height: attachment.height,
-            duration: attachment.duration,
-            type: attachment.type
-        )
+        return uploaded
+    }
+
+    private func reserveAttachment(threadId: String, operationId: UUID) async throws -> String? {
+        let response: [String: Any]
+        do {
+            response = try await executeUserFunction(functionId: configuration.sendMessageFunctionId, body: [
+                "action": "reserveAttachment", "threadId": threadId, "operationId": operationId.uuidString.lowercased()
+            ])
+        } catch let error as AppwriteServiceError {
+            // Older deployments reject the unknown action. Their uploads remain unmanaged.
+            if case let .api(status, _, type) = error, status == 400, type == "function" { return nil }
+            throw error
+        }
+        if response["supported"] as? Bool == false { return nil }
+        guard response["supported"] as? Bool == true,
+              let fileId = response["fileId"] as? String, ManagedAttachmentContract.isManaged(fileId) else {
+            throw AppwriteServiceError.invalidResponse
+        }
+        return fileId
     }
 
     func uploadChatAttachment(
@@ -622,40 +799,13 @@ private extension AppwriteService {
         fileId: String,
         fileName: String,
         mimeType: String,
-        permissions: [String]
+        permissions: [String],
+        control: UploadControl? = nil
     ) async throws {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var request = URLRequest(
-            url: url(
-                pathComponents: [
-                    "storage",
-                    "buckets",
-                    bucketId,
-                    "files"
-                ]
-            )
+        try await uploadFile(
+            data: data, bucketId: bucketId, fileId: fileId, fileName: fileName,
+            mimeType: mimeType, permissions: permissions, limit: BoundedAttachment.chatLimit, control: control
         )
-        request.httpMethod = "POST"
-        request.setValue(configuration.projectId, forHTTPHeaderField: "X-Appwrite-Project")
-        request.setValue("1.8.0", forHTTPHeaderField: "X-Appwrite-Response-Format")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = makeMultipartBody(
-            boundary: boundary,
-            fileId: fileId,
-            fileName: fileName,
-            mimeType: mimeType,
-            fileData: data,
-            permissions: permissions
-        )
-
-        let (responseData, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AppwriteServiceError.invalidResponse
-        }
-
-        guard httpResponse.statusCode == 201 else {
-            throw makeAPIError(from: responseData, statusCode: httpResponse.statusCode)
-        }
     }
 
     func makeMessageDTO(from row: [String: Any], currentAccountId: String, replyLookup: [String: String] = [:]) -> MessageDTO? {
@@ -712,7 +862,7 @@ private extension RelationshipStateDTO {
     }
 }
 
-private struct UploadedAttachment {
+struct UploadedAttachment: Sendable, Codable {
     let fileId: String
     let name: String?
     let mimeType: String?

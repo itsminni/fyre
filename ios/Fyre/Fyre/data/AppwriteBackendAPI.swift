@@ -14,6 +14,10 @@ struct AppwriteBackendAPI: BackendAPI {
         service = AppwriteService(configuration: configuration)
     }
 
+    func fetchDiscoverPage(after cursor: String?) async throws -> DiscoverPageDTO {
+        try await service.fetchDiscoverPage(after: cursor)
+    }
+
     func fetchDiscoverProfiles() async throws -> [DiscoverProfileDTO] {
         // When Appwrite is selected, discover should only show real backend profiles.
         try await service.fetchDiscoverProfiles()
@@ -27,13 +31,17 @@ struct AppwriteBackendAPI: BackendAPI {
         try await service.fetchThreadDTO(threadId: threadId)
     }
 
+    func fetchMessagePage(threadId: String, before cursor: String) async throws -> MessagePageDTO {
+        try await service.fetchMessagePage(threadId: threadId, before: cursor)
+    }
+
     func createOrGetThread(otherUserId: String) async throws -> ThreadDTO {
         // Thread creation stays strict so a real match never lands in a mock conversation by mistake.
         try await service.createOrGetThreadDTO(otherUserId: otherUserId)
     }
 
-    func sendMessage(threadId: String, text: String, replyToMessageId: String?, attachment: OutgoingAttachmentDTO?) async throws -> MessageDTO {
-        try await service.sendMessage(threadId: threadId, text: text, replyToMessageId: replyToMessageId, attachment: attachment)
+    func sendMessage(threadId: String, attempt: OutgoingMessageAttempt) async throws -> MessageDTO {
+        try await service.sendMessage(threadId: threadId, attempt: attempt)
     }
 
     func submitSwipe(otherUserId: String, otherUserName: String?, decision: SwipeDecisionDTO) async throws -> ThreadDTO? {

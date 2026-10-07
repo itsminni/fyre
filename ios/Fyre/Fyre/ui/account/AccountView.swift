@@ -122,6 +122,8 @@ struct AccountView: View {
     @State private var isHydratingProfileForm = false
     @State private var hasLoadedProfileForm = false
     @State private var isSavingProfile = false
+    @State private var photoTransfer: UploadControl?
+    @State private var profileSaveTask: Task<Void, Never>?
     @State private var isLoggingOut = false
     @State private var draggingProfilePhotoIndex: Int?
     @State private var profilePhotoDropIndex: Int?
@@ -143,8 +145,14 @@ struct AccountView: View {
     var body: some View {
         NavigationStack {
             settingsHome
-            .onAppear {
-                fillFromUser()
+            .overlay(alignment: .bottom) {
+            if let photoTransfer {
+                UploadProgressView(control: photoTransfer)
+                    .padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)).padding()
+            }
+        }
+        .onAppear {
+                if !hasLoadedProfileForm { fillFromUser() }
                 chatBackgroundStyleSelection = chatBackgroundStyle
             }
             .task {
@@ -189,14 +197,16 @@ struct AccountView: View {
             ) {
                 Button(L10n.tr("profile.eventsRemoval.warning.confirm"), role: .destructive) {
                     Task {
+                        let confirmedGender = pendingDangerousGender
+                        let confirmedOrientation = pendingDangerousOrientation
+                        pendingDangerousGender = nil
+                        pendingDangerousOrientation = nil
                         await performProfileSave(
-                            genderOverride: pendingDangerousGender,
-                            orientationOverride: pendingDangerousOrientation,
+                            genderOverride: confirmedGender,
+                            orientationOverride: confirmedOrientation,
                             notifyEventRemoval: true,
                             showSuccessMessage: true
                         )
-                        pendingDangerousGender = nil
-                        pendingDangerousOrientation = nil
                     }
                 }
                 Button(L10n.tr("common.cancel"), role: .cancel) {
@@ -856,6 +866,16 @@ struct AccountView: View {
         }
     }
 
+    @MainActor
+    private func performPhotoUpdate(_ update: (UploadControl) async -> String?) async -> String? {
+        guard photoTransfer == nil else { return L10n.tr("upload.saving") }
+        let control = UploadControl()
+        photoTransfer = control
+        defer { photoTransfer = nil }
+        let result = await update(control)
+        return control.isCancelled ? nil : result
+    }
+
     private var currentProfilePhotoDataItems: [Data] {
         store.currentUser?.resolvedProfilePhotoDataItems ?? []
     }
@@ -863,14 +883,13 @@ struct AccountView: View {
     @MainActor
     private func saveCroppedProfileAvatar(_ data: Data) async {
         // Avatar uploads are handled separately so autosaving text fields never reuploads the image.
-        let result = await store.updateProfileImage(data)
+        let result = await performPhotoUpdate { await store.updateProfileImage(data, control: $0) }
         if let result {
             profileMessage = result
             profileMessageIsError = true
         } else {
             profileMessage = nil
             profileMessageIsError = false
-            fillFromUser()
         }
     }
 
@@ -999,14 +1018,13 @@ struct AccountView: View {
         updatedImages.insert(movedImage, at: destinationIndex)
 
         Task { @MainActor in
-            let result = await store.updateProfileImages(updatedImages)
+            let result = await performPhotoUpdate { await store.updateProfileImages(updatedImages, control: $0) }
             if let result {
                 profileMessage = result
                 profileMessageIsError = true
             } else {
                 profileMessage = nil
                 profileMessageIsError = false
-                fillFromUser()
             }
         }
 
@@ -1176,21 +1194,27 @@ struct AccountView: View {
 
         var appendedImages: [Data] = []
         for item in items.prefix(remainingCapacity) {
-            if let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty {
-                appendedImages.append(data)
+            do {
+                guard let picked = try await item.loadTransferable(type: BoundedPickedAttachment.self) else {
+                    throw AttachmentReadError.unreadable
+                }
+                appendedImages.append(try BoundedAttachment.profilePhotoData(from: picked.data))
+            } catch {
+                profileMessage = error.localizedDescription
+                profileMessageIsError = true
+                return
             }
         }
 
         guard !appendedImages.isEmpty else { return }
 
-        let result = await store.updateProfileImages(currentProfilePhotoDataItems + appendedImages)
+        let result = await performPhotoUpdate { await store.updateProfileImages(currentProfilePhotoDataItems + appendedImages, control: $0) }
         if let result {
             profileMessage = result
             profileMessageIsError = true
         } else {
             profileMessage = nil
             profileMessageIsError = false
-            fillFromUser()
         }
     }
 
@@ -1201,14 +1225,13 @@ struct AccountView: View {
         updatedImages.remove(at: index)
 
         Task { @MainActor in
-            let result = await store.updateProfileImages(updatedImages)
+            let result = await performPhotoUpdate { await store.updateProfileImages(updatedImages, control: $0) }
             if let result {
                 profileMessage = result
                 profileMessageIsError = true
             } else {
                 profileMessage = nil
                 profileMessageIsError = false
-                fillFromUser()
             }
         }
     }
@@ -1319,7 +1342,7 @@ struct AccountView: View {
               pendingDangerousOrientation == nil,
               editableProfileDraft != storedEditableProfileDraft else { return }
 
-        await performProfileSave(showSuccessMessage: false)
+        await saveProfileIndependently()
     }
 
     private func autosaveProfileIfNeeded() async {
@@ -1340,7 +1363,23 @@ struct AccountView: View {
               pendingDangerousOrientation == nil,
               editableProfileDraft != storedEditableProfileDraft else { return }
 
-        await performProfileSave(showSuccessMessage: false)
+        await saveProfileIndependently()
+    }
+
+    @MainActor
+    private func saveProfileIndependently() async {
+        // A SwiftUI task(id:) is cancelled by the next keystroke. The actual
+        // write must finish independently so its result can be reconciled.
+        if let profileSaveTask {
+            await profileSaveTask.value
+            return
+        }
+        let task = Task { @MainActor in
+            await performProfileSave(showSuccessMessage: false)
+        }
+        profileSaveTask = task
+        await task.value
+        profileSaveTask = nil
     }
 
     @MainActor
@@ -1383,6 +1422,8 @@ struct AccountView: View {
             return
         }
 
+        let submittedDraft = editableProfileDraft
+        let savingSession = store.sessionRevision
         isSavingProfile = true
 
         let result = await store.updateProfile(
@@ -1407,15 +1448,20 @@ struct AccountView: View {
             drinks: drinks
         )
 
+        guard store.sessionRevision == savingSession else {
+            isSavingProfile = false
+            return
+        }
+        let hasNewerEdits = editableProfileDraft != submittedDraft
         if let result {
             profileMessage = result
             profileMessageIsError = true
-            if genderOverride != nil {
+            if genderOverride != nil && !hasNewerEdits {
                 isHydratingProfileForm = true
                 gender = previousDraft.gender
                 isHydratingProfileForm = false
             }
-            if orientationOverride != nil {
+            if orientationOverride != nil && !hasNewerEdits {
                 isHydratingProfileForm = true
                 orientation = previousDraft.orientation
                 isHydratingProfileForm = false
@@ -1430,17 +1476,21 @@ struct AccountView: View {
                 profileMessage = nil
                 profileMessageIsError = false
             }
-            fillFromUser()
+            if !hasNewerEdits { fillFromUser() }
         }
 
         isSavingProfile = false
+        // Coalesce edits made during the request into one subsequent write.
+        // Keep failed drafts visible; retry only when there is newer input.
+        if hasNewerEdits {
+            await performProfileSave(showSuccessMessage: false)
+        }
     }
 
     @MainActor
     private func performLogout() async {
         guard !isLoggingOut else { return }
         isLoggingOut = true
-        await PushNotificationCoordinator.shared.unregister()
         await store.logOut()
         isLoggingOut = false
     }

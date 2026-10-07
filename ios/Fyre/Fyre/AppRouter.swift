@@ -7,22 +7,36 @@
 
 import Combine
 
+enum SessionBootstrapFailure: Equatable {
+    case configuration
+    case unavailable
+}
+
 @MainActor
 final class AppRouter: ObservableObject {
     enum Root: Equatable {
         case loading
         case auth
         case main
+        case bootstrapFailed(SessionBootstrapFailure)
     }
 
     @Published private(set) var root: Root = .loading
 
-    func completeBootstrap(isLoggedIn: Bool) {
-        root = isLoggedIn ? .main : .auth
+    func beginBootstrap() {
+        root = .loading
+    }
+
+    func completeBootstrap(isLoggedIn: Bool, failure: SessionBootstrapFailure? = nil) {
+        if let failure {
+            root = .bootstrapFailed(failure)
+        } else {
+            root = isLoggedIn ? .main : .auth
+        }
     }
 
     func sync(isLoggedIn: Bool) {
-        guard root != .loading else { return }
+        guard root == .auth || root == .main else { return }
         root = isLoggedIn ? .main : .auth
     }
 }

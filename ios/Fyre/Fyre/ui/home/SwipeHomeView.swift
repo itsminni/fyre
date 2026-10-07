@@ -124,40 +124,14 @@ private struct DiscoverProfileDetailsView: View {
 
 private struct FlowChips: View {
     let items: [String]
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(rows, id: \.self) { row in
-                HStack(spacing: 8) {
-                    ForEach(row, id: \.self) { item in
-                        Text(item)
-                            .font(.footnote.weight(.semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(Color.primary.opacity(0.10), in: Capsule(style: .continuous))
-                    }
-                    Spacer(minLength: 0)
-                }
+        AdaptiveFlowLayout(spacing: 8) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                Text(item).font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Color.primary.opacity(0.10), in: Capsule())
             }
         }
-    }
-
-    private var rows: [[String]] {
-        var rows: [[String]] = [[]]
-        var currentCount = 0
-
-        for item in items {
-            let estimatedWidth = item.count + 5
-            if currentCount + estimatedWidth > 26 {
-                rows.append([item])
-                currentCount = estimatedWidth
-            } else {
-                rows[rows.count - 1].append(item)
-                currentCount += estimatedWidth
-            }
-        }
-
-        return rows.filter { !$0.isEmpty }
     }
 }
 
@@ -169,6 +143,7 @@ struct SwipeHomeView: View {
 
     @Environment(AppServices.self) private var services
     @Environment(UserStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("settings_show_age") private var showAge = true
     @AppStorage("settings_show_distance") private var showDistance = true
@@ -181,6 +156,10 @@ struct SwipeHomeView: View {
     @State private var activePhotoIndices: [String: Int] = [:]
     @State private var selectedDetailsProfile: SwipeProfile?
     @State private var profileLoadGeneration: UInt = 0
+    @State private var nextProfileCursor: String?
+    @State private var hasMoreProfiles = true
+    @State private var isLoadingProfiles = false
+    @State private var consumedProfileIDs = Set<String>()
 
     var onMatchedThread: (ChatThread) -> Void = { _ in }
 
@@ -190,11 +169,17 @@ struct SwipeHomeView: View {
         NavigationStack {
             Group {
                 if profiles.isEmpty {
-                    ContentUnavailableView(
-                        L10n.tr("home.empty.title"),
-                        systemImage: "checkmark.circle",
-                        description: Text(L10n.tr("home.empty.description"))
-                    )
+                    VStack(spacing: 16) {
+                        if isLoadingProfiles { ProgressView() }
+                        else {
+                            ContentUnavailableView(
+                                L10n.tr(swipeErrorMessage != nil ? "home.swipe.error" : hasMoreProfiles ? "home.discovery.continue" : "home.empty.title"),
+                                systemImage: swipeErrorMessage != nil ? "wifi.exclamationmark" : "person.crop.circle.badge.magnifyingglass",
+                                description: Text(L10n.tr("home.empty.description"))
+                            )
+                            Button(L10n.tr("startup.retry")) { Task { await loadProfiles(restart: !hasMoreProfiles) } }
+                        }
+                    }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     GeometryReader { geometry in
@@ -210,15 +195,15 @@ struct SwipeHomeView: View {
             .toolbarBackground(discoveryBarBackground, for: .tabBar)
             .toolbarBackground(.visible, for: .tabBar)
         }
+        .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
         .task(id: discoverFilterID) {
-            while !Task.isCancelled {
-                await loadProfiles()
-                do {
-                    try await Task.sleep(nanoseconds: 240_000_000_000)
-                } catch {
-                    return
-                }
-            }
+            profileLoadGeneration &+= 1
+            profiles = []
+            consumedProfileIDs = []
+            nextProfileCursor = nil
+            hasMoreProfiles = true
+            isLoadingProfiles = false
+            await loadProfiles()
         }
         .fullScreenCover(item: $selectedDetailsProfile) { profile in
             DiscoverProfileDetailsView(
@@ -479,15 +464,17 @@ struct SwipeHomeView: View {
     }
 
     private func animateDecision(_ direction: DecisionDirection, for profile: SwipeProfile) {
+        let scope = discoverFilterID
         isAnimatingDecision = true
         swipeErrorMessage = nil
 
         let targetX: CGFloat = direction == .left ? -560 : 560
         withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) {
-            dragOffset = CGSize(width: targetX, height: direction == .left ? -20 : 20)
+            dragOffset = reduceMotion ? .zero : CGSize(width: targetX, height: direction == .left ? -20 : 20)
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            guard scope == discoverFilterID else { dragOffset = .zero; isAnimatingDecision = false; return }
             if !profiles.isEmpty {
                 profiles.removeFirst()
             }
@@ -502,16 +489,32 @@ struct SwipeHomeView: View {
     }
 
     @MainActor
-    private func loadProfiles() async {
+    private func loadProfiles(restart: Bool = false) async {
+        guard !isLoadingProfiles else { return }
+        if restart { nextProfileCursor = nil; hasMoreProfiles = true }
+        guard hasMoreProfiles else { return }
+        isLoadingProfiles = true
         profileLoadGeneration &+= 1
         let generation = profileLoadGeneration
         let expectedUserId = store.currentUser?.appwriteUserId
+        defer { if generation == profileLoadGeneration { isLoadingProfiles = false } }
         do {
             swipeErrorMessage = nil
-            let dtos = try await services.backend.fetchDiscoverProfiles()
+            var dtos: [DiscoverProfileDTO] = []
+            // Bound each refill; retain the continuation when a sparse window is empty.
+            for _ in 0..<4 {
+                let page = try await services.backend.fetchDiscoverPage(after: nextProfileCursor)
+                guard generation == profileLoadGeneration, expectedUserId == store.currentUser?.appwriteUserId,
+                      !Task.isCancelled else { return }
+                nextProfileCursor = page.nextCursor
+                hasMoreProfiles = page.nextCursor != nil
+                var known = Set(profiles.map(\.id)).union(consumedProfileIDs)
+                dtos = page.profiles.filter { known.insert($0.id).inserted }
+                if !dtos.isEmpty || !hasMoreProfiles { break }
+            }
             guard generation == profileLoadGeneration,
                   expectedUserId == store.currentUser?.appwriteUserId else { return }
-            profiles = dtos.map {
+            profiles += dtos.map {
                 SwipeProfile(
                     id: $0.id,
                     name: $0.name,
@@ -539,8 +542,9 @@ struct SwipeHomeView: View {
         } catch {
             guard generation == profileLoadGeneration,
                   expectedUserId == store.currentUser?.appwriteUserId else { return }
-            profiles = []
-            swipeErrorMessage = error.localizedDescription
+            // A transient refresh failure must not discard cards already loaded.
+            guard !Task.isCancelled else { return }
+            swipeErrorMessage = L10n.tr("home.swipe.error")
         }
     }
 
@@ -549,6 +553,7 @@ struct SwipeHomeView: View {
         guard !profile.id.isEmpty else { return }
 
         isSubmittingSwipe = true
+        let scope = discoverFilterID
         defer { isSubmittingSwipe = false }
 
         do {
@@ -559,6 +564,10 @@ struct SwipeHomeView: View {
                 decision: decision
             )
 
+            guard scope == discoverFilterID else { return }
+            consumedProfileIDs.insert(profile.id)
+            if profiles.count <= 5 { await loadProfiles(restart: !hasMoreProfiles) }
+            guard scope == discoverFilterID else { return }
             guard let dto = matchedThread else { return }
 
             let displayName = ThreadNaming.isPlaceholderThreadName(dto.name)
@@ -576,18 +585,21 @@ struct SwipeHomeView: View {
                 participantUserIds: dto.participantUserIds,
                 notificationsEnabled: dto.notificationsEnabled,
                 relationshipState: dto.relationshipState,
-                messages: dto.messages.map(ChatMessage.init(dto:))
+                messages: dto.messages.map(ChatMessage.init(dto:)),
+                olderMessagesCursor: dto.olderMessagesCursor,
+                remoteUnreadCount: dto.remoteUnreadCount
             )
             RecentChatThreadStore.upsert(thread)
             NotificationCenter.default.post(name: .fyreThreadsDidChange, object: thread)
             onMatchedThread(thread)
         } catch {
+            guard scope == discoverFilterID else { return }
+            if !profiles.contains(where: { $0.id == profile.id }) { profiles.insert(profile, at: 0) }
 #if DEBUG
             swipeErrorMessage = error.localizedDescription
 #else
             swipeErrorMessage = L10n.tr("home.swipe.error")
 #endif
-            await loadProfiles()
         }
     }
 
@@ -719,6 +731,8 @@ struct SwipeHomeView: View {
         guard let user = store.currentUser else { return "discover" }
         let genders = user.resolvedPreferredGenders.map(\.rawValue).joined(separator: ",")
         return [
+            user.appwriteUserId ?? user.email,
+            String(store.sessionRevision),
             genders,
             "\(user.resolvedMinPreferredAge)",
             "\(user.resolvedMaxPreferredAge)",

@@ -246,7 +246,8 @@ final class LocalNotificationCoordinator: NSObject {
         await scheduleImmediateNotification(
             identifier: opaqueIdentifier(prefix: IdentifierPrefix.match, rawValue: rawIdentifier),
             title: L10n.tr("notifications.match.title"),
-            body: body
+            body: body,
+            threadId: threadId
         )
     }
 
@@ -285,7 +286,8 @@ final class LocalNotificationCoordinator: NSObject {
         await scheduleImmediateNotification(
             identifier: opaqueIdentifier(prefix: IdentifierPrefix.message, rawValue: rawIdentifier),
             title: L10n.tr("notifications.message.title"),
-            body: body
+            body: body,
+            threadId: threadId
         )
     }
 
@@ -359,9 +361,12 @@ final class LocalNotificationCoordinator: NSObject {
                 content.body = String(
                     format: L10n.tr("notifications.eventReminder.body"),
                     item.eventTitle,
-                    Self.eventDateFormatter.string(from: item.eventDate)
+                    EventDatePresentation.full( item.eventDate)
                 )
                 content.sound = .default
+                if let eventId = item.remoteEventId, let expectedUserId {
+                    content.userInfo = ["eventId": eventId, "accountId": expectedUserId]
+                }
 
                 let request = UNNotificationRequest(
                     identifier: opaqueIdentifier(
@@ -376,7 +381,7 @@ final class LocalNotificationCoordinator: NSObject {
         }
     }
 
-    private func scheduleImmediateNotification(identifier: String, title: String, body: String) async {
+    private func scheduleImmediateNotification(identifier: String, title: String, body: String, threadId: String?) async {
         guard notificationsEnabled else { return }
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
@@ -384,6 +389,9 @@ final class LocalNotificationCoordinator: NSObject {
         content.title = title
         content.body = body
         content.sound = .default
+        if let threadId, let currentUserId {
+            content.userInfo = ["threadId": threadId, "accountId": currentUserId]
+        }
 
         let request = UNNotificationRequest(
             identifier: identifier,
@@ -512,15 +520,15 @@ final class LocalNotificationCoordinator: NSObject {
         return true
     }
 
-    private static let eventDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
 }
 
 extension LocalNotificationCoordinator: UNUserNotificationCenterDelegate {
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+              let route = NotificationRoute(userInfo: response.notification.request.content.userInfo) else { return }
+        await MainActor.run { NotificationRouter.shared.receive(route) }
+    }
+
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
