@@ -34,7 +34,9 @@ Without the local file, the app reports that the backend is unavailable without 
 
 ## Tests
 
-Run the `FyreTests` target from the shared `Fyre` scheme. [CI](../../.github/workflows/ci.yml) selects an available simulator and uses normal ad-hoc signing for Keychain verification.
+Run both `FyreTests` and `FyreUITests` from the shared `Fyre` scheme. [CI](../../.github/workflows/ci.yml) selects an available simulator and uses normal ad-hoc signing for Keychain verification.
+
+The UI target checks history scrolling, retry, and the composer with the largest accessibility text size and keyboard, using an offline fixture enabled only in Debug. Both targets run in CI. Message identity cases are shared with the backend in `shared/contracts/fixtures/message-identity.json`.
 
 See the [main README](../../README.md) and [Appwrite setup](../../appwrite/README.md).
 
@@ -76,6 +78,8 @@ Senza il file locale l'app segnala il backend come non disponibile senza interro
 
 ### Test
 
-Eseguire il target `FyreTests` dallo schema condiviso `Fyre`. La [CI](../../.github/workflows/ci.yml) seleziona un simulatore disponibile e usa la normale firma ad-hoc necessaria a verificare il Keychain.
+Eseguire i target `FyreTests` e `FyreUITests` dallo schema condiviso `Fyre`. La [CI](../../.github/workflows/ci.yml) seleziona un simulatore disponibile e usa la normale firma ad-hoc necessaria a verificare il Keychain.
+
+Verificare scorrimento e riprova della cronologia, oltre al composer con testo accessibile massimo e tastiera, tramite le fixture offline disponibili soltanto in Debug. Eseguire entrambi i target in CI. Condividere con il backend i casi di identità messaggio in `shared/contracts/fixtures/message-identity.json`.
 
 Consultare anche il [README principale](../../README.md#italiano) e la [configurazione Appwrite](../../appwrite/README.md#italiano).

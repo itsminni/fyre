@@ -84,7 +84,7 @@ Fyre è un progetto finale di quinta superiore realizzato da un piccolo gruppo. 
 | [`web/`](web/README.md#italiano) | Client React, TypeScript e Vite |
 | [`android/Fyre/`](android/Fyre/README.md#italiano) | Client Kotlin e Jetpack Compose |
 | [`ios/Fyre/`](ios/Fyre/README.md#italiano) | Client Swift e SwiftUI |
-| [`functions/`](functions/README.md#italiano) | Nove funzioni Appwrite autenticate |
+| [`functions/`](functions/README.md#italiano) | Funzioni Appwrite |
 | [`appwrite/`](appwrite/README.md#italiano) | Schema Appwrite riproducibile e guida al deploy |
 | [`shared/contracts/`](shared/contracts/index.d.ts) | Contratti JavaScript e TypeScript condivisi |
 | [`.github/workflows/`](.github/workflows/ci.yml) | CI per web, backend, Android e iOS |

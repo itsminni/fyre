@@ -2,23 +2,21 @@
 
 This directory is the reproducible source for Fyre's Appwrite backend. Tracked files contain neutral logical IDs; the live endpoint, project ID, and mapped resource IDs belong in the ignored root `.env` file.
 
-The public repository includes the backend implementation so each clone can use a separate Appwrite project.
-
 ## Tracked resources
 
 | File | Contents |
 | --- | --- |
 | [`tables-db.json`](tables-db.json) | TablesDB database |
-| [`tables.json`](tables.json) | Nine row-secured tables, columns, and indexes |
+| [`tables.json`](tables.json) | Eleven row-secured tables, columns, and indexes |
 | [`buckets.json`](buckets.json) | Two file-secured Storage buckets |
-| [`functions.json`](functions.json) | Nine authenticated Node.js 22 functions |
+| [`functions.json`](functions.json) | Nine authenticated functions and one scheduled cleanup (Node.js 22) |
 | [`../appwrite.config.example.json`](../appwrite.config.example.json) | Neutral multi-file CLI configuration |
 
 ## Requirements
 
 - Node.js 22 for function tests;
 - Ruby for configuration generation and validation;
-- Appwrite CLI 25, authenticated to a project that can host nine functions and two buckets.
+- Appwrite CLI 25 or 28, authenticated to a project that can host ten functions and two buckets.
 
 On macOS, install the CLI with:
 
@@ -68,41 +66,27 @@ appwrite push buckets
 scripts/deploy-appwrite-functions.sh --confirm-project 'EXACT-PROJECT-ID'
 ```
 
-The deployment script runs tests, validates the target project and configuration, applies function variables and scopes, deploys all nine functions, and keeps production logging disabled.
-
-Tables have no broad permissions and use row security. Published active events receive authenticated-user read access, drafts and inactive events remain private. Profile photos and chat attachments use per-file permissions.
-
-## Demo checklist
-
-- all three client platforms are registered;
-- nine tables, two buckets, and nine ready function deployments are present;
-- all clients use the same endpoint and resource IDs;
-- at least one future `active` event exists with authenticated-user read permission;
-- two synthetic accounts and profiles are available to demonstrate discovery, a reciprocal match, and chat.
-
 ---
 
 ## Italiano
 
 Questa cartella è la fonte riproducibile del backend Appwrite di Fyre. I file tracciati contengono ID logici neutri; endpoint live, project ID e ID delle risorse associate vanno nel file `.env` alla root, ignorato da Git.
 
-Il repository pubblico include l’implementazione del backend per consentire a ogni clone di usare un progetto Appwrite separato.
-
 ### Risorse tracciate
 
 | File | Contenuto |
 | --- | --- |
 | [`tables-db.json`](tables-db.json) | Database TablesDB |
-| [`tables.json`](tables.json) | Nove tabelle con sicurezza per riga, colonne e indici |
+| [`tables.json`](tables.json) | Undici tabelle con sicurezza per riga, colonne e indici |
 | [`buckets.json`](buckets.json) | Due bucket Storage con sicurezza per file |
-| [`functions.json`](functions.json) | Nove funzioni Node.js 22 autenticate |
+| [`functions.json`](functions.json) | Nove funzioni autenticate e una pulizia pianificata (Node.js 22) |
 | [`../appwrite.config.example.json`](../appwrite.config.example.json) | Configurazione CLI neutra su più file |
 
 ### Requisiti
 
 - Node.js 22 per i test delle funzioni;
 - Ruby per generare e validare la configurazione;
-- Appwrite CLI 25, autenticata su un progetto che possa ospitare nove funzioni e due bucket.
+- Appwrite CLI 25 o 28, autenticata su un progetto che possa ospitare dieci funzioni e due bucket.
 
 Su macOS si installa la CLI con:
 
@@ -151,15 +135,3 @@ appwrite push tables
 appwrite push buckets
 scripts/deploy-appwrite-functions.sh --confirm-project 'ID-ESATTO-DEL-PROGETTO'
 ```
-
-Lo script esegue i test, verifica progetto e configurazione, applica variabili e scope, distribuisce le nove funzioni e mantiene disabilitati i log di produzione. Evitare `--force` finché non sono state controllate tutte le modifiche mostrate.
-
-Le tabelle non hanno permessi generali e usano la sicurezza per riga. Gli eventi attivi pubblicati ricevono il permesso di lettura per gli utenti autenticati, bozze ed eventi inattivi restano privati. Foto profilo e allegati chat usano permessi per file.
-
-### Checklist della demo
-
-- le tre platform client sono registrate;
-- sono presenti nove tabelle, due bucket e nove deployment pronti;
-- tutti i client usano gli stessi endpoint e ID delle risorse;
-- esiste almeno un evento futuro `active` leggibile dagli utenti autenticati;
-- esistono due account e profili sintetici per mostrare discovery, match reciproco e chat.
