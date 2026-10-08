@@ -34,7 +34,8 @@ final class IOSRegressionTests: XCTestCase {
         XCTAssertTrue(isDefinitiveWriteRejection(AppwriteServiceError.api(statusCode: 400, message: nil, type: "function")))
     }
 
-    func testBootstrapFailureBlocksCachedLoginUntilRetrySucceeds() {
+    // Async XCTest supplies the task context required by actor-isolated deinitializers.
+    func testBootstrapFailureBlocksCachedLoginUntilRetrySucceeds() async {
         let router = AppRouter()
         router.completeBootstrap(isLoggedIn: true, failure: .unavailable)
         XCTAssertEqual(router.root, .bootstrapFailed(.unavailable))
@@ -46,7 +47,7 @@ final class IOSRegressionTests: XCTestCase {
         XCTAssertEqual(router.root, .main)
     }
 
-    func testInvalidConfigurationDoesNotOpenLogin() {
+    func testInvalidConfigurationDoesNotOpenLogin() async {
         let router = AppRouter()
         router.completeBootstrap(isLoggedIn: false, failure: .configuration)
         router.sync(isLoggedIn: false)

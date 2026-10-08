@@ -32,14 +32,18 @@ final class FyreUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["History message 100"].waitForExistence(timeout: 5))
         let scroll = app.scrollViews.firstMatch
+        let previousPage = app.staticTexts["History message 50"]
+        let pageBoundary = app.staticTexts["History message 51"]
+        // Stop when pagination completes; inertial swipes can skip the restored boundary.
         for _ in 0..<20 {
-            if app.staticTexts["History message 51"].exists && app.staticTexts["History message 51"].isHittable { break }
-            scroll.swipeDown()
+            if previousPage.exists { break }
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
-        XCTAssertTrue(app.staticTexts["History message 51"].isHittable)
         // Automatic pagination should leave the old page boundary near the viewport.
-        XCTAssertTrue(app.staticTexts["History message 50"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["History message 51"].isHittable)
+        XCTAssertTrue(previousPage.waitForExistence(timeout: 5))
+        XCTAssertTrue(pageBoundary.isHittable)
         for _ in 0..<20 {
             if app.staticTexts["History message 1"].exists && app.staticTexts["History message 1"].isHittable { break }
             scroll.swipeDown()

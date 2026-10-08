@@ -30,10 +30,15 @@ private extension Color {
     }
 }
 
-private struct ChatMessageFramesPreferenceKey: PreferenceKey {
-    static var defaultValue: [UUID: CGRect] = [:]
+private struct ChatMessageFrame: Equatable {
+    let rect: CGRect
+    let historyStartID: UUID?
+}
 
-    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+private struct ChatMessageFramesPreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: ChatMessageFrame] = [:]
+
+    static func reduce(value: inout [UUID: ChatMessageFrame], nextValue: () -> [UUID: ChatMessageFrame]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
@@ -254,6 +259,7 @@ struct ChatDetailView: View {
     @State private var latestHistoryAnchor: ChatMessage?
     @State private var visibleMessageID: UUID?
     @State private var historyScrollRestoreID: UUID?
+    @GestureState private var isDraggingHistory = false
     @State private var isHistoryScrollReady = false
     @State private var draft = ""
     @State private var pendingAttachment: PendingChatAttachment?
@@ -315,7 +321,10 @@ struct ChatDetailView: View {
                                     GeometryReader { geometry in
                                         Color.clear.preference(
                                             key: ChatMessageFramesPreferenceKey.self,
-                                            value: [message.id: geometry.frame(in: .named("chatScrollView"))]
+                                            value: [message.id: ChatMessageFrame(
+                                                rect: geometry.frame(in: .named("chatScrollView")),
+                                                historyStartID: messages.first?.id
+                                            )]
                                         )
                                     }
                                 }
@@ -328,21 +337,25 @@ struct ChatDetailView: View {
                         .frame(height: 1)
                         .background(ChatBottomAnchorReader())
                 }
+                .simultaneousGesture(
+                    DragGesture().updating($isDraggingHistory) { _, isDragging, _ in
+                        isDragging = true
+                    }
+                )
                 .onPreferenceChange(ChatMessageFramesPreferenceKey.self) { frames in
-                    visibleMessageID = frames.filter { $0.value.maxY > 0 && $0.value.minY < scrollViewportHeight }
-                        .min { $0.value.minY < $1.value.minY }?.key
+                    if let anchor = historyScrollRestoreID {
+                        // Restore only after geometry belongs to the newly prepended page.
+                        guard frames.values.contains(where: { $0.historyStartID == messages.first?.id }) else { return }
+                        historyScrollRestoreID = nil
+                        proxy.scrollTo(anchor, anchor: .top)
+                        return
+                    }
+                    visibleMessageID = frames.filter { $0.value.rect.maxY > 0 && $0.value.rect.minY < scrollViewportHeight }
+                        .min { $0.value.rect.minY < $1.value.rect.minY }?.key
                     if isHistoryScrollReady, !historyLoadFailed,
-                       let firstID = messages.first?.id, let frame = frames[firstID],
+                       let firstID = messages.first?.id, let frame = frames[firstID]?.rect,
                        frame.minY >= 0, frame.minY < 180 {
                         loadOlderMessages()
-                    }
-                }
-                .onChange(of: historyScrollRestoreID) { _, id in
-                    guard let id else { return }
-                    Task { @MainActor in
-                        await Task.yield()
-                        proxy.scrollTo(id, anchor: .top)
-                        historyScrollRestoreID = nil
                     }
                 }
                 .coordinateSpace(name: "chatScrollView")
@@ -2827,13 +2840,18 @@ struct ChatDetailView: View {
             defer { isLoadingOlderMessages = false }
             do {
                 let page = try await services.backend.fetchMessagePage(threadId: thread.remoteId, before: cursor)
+                // A scroll restoration cannot take effect while the finger still controls the scroll view.
+                while isDraggingHistory {
+                    try await Task.sleep(for: .milliseconds(50))
+                }
                 try Task.checkCancellation()
                 // Preserve the row being read, including when the user moves during the request.
                 // Restore it after the prepended rows have been laid out.
                 let anchor = visibleMessageID ?? messages.first?.id
-                messages = ChatHistoryPagination.prepend(page.messages.map(ChatMessage.init(dto:)), to: messages)
+                let updated = ChatHistoryPagination.prepend(page.messages.map(ChatMessage.init(dto:)), to: messages)
+                historyScrollRestoreID = updated.first?.id != messages.first?.id ? anchor : nil
+                messages = updated
                 olderMessagesCursor = page.nextCursor
-                historyScrollRestoreID = anchor
                 RecentChatThreadStore.upsert(currentThreadSnapshot)
             } catch is CancellationError {
                 return

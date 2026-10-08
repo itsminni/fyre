@@ -14,7 +14,8 @@ final class CompletionRegressionTests: XCTestCase {
         }
     }
 
-    func testNewNotificationIsNotConsumedByAnOlderNavigation() throws {
+    // Async XCTest supplies the task context required by actor-isolated deinitializers.
+    func testNewNotificationIsNotConsumedByAnOlderNavigation() async throws {
         let router = NotificationRouter()
         router.receive(try XCTUnwrap(NotificationRoute(userInfo: ["threadId": "one"])))
         let previousRevision = router.revision
@@ -43,7 +44,7 @@ final class CompletionRegressionTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "settings_theme_mode"), "dark")
     }
 
-    func testUploadCannotCommitAfterCancellationAndCannotCancelAfterCommit() throws {
+    func testUploadCannotCommitAfterCancellationAndCannotCancelAfterCommit() async throws {
         let cancelled = UploadControl()
         try cancelled.progress(completed: 5, total: 10)
         XCTAssertEqual(cancelled.fraction, 0.5)
@@ -69,7 +70,7 @@ final class CompletionRegressionTests: XCTestCase {
         XCTAssertNil(RealtimePayload.parse(["events": [], "payload": [:]]))
     }
 
-    func testRealtimeSharesConnectionAndDiscardsOldSessionEvents() throws {
+    func testRealtimeSharesConnectionAndDiscardsOldSessionEvents() async throws {
         var connections: [RealtimeSpy] = []
         let hub = SharedRealtimeHub { _, channels, event, _, _ in
             let connection = RealtimeSpy(event: event)
