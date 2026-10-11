@@ -15,7 +15,7 @@
     "typecheck:e2e": "tsc -p tsconfig.e2e.json"
   },
   "dependencies": {
-    "appwrite": "^14.0.0",
+    "appwrite": "^28.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.2"
