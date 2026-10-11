@@ -29,13 +29,15 @@ function ThemeBridge(): null {
     const root = document.documentElement;
     root.lang = language;
 
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      root.dataset.theme = themeMode === 'system' ? (systemTheme.matches ? 'dark' : 'light') : themeMode;
+    };
+    applyTheme();
     if (themeMode === 'system') {
-      const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      root.dataset.theme = systemDark ? 'dark' : 'light';
-      return;
+      systemTheme.addEventListener('change', applyTheme);
+      return () => systemTheme.removeEventListener('change', applyTheme);
     }
-
-    root.dataset.theme = themeMode;
   }, [language, themeMode]);
 
   return null;
