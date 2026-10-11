@@ -33,7 +33,7 @@ function threadPreviewText(
   return t('messages.noMessages');
 }
 
-function formatThreadTime(createdAt: string): string {
+function formatThreadTime(createdAt: string, language: string): string {
   const date = new Date(createdAt);
   if (Number.isNaN(date.getTime())) {
     return '--:--';
@@ -46,8 +46,8 @@ function formatThreadTime(createdAt: string): string {
     date.getFullYear() === now.getFullYear();
 
   return isToday
-    ? new Intl.DateTimeFormat('it-IT', { hour: '2-digit', minute: '2-digit' }).format(date)
-    : new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: '2-digit' }).format(date);
+    ? new Intl.DateTimeFormat(language === 'it' ? 'it-IT' : 'en-GB', { hour: '2-digit', minute: '2-digit' }).format(date)
+    : new Intl.DateTimeFormat(language === 'it' ? 'it-IT' : 'en-GB', { day: '2-digit', month: '2-digit' }).format(date);
 }
 
 function outgoingStatusLabel(
@@ -63,6 +63,7 @@ function outgoingStatusLabel(
     return t('messages.read');
   }
 
+  if (lastMessage.deliveryState === 'failed' || lastMessage.deliveryState === 'cancelled') return t('messages.failed');
   if (lastMessage.deliveryState === 'sending') {
     return t('messages.sending');
   }
@@ -104,7 +105,7 @@ export function MessagesPage(): JSX.Element {
                   </div>
 
                   <div className="thread-row__status">
-                    <p>{lastMessage ? formatThreadTime(lastMessage.createdAt) : '--:--'}</p>
+                    <p>{lastMessage ? formatThreadTime(lastMessage.createdAt, persisted.settings.language) : '--:--'}</p>
                     {thread.unreadCount > 0 ? (
                       <strong>{thread.unreadCount > 99 ? '99+' : thread.unreadCount}</strong>
                     ) : (

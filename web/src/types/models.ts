@@ -2,7 +2,7 @@ export type ThemeMode = 'system' | 'light' | 'dark';
 export type AppLanguage = 'it' | 'en';
 export type RealtimeConnectionState = 'connecting' | 'connected' | 'disconnected';
 export type ChatAttachmentType = 'image' | 'video' | 'audio' | 'file';
-export type ChatDeliveryState = 'sending' | 'sent' | 'delivered' | 'read';
+export type ChatDeliveryState = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'cancelled';
 export type NotificationType = 'chat' | 'match' | 'event' | 'system';
 export type MatchIntent = 'relationship' | 'friendship' | 'casual' | 'notSure';
 export type RelationshipState = 'none' | 'liked' | 'matched' | 'archived' | 'blocked';
@@ -89,6 +89,9 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   readAt?: string;
   deliveryState?: ChatDeliveryState;
+  operationId?: string;
+  uploadProgress?: number;
+  canCancel?: boolean;
 }
 
 export interface ChatThread {
@@ -104,6 +107,9 @@ export interface ChatThread {
   notificationsEnabled: boolean;
   relationshipState?: RelationshipState;
   messages: ChatMessage[];
+  peerReadAt?: string;
+  historyLoaded?: boolean;
+  historyCursor?: string | null;
 }
 
 export interface AppNotification {

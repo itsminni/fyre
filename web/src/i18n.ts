@@ -105,6 +105,7 @@ export type TranslationKey =
   | 'messages.audio'
   | 'messages.read'
   | 'messages.sending'
+  | 'messages.failed'
   | 'messages.sent'
   | 'messages.typing'
   | 'account.title'
@@ -347,6 +348,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'messages.audio': 'Messaggio vocale',
     'messages.read': 'Letto',
     'messages.sending': 'Invio...',
+    'messages.failed': 'Invio non riuscito',
     'messages.sent': 'Inviato',
     'messages.typing': 'Sta scrivendo...',
     'account.title': 'Profilo',
@@ -588,6 +590,7 @@ const translations: Record<AppLanguage, Record<TranslationKey, string>> = {
     'messages.audio': 'Voice message',
     'messages.read': 'Read',
     'messages.sending': 'Sending...',
+    'messages.failed': 'Send failed',
     'messages.sent': 'Sent',
     'messages.typing': 'Typing...',
     'account.title': 'Profile',

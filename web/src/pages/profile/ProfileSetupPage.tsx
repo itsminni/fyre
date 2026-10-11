@@ -1,3 +1,4 @@
+import { validateUpload } from '../../services/uploads';
 import { ChangeEvent, FormEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { LanguageSwitch } from '../../components/layout/LanguageSwitch';
@@ -100,6 +101,7 @@ function ageInputValue(value: number | undefined, fallback: number): string {
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
+    try { validateUpload(file, true); } catch (error) { reject(error); return; }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {

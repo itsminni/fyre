@@ -1,3 +1,9 @@
+import { notificationDestination } from '../services/notificationDestination';
+import { mergeChatMessages, mergeChatThreads } from '../services/chatState';
+export { mergeChatThreads } from '../services/chatState';
+import { mapAppwriteError } from '../services/userFacingError';
+import { UploadControl, messageOperationId } from '../services/uploads';
+import { accountSettings, storeAccountSettings } from '../services/accountSettings';
 import {
   ReactNode,
   createContext,
@@ -31,7 +37,6 @@ import {
   UserGender,
   UserOrientation,
   calculateAge,
-  getDisplayName,
   isProfileComplete,
   isValidEmail,
   normalizeUser,
@@ -81,6 +86,16 @@ interface EventAdminActionResult {
 interface AppContextValue {
   persisted: PersistedAppState;
   isAuthInitialized: boolean;
+  authError: boolean;
+  retrySession(): void;
+  discoveryLoading: boolean;
+  discoveryError: boolean;
+  discoveryExhausted: boolean;
+  loadMoreProfiles(): Promise<void>;
+  openThread(threadId: string | null): void;
+  loadOlderMessages(threadId: string, beforeCommit?: () => void): Promise<void>;
+  retryMessage(messageId: string): void;
+  cancelMessage(messageId: string): void;
   currentUser: User | null;
   discoverProfiles: DiscoverProfile[];
   mainEventConfig: MainEventConfig;
@@ -221,58 +236,6 @@ function upsertUser(users: User[], user: User): User[] {
   return nextUsers;
 }
 
-function mapAppwriteError(error: unknown, fallbackMessage: string): string {
-  if (error instanceof AppwriteServiceError) {
-    const normalizedType = error.type?.toLowerCase() ?? '';
-    const normalizedMessage = error.message.toLowerCase();
-    const statusCode = error.statusCode;
-
-    if (statusCode === 401) {
-      return 'Credenziali non valide o sessione scaduta.';
-    }
-
-    if (
-      statusCode === 409 ||
-      normalizedType.includes('already') ||
-      normalizedMessage.includes('already exists')
-    ) {
-      return 'Esiste già un account con questa email.';
-    }
-
-    if (
-      normalizedType.includes('password') ||
-      normalizedMessage.includes('password')
-    ) {
-      return 'La password deve contenere almeno 8 caratteri.';
-    }
-
-    if (
-      normalizedType.includes('email') ||
-      normalizedMessage.includes('email')
-    ) {
-      return 'Inserisci un indirizzo email valido.';
-    }
-
-    if (statusCode === 429) {
-      return 'Troppe richieste in poco tempo. Riprova tra qualche minuto.';
-    }
-
-    if (statusCode === 400) {
-      return 'Controlla i dati inseriti e riprova.';
-    }
-
-    if (statusCode !== null && statusCode >= 500) {
-      return 'Il server non è disponibile adesso. Riprova tra poco.';
-    }
-  }
-
-  if (error instanceof TypeError) {
-    return 'Impossibile raggiungere il server. Controlla la connessione e riprova.';
-  }
-
-  return fallbackMessage;
-}
-
 function appwriteMessageKey(error: unknown): string | null {
   if (!(error instanceof AppwriteServiceError)) {
     return null;
@@ -362,152 +325,27 @@ function normalizeMaxDistanceKm(value: number | undefined): number | undefined {
   return Math.min(Math.max(Math.floor(value), 5), 999);
 }
 
-function shouldPreferCachedThread(cachedThread: ChatThread, fetchedThread: ChatThread): boolean {
-  const cachedLastMessage = cachedThread.messages[cachedThread.messages.length - 1];
-  const fetchedLastMessage = fetchedThread.messages[fetchedThread.messages.length - 1];
-  const cachedLastMessageAt = Date.parse(cachedLastMessage?.createdAt ?? '');
-  const fetchedLastMessageAt = Date.parse(fetchedLastMessage?.createdAt ?? '');
-  const cachedTimestamp = Number.isNaN(cachedLastMessageAt) ? 0 : cachedLastMessageAt;
-  const fetchedTimestamp = Number.isNaN(fetchedLastMessageAt) ? 0 : fetchedLastMessageAt;
-
-  if (cachedTimestamp > fetchedTimestamp) {
-    return true;
-  }
-
-  return cachedThread.messages.length > fetchedThread.messages.length
-    && cachedTimestamp === fetchedTimestamp;
-}
-
-function isClientGeneratedMessageId(id: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
-}
-
-function messageAttachmentFingerprint(message: ChatMessage): string {
-  return (message.attachments ?? [])
-    .map((attachment) => `${attachment.type}:${attachment.name}:${attachment.sizeBytes}`)
-    .join('|');
-}
-
-function isSameMessageCandidate(left: ChatMessage, right: ChatMessage): boolean {
-  if (
-    left.isMe !== right.isMe
-    || left.text.trim() !== right.text.trim()
-    || (left.replyToMessageId ?? '') !== (right.replyToMessageId ?? '')
-    || messageAttachmentFingerprint(left) !== messageAttachmentFingerprint(right)
-  ) {
-    return false;
-  }
-
-  const leftTimestamp = Date.parse(left.createdAt);
-  const rightTimestamp = Date.parse(right.createdAt);
-  if (Number.isNaN(leftTimestamp) || Number.isNaN(rightTimestamp)) {
-    return left.time === right.time;
-  }
-
-  return Math.abs(leftTimestamp - rightTimestamp) <= 20_000;
-}
-
-function canDedupeChatMessagePair(left: ChatMessage, right: ChatMessage): boolean {
-  if (left.id === right.id) {
-    return true;
-  }
-
-  const leftIsClientGenerated = isClientGeneratedMessageId(left.id);
-  const rightIsClientGenerated = isClientGeneratedMessageId(right.id);
-  if (leftIsClientGenerated === rightIsClientGenerated) {
-    return false;
-  }
-
-  return isSameMessageCandidate(left, right);
-}
-
-function messageCompletenessScore(message: ChatMessage): number {
-  return [
-    message.readAt,
-    message.deliveryState,
-    message.senderName,
-    message.attachments?.length ? 'attachments' : ''
-  ].filter(Boolean).length;
-}
-
-function preferChatMessage(existing: ChatMessage, candidate: ChatMessage): ChatMessage {
-  return messageCompletenessScore(candidate) >= messageCompletenessScore(existing)
-    ? { ...existing, ...candidate }
-    : { ...candidate, ...existing };
-}
-
-function dedupeChatMessages(messages: ChatMessage[]): ChatMessage[] {
-  const deduped: ChatMessage[] = [];
-
-  for (const message of messages) {
-    const duplicateIndex = deduped.findIndex((existing) => canDedupeChatMessagePair(existing, message));
-    if (duplicateIndex >= 0) {
-      deduped[duplicateIndex] = preferChatMessage(deduped[duplicateIndex], message);
-    } else {
-      deduped.push(message);
-    }
-  }
-
-  return deduped.sort((left, right) => {
-    const leftTimestamp = Date.parse(left.createdAt);
-    const rightTimestamp = Date.parse(right.createdAt);
-    return (Number.isNaN(leftTimestamp) ? 0 : leftTimestamp)
-      - (Number.isNaN(rightTimestamp) ? 0 : rightTimestamp);
-  });
-}
-
-function mergeChatMessages(existingMessages: ChatMessage[], incomingMessages: ChatMessage[]): ChatMessage[] {
-  return dedupeChatMessages([...existingMessages, ...incomingMessages]);
-}
-
-export function mergeChatThreads(fetchedThreads: ChatThread[], cachedThreads: ChatThread[]): ChatThread[] {
-  const merged = fetchedThreads.map((thread) => ({
-    ...thread,
-    messages: dedupeChatMessages(thread.messages)
-  }));
-  const fetchedThreadIds = new Set(fetchedThreads.map((thread) => thread.id));
-
-  for (const cachedThread of cachedThreads) {
-    const normalizedCachedThread = {
-      ...cachedThread,
-      messages: dedupeChatMessages(cachedThread.messages)
-    };
-    const existingIndex = merged.findIndex((thread) => thread.id === cachedThread.id);
-    if (existingIndex >= 0) {
-      const mergedMessages = mergeChatMessages(merged[existingIndex].messages, normalizedCachedThread.messages);
-      merged[existingIndex] = {
-        ...(shouldPreferCachedThread(normalizedCachedThread, merged[existingIndex])
-          ? normalizedCachedThread
-          : merged[existingIndex]),
-        messages: mergedMessages
-      };
-    } else if (
-      !fetchedThreadIds.has(normalizedCachedThread.id) &&
-      normalizedCachedThread.messages.some((message) => (
-        isClientGeneratedMessageId(message.id) && message.deliveryState === 'sending'
-      ))
-    ) {
-      // Preserve only an explicit optimistic send. A successful authoritative
-      // fetch must remove conversations whose ACL was revoked by block/unmatch.
-      merged.unshift(normalizedCachedThread);
-    }
-  }
-
-  return merged.sort((left, right) => {
-    const leftLastMessage = left.messages[left.messages.length - 1];
-    const rightLastMessage = right.messages[right.messages.length - 1];
-    const leftTimestamp = Date.parse(leftLastMessage?.createdAt ?? left.createdAt);
-    const rightTimestamp = Date.parse(rightLastMessage?.createdAt ?? right.createdAt);
-    return (Number.isNaN(rightTimestamp) ? 0 : rightTimestamp)
-      - (Number.isNaN(leftTimestamp) ? 0 : leftTimestamp);
-  });
-}
-
 export function AppProvider({ children }: { children: ReactNode }): JSX.Element {
   const [persisted, setPersisted] = useState<PersistedAppState>(() =>
     withoutSensitivePersistedData(loadPersistedState())
   );
   const [isAuthInitialized, setIsAuthInitialized] = useState(false);
+  const [authError, setAuthError] = useState(false);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const retrySession = useCallback(() => { setAuthError(false); setBootstrapAttempt((value) => value + 1); }, []);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState(false);
+  const [discoveryExhausted, setDiscoveryExhausted] = useState(false);
+  const consumedProfilesRef = useRef(new Set<string>());
+  const discoveryCursorRef = useRef<string | null>(null);
+  const discoveryLoadingRef = useRef(false);
+  const discoveryCursorsRef = useRef(new Set<string>());
+  const activeThreadRef = useRef<string | null>(null);
+  const olderRequestsRef = useRef(new Set<string>());
+  const preferenceOwnerRef = useRef<string | null>(null);
+  const attemptsRef = useRef(new Map<string, {
+    input: Parameters<AppwriteService['sendMessage']>[0]; generation: number; control: UploadControl | null;
+  }>());
   const [discoverProfiles, setDiscoverProfiles] = useState<DiscoverProfile[]>([]);
   const [remoteMainEventState, setRemoteMainEventState] = useState<EventRemoteState | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<
@@ -529,6 +367,27 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   const runSerializedAuth = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
     const result = authQueueRef.current.then(operation, operation);
     authQueueRef.current = result.then(() => undefined, () => undefined);
+    return result;
+  }, []);
+
+  const profileQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveProfileMutation = useCallback((base: User, next: User, image?: string): Promise<User> => {
+    const generation = sessionInvalidationRef.current;
+    const patch = Object.fromEntries(Object.entries(next).filter(([key, value]) =>
+      JSON.stringify(value) !== JSON.stringify(base[key as keyof User])));
+    const operation = async (): Promise<User> => {
+      if (generation !== sessionInvalidationRef.current) throw new AppwriteServiceError('Session ended', 401);
+      // Refresh after prior writes, including commits whose response was lost.
+      const verified = await appwriteService.restoreCurrentUser();
+      if (!verified || verified.appwriteUserId !== base.appwriteUserId || generation !== sessionInvalidationRef.current) {
+        throw new AppwriteServiceError('Session changed', 401);
+      }
+      return image === undefined
+        ? appwriteService.updateProfile({ ...verified, ...patch })
+        : appwriteService.updateProfileImage(verified, image);
+    };
+    const result = profileQueueRef.current.then(operation, operation);
+    profileQueueRef.current = result.then(() => undefined, () => undefined);
     return result;
   }, []);
 
@@ -589,6 +448,11 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     const requestGeneration = ++threadRefreshRequestRef.current;
     try {
       const threads = await appwriteService.fetchThreads();
+      const active = activeThreadRef.current;
+      if (active && threads.some((thread) => thread.id === active)) {
+        const detail = await appwriteService.fetchThread(active);
+        if (detail) threads.splice(threads.findIndex((thread) => thread.id === active), 1, detail);
+      }
       if (
         sessionGeneration !== sessionInvalidationRef.current ||
         requestGeneration !== threadRefreshRequestRef.current
@@ -621,11 +485,18 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       threadRefreshRequestRef.current += 1;
       discoveryRefreshRequestRef.current += 1;
       removePersistedState();
+      activeThreadRef.current = null;
+      consumedProfilesRef.current.clear();
+      attemptsRef.current.forEach((attempt) => attempt.control?.cancel());
+      attemptsRef.current.clear();
     }
+    const owner = user?.appwriteUserId ?? null;
+    const changedOwner = owner !== preferenceOwnerRef.current;
+    preferenceOwnerRef.current = owner;
 
     setPersisted((prev) => {
       if (!user) {
-        return withoutSensitivePersistedData(prev);
+        return { ...withoutSensitivePersistedData(prev), settings: accountSettings(prev.settings, appwriteConfiguration.projectId, null) };
       }
 
       const normalizedUser = normalizeUser(user);
@@ -633,7 +504,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       return {
         ...prev,
         users: upsertUser(prev.users, normalizedUser),
-        currentUserEmail: normalizedUser.email
+        currentUserEmail: normalizedUser.email,
+        settings: changedOwner ? accountSettings(prev.settings, appwriteConfiguration.projectId, owner) : prev.settings
       };
     });
   }, []);
@@ -662,13 +534,12 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
               sessionInvalidationRef.current += 1;
             }
             commitCurrentUser(restoredUser);
+            setAuthError(false);
             setIsAuthInitialized(true);
           }
         } catch {
           if (!isCancelled && bootstrapGeneration === sessionInvalidationRef.current) {
-            commitCurrentUser(null);
-            setRemoteMainEventState(null);
-            setIsAuthInitialized(true);
+            setAuthError(true);
           }
         }
       });
@@ -677,7 +548,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     return () => {
       isCancelled = true;
     };
-  }, [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth]);
+  }, [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth, bootstrapAttempt]);
 
   useEffect(() => {
     if (!isAuthInitialized || !currentUser) {
@@ -687,7 +558,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     let isStopped = false;
 
     const markOnline = () => {
-      if (!isStopped) {
+      if (!isStopped && document.visibilityState === 'visible') {
         void appwriteService.markCurrentUserPresence(true).catch(() => undefined);
       }
     };
@@ -724,28 +595,37 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     void refreshRemoteMainEventState(currentUser);
   }, [currentUser, isAuthInitialized, refreshRemoteMainEventState]);
 
-  const hydrateDiscoverProfiles = useCallback(async (): Promise<void> => {
+  const hydrateDiscoverProfiles = useCallback(async (reset = true): Promise<void> => {
+    if (!reset && (discoveryLoadingRef.current || discoveryCursorRef.current === null)) return;
+    if (reset) { discoveryCursorRef.current = null; discoveryCursorsRef.current.clear(); }
+    const cursor = discoveryCursorRef.current;
     const sessionGeneration = sessionInvalidationRef.current;
     const requestGeneration = ++discoveryRefreshRequestRef.current;
+    discoveryLoadingRef.current = true;
+    setDiscoveryLoading(true);
+    setDiscoveryError(false);
     try {
-      const profiles = await appwriteService.fetchDiscoverProfiles();
-      if (
-        sessionGeneration !== sessionInvalidationRef.current ||
-        requestGeneration !== discoveryRefreshRequestRef.current
-      ) {
-        return;
-      }
-      setDiscoverProfiles(profiles);
+      const page = await appwriteService.fetchDiscoverPage(cursor);
+      if (sessionGeneration !== sessionInvalidationRef.current || requestGeneration !== discoveryRefreshRequestRef.current) return;
+      if (page.nextCursor && discoveryCursorsRef.current.has(page.nextCursor)) throw new Error('Repeated cursor');
+      if (page.nextCursor) discoveryCursorsRef.current.add(page.nextCursor);
+      discoveryCursorRef.current = page.nextCursor;
+      setDiscoveryExhausted(page.nextCursor === null);
+      setDiscoverProfiles((previous) => {
+        const updated = new Map(previous.map((profile) => [profile.id, profile]));
+        page.profiles.forEach((profile) => { if (!consumedProfilesRef.current.has(profile.id)) updated.set(profile.id, profile); });
+        return Array.from(updated.values());
+      });
     } catch {
-      if (
-        sessionGeneration !== sessionInvalidationRef.current ||
-        requestGeneration !== discoveryRefreshRequestRef.current
-      ) {
-        return;
+      if (sessionGeneration === sessionInvalidationRef.current && requestGeneration === discoveryRefreshRequestRef.current) setDiscoveryError(true);
+    } finally {
+      if (requestGeneration === discoveryRefreshRequestRef.current) {
+        discoveryLoadingRef.current = false;
+        setDiscoveryLoading(false);
       }
-      setDiscoverProfiles([]);
     }
   }, []);
+  const loadMoreProfiles = useCallback(() => hydrateDiscoverProfiles(discoveryCursorRef.current === null), [hydrateDiscoverProfiles]);
 
   const hydrateThreads = useCallback(async (): Promise<void> => {
     await refreshThreads();
@@ -756,7 +636,6 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       return;
     }
 
-    void hydrateDiscoverProfiles();
     void hydrateThreads();
   }, [persisted.currentUserEmail, hydrateDiscoverProfiles, hydrateThreads, isAuthInitialized]);
 
@@ -784,6 +663,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       return;
     }
 
+    setDiscoverProfiles([]);
+    setDiscoveryExhausted(false);
     void hydrateDiscoverProfiles();
   }, [discoveryProfileRefreshKey, hydrateDiscoverProfiles]);
 
@@ -816,7 +697,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     let fallbackRefresh: number | null = null;
 
     const scheduleRefresh = () => {
-      if (isStopped || pendingRefresh !== null) {
+      if (isStopped || pendingRefresh !== null || document.visibilityState !== 'visible') {
         return;
       }
 
@@ -841,18 +722,22 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     try {
       unsubscribe = appwriteService.subscribeToChatRealtime(scheduleRefresh);
       scheduleRefresh();
-      fallbackRefresh = window.setInterval(scheduleRefresh, 8_000);
+      if (persisted.settings.notificationsPollingEnabled) fallbackRefresh = window.setInterval(scheduleRefresh, 30_000);
     } catch {
       setPersisted((prev) => ({
         ...prev,
         realtimeState: 'disconnected'
       }));
-      fallbackRefresh = window.setInterval(scheduleRefresh, 8_000);
+      if (persisted.settings.notificationsPollingEnabled) fallbackRefresh = window.setInterval(scheduleRefresh, 30_000);
       scheduleRefresh();
     }
 
+    document.addEventListener('visibilitychange', scheduleRefresh);
+    window.addEventListener('focus', scheduleRefresh);
     return () => {
       isStopped = true;
+      document.removeEventListener('visibilitychange', scheduleRefresh);
+      window.removeEventListener('focus', scheduleRefresh);
       if (pendingRefresh !== null) {
         window.clearTimeout(pendingRefresh);
       }
@@ -861,7 +746,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       }
       unsubscribe();
     };
-  }, [currentUser?.appwriteUserId, isAuthInitialized, refreshThreads]);
+  }, [currentUser?.appwriteUserId, isAuthInitialized, refreshThreads, persisted.settings.notificationsPollingEnabled]);
 
   const [verifiedEventAdminUserId, setVerifiedEventAdminUserId] = useState<string | null>(null);
   const activeAppwriteUserId = currentUser?.appwriteUserId ?? null;
@@ -1005,11 +890,11 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           commitCurrentUser(user);
           return null;
         } catch (error) {
-          return mapAppwriteError(error, 'Registrazione non riuscita. Riprova.');
+          return mapAppwriteError(error, 'Registrazione non riuscita. Riprova.', persisted.settings.language, true);
         }
       });
     },
-    [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth]
+    [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth, persisted.settings.language]
   );
 
   const logIn = useCallback(
@@ -1034,11 +919,11 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           commitCurrentUser(user);
           return null;
         } catch (error) {
-          return mapAppwriteError(error, 'Accesso non riuscito. Riprova.');
+          return mapAppwriteError(error, 'Accesso non riuscito. Riprova.', persisted.settings.language, true);
         }
       });
     },
-    [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth]
+    [commitCurrentUser, finishPendingBackendLogout, runSerializedAuth, persisted.settings.language]
   );
 
   const logOut = useCallback(async (): Promise<void> => {
@@ -1071,17 +956,17 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const sessionGeneration = sessionInvalidationRef.current;
       try {
-        const updatedUser = await appwriteService.updateProfileImage(currentUser, imageData);
+        const updatedUser = await saveProfileMutation(currentUser, currentUser, imageData);
         if (sessionGeneration !== sessionInvalidationRef.current) {
           return null;
         }
         commitCurrentUser(updatedUser);
         return null;
       } catch (error) {
-        return mapAppwriteError(error, 'Impossibile aggiornare la foto profilo.');
+        return mapAppwriteError(error, 'Impossibile aggiornare la foto profilo.', persisted.settings.language);
       }
     },
-    [commitCurrentUser, currentUser]
+    [commitCurrentUser, currentUser, saveProfileMutation, persisted.settings.language]
   );
 
   const updateProfileImages = useCallback(
@@ -1106,17 +991,17 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const sessionGeneration = sessionInvalidationRef.current;
       try {
-        const updatedUser = await appwriteService.updateProfile(nextUser);
+        const updatedUser = await saveProfileMutation(currentUser, nextUser);
         if (sessionGeneration !== sessionInvalidationRef.current) {
           return null;
         }
         commitCurrentUser(updatedUser);
         return null;
       } catch (error) {
-        return mapAppwriteError(error, 'Impossibile aggiornare le foto per lo swipe.');
+        return mapAppwriteError(error, 'Impossibile aggiornare le foto per lo swipe.', persisted.settings.language);
       }
     },
-    [commitCurrentUser, currentUser]
+    [commitCurrentUser, currentUser, saveProfileMutation, persisted.settings.language]
   );
 
   const willUserLoseEventRegistrations = useCallback(
@@ -1221,7 +1106,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const sessionGeneration = sessionInvalidationRef.current;
       try {
-        const savedUser = await appwriteService.updateProfile(updatedUser);
+        const savedUser = await saveProfileMutation(currentUser, updatedUser);
         if (sessionGeneration !== sessionInvalidationRef.current) {
           return null;
         }
@@ -1235,14 +1120,16 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         }
         return null;
       } catch (error) {
-        return mapAppwriteError(error, 'Impossibile salvare il profilo adesso. Riprova.');
+        return mapAppwriteError(error, 'Impossibile salvare il profilo adesso. Riprova.', persisted.settings.language);
       }
     },
     [
       commitCurrentUser,
       currentUser,
       enforceRemoteMainEventEligibilityAfterProfileChange,
-      willUserLoseEventRegistrations
+      willUserLoseEventRegistrations,
+      saveProfileMutation,
+      persisted.settings.language
     ]
   );
 
@@ -1319,7 +1206,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
       const sessionGeneration = sessionInvalidationRef.current;
       try {
-        const savedUser = await appwriteService.updateProfile(updatedUser);
+        const savedUser = await saveProfileMutation(currentUser, updatedUser);
         if (sessionGeneration !== sessionInvalidationRef.current) {
           return null;
         }
@@ -1333,14 +1220,16 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         }
         return null;
       } catch (error) {
-        return mapAppwriteError(error, 'Aggiornamento preferenze non riuscito. Riprova.');
+        return mapAppwriteError(error, 'Aggiornamento preferenze non riuscito. Riprova.', persisted.settings.language);
       }
     },
     [
       commitCurrentUser,
       currentUser,
       enforceRemoteMainEventEligibilityAfterProfileChange,
-      willUserLoseEventRegistrations
+      willUserLoseEventRegistrations,
+      saveProfileMutation,
+      persisted.settings.language
     ]
   );
 
@@ -1470,68 +1359,78 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     remoteMainEventState?.eventId
   ]);
 
-  const sendMessage = useCallback(
-    (input: SendMessageInput): void => {
-      const normalizedText = input.text.trim();
-      const attachments = input.attachments ?? [];
+  const updateMessage = useCallback((threadId: string, id: string, patch: Partial<ChatMessage>, generation: number) => {
+    if (generation !== sessionInvalidationRef.current) return;
+    setPersisted((previous) => ({ ...previous, threads: previous.threads.map((thread) => thread.id === threadId
+      ? { ...thread, messages: thread.messages.map((message) => message.id === id ? mergeChatMessages([message], [{ ...message, ...patch }])[0] : message) }
+      : thread) }));
+  }, []);
 
-      if (!normalizedText && attachments.length === 0) {
-        return;
+  const retryMessage = useCallback((id: string): void => {
+    const attempt = attemptsRef.current.get(id);
+    if (!attempt || attempt.control || attempt.generation !== sessionInvalidationRef.current) return;
+    const control = new UploadControl((done, total) => updateMessage(attempt.input.threadId, id,
+      { uploadProgress: done / total }, attempt.generation), () => updateMessage(attempt.input.threadId, id, { canCancel: false }, attempt.generation));
+    attempt.control = control;
+    updateMessage(attempt.input.threadId, id, { deliveryState: 'sending', canCancel: true, uploadProgress: 0 }, attempt.generation);
+    void appwriteService.sendMessage({ ...attempt.input, control }).then((message) => {
+      updateMessage(attempt.input.threadId, id, { ...message, canCancel: false, uploadProgress: undefined }, attempt.generation);
+      attemptsRef.current.delete(id);
+    }).catch(() => {
+      updateMessage(attempt.input.threadId, id, { deliveryState: control.controller.signal.aborted ? 'cancelled' : 'failed', canCancel: false }, attempt.generation);
+    }).finally(() => { attempt.control = null; });
+  }, [updateMessage]);
+
+  const cancelMessage = useCallback((id: string) => { attemptsRef.current.get(id)?.control?.cancel(); }, []);
+
+  const sendMessage = useCallback((input: SendMessageInput): void => {
+    const owner = currentUser?.appwriteUserId;
+    const text = input.text.trim();
+    if (!owner || (!text && !input.attachments?.length) || !persisted.threads.some((thread) => thread.id === input.threadId)) return;
+    const generation = sessionInvalidationRef.current;
+    const entries = input.attachments?.length ? input.attachments : [undefined];
+    void (async () => {
+      const optimistic: ChatMessage[] = [];
+      for (let index = 0; index < entries.length; index++) {
+        const operationId = crypto.randomUUID();
+        const id = await messageOperationId(owner, input.threadId, operationId);
+        if (generation !== sessionInvalidationRef.current) return;
+        const pending = { threadId: input.threadId, text: index === 0 ? text : '',
+          replyToMessageId: index === 0 ? input.replyToMessageId : undefined, attachment: entries[index], operationId };
+        attemptsRef.current.set(id, { input: pending, generation, control: null });
+        const createdAt = nowIso();
+        optimistic.push({ id, operationId, text: pending.text, isMe: true, createdAt,
+          time: new Date(createdAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }),
+          replyToMessageId: pending.replyToMessageId, attachments: pending.attachment ? [pending.attachment] : undefined,
+          deliveryState: 'sending', canCancel: true });
       }
+      if (generation !== sessionInvalidationRef.current) return;
+      setPersisted((previous) => ({ ...previous, threads: previous.threads.map((thread) => thread.id === input.threadId
+        ? { ...thread, messages: mergeChatMessages(thread.messages, optimistic) } : thread) }));
+      // Start separately: each attachment keeps its own outcome and operation identity.
+      optimistic.forEach((message) => retryMessage(message.id));
+    })();
+  }, [currentUser?.appwriteUserId, persisted.threads, retryMessage]);
 
-      if (!persisted.threads.some((thread) => thread.id === input.threadId)) {
-        return;
-      }
+  const openThread = useCallback((threadId: string | null) => {
+    activeThreadRef.current = threadId;
+    if (threadId) void refreshThreads();
+  }, [refreshThreads]);
 
-      void (async () => {
-        try {
-          const pendingMessages =
-            attachments.length > 0
-              ? attachments.map((attachment, index) => ({
-                  threadId: input.threadId,
-                  text: index === 0 ? normalizedText : '',
-                  replyToMessageId: index === 0 ? input.replyToMessageId : undefined,
-                  attachment
-                }))
-              : [
-                  {
-                    threadId: input.threadId,
-                    text: normalizedText,
-                    replyToMessageId: input.replyToMessageId
-                  }
-                ];
-          const sentMessages: ChatMessage[] = [];
-
-          for (const pendingMessage of pendingMessages) {
-            const message = await appwriteService.sendMessage(pendingMessage);
-            sentMessages.push({
-              ...message,
-              senderName: currentUser ? getDisplayName(currentUser) : 'Tu'
-            });
-          }
-
-          setPersisted((prev) => ({
-            ...prev,
-            threads: prev.threads.map((thread) => {
-              if (thread.id !== input.threadId) {
-                return thread;
-              }
-
-              return {
-                ...thread,
-                unreadCount: 0,
-                messages: mergeChatMessages(thread.messages, sentMessages),
-                isTyping: false
-              };
-            })
-          }));
-        } catch {
-          // Leave the thread untouched when the backend rejects the message.
-        }
-      })();
-    },
-    [currentUser, persisted.threads]
-  );
+  const loadOlderMessages = useCallback(async (threadId: string, beforeCommit?: () => void): Promise<void> => {
+    const thread = persisted.threads.find((candidate) => candidate.id === threadId);
+    const generation = sessionInvalidationRef.current;
+    const requestKey = `${generation}:${threadId}`;
+    if (!thread?.historyCursor || olderRequestsRef.current.has(requestKey)) return;
+    olderRequestsRef.current.add(requestKey);
+    try {
+      const page = await appwriteService.fetchMessagePage(threadId, thread.historyCursor, undefined, thread.peerReadAt ? new Date(thread.peerReadAt) : null);
+      if (generation !== sessionInvalidationRef.current) return;
+      beforeCommit?.();
+      setPersisted((previous) => ({ ...previous, threads: previous.threads.map((candidate) => candidate.id === threadId
+        ? { ...candidate, historyCursor: page.nextCursor, messages: mergeChatMessages(candidate.messages, page.messages) } : candidate) }));
+    } finally { olderRequestsRef.current.delete(requestKey); }
+  }, [persisted.threads]);
 
   const markThreadRead = useCallback((threadId: string): void => {
     const readAt = nowIso();
@@ -1694,6 +1593,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           };
         }
 
+        consumedProfilesRef.current.add(profileId);
+        setDiscoverProfiles((previous) => previous.filter((candidate) => candidate.id !== profileId));
         if (!thread) {
           return {
             matched: false,
@@ -1919,13 +1820,11 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   }, []);
 
   const updateSettings = useCallback((patch: Partial<AppSettings>): void => {
-    setPersisted((prev) => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
-        ...patch
-      }
-    }));
+    setPersisted((prev) => {
+      const settings = { ...prev.settings, ...patch };
+      storeAccountSettings(settings, appwriteConfiguration.projectId, preferenceOwnerRef.current);
+      return { ...prev, settings };
+    });
   }, []);
 
   const setThreads = useCallback((threads: ChatThread[]): void => {
@@ -2015,19 +1914,25 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       body: latestUnread.body
     });
 
-    if (latestUnread.threadId) {
-      browserNotification.onclick = () => {
-        window.focus();
-      };
-    }
+    const generation = sessionInvalidationRef.current;
+    browserNotification.onclick = () => {
+      if (generation !== sessionInvalidationRef.current) return;
+      window.focus();
+      const destination = notificationDestination(latestUnread);
+      if (destination) window.location.assign(destination);
+      browserNotification.close();
+    };
+    return () => browserNotification.close();
   }, [notificationPermission, persisted.notifications, persisted.settings.browserPushEnabled]);
 
   const contextValue = useMemo<AppContextValue>(
     () => ({
       persisted,
       isAuthInitialized,
+      authError, retrySession,
       currentUser,
       discoverProfiles,
+      discoveryLoading, discoveryError, discoveryExhausted, loadMoreProfiles, openThread, loadOlderMessages, retryMessage, cancelMessage,
       mainEventConfig: resolvedMainEventConfig,
       mainEventInfo: resolvedMainEventInfo,
       hasMainEvent,
@@ -2068,8 +1973,10 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     [
       persisted,
       isAuthInitialized,
+      authError, retrySession,
       currentUser,
       discoverProfiles,
+      discoveryLoading, discoveryError, discoveryExhausted, loadMoreProfiles, openThread, loadOlderMessages, retryMessage, cancelMessage,
       resolvedMainEventConfig,
       resolvedMainEventInfo,
       hasMainEvent,

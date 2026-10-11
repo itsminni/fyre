@@ -1,3 +1,4 @@
+import { validateUpload } from '../../services/uploads';
 import {
   CSSProperties,
   ChangeEvent,
@@ -132,6 +133,7 @@ function clamp(value: number, min: number, max: number): number {
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
+    try { validateUpload(file, true); } catch (error) { reject(error); return; }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -234,6 +236,9 @@ export function AccountPage(): JSX.Element {
   const [instagramTag, setInstagramTag] = useState(currentUser?.instagramTag ?? '');
   const [spotifyTag, setSpotifyTag] = useState(currentUser?.spotifyTag ?? '');
 
+  const initializedOwnerRef = useRef<string | null>(null);
+  const currentDraftKeyRef = useRef('');
+
   const localCitySuggestions = useMemo(() => searchCities(city), [city]);
   const citySuggestions = useMemo(
     () => mergeCityResults(localCitySuggestions, remoteCitySuggestions),
@@ -247,18 +252,17 @@ export function AccountPage(): JSX.Element {
       return;
     }
 
-    const isCityBeingEdited = cityIsDirtyRef.current || isCityFieldFocused || city.trim().length > 0;
+    const owner = currentUser.appwriteUserId ?? currentUser.email;
+    if (initializedOwnerRef.current === owner) return;
+    initializedOwnerRef.current = owner;
 
     setOrientation(currentUser.orientation ?? 'straight');
     setPreferredGenders(defaultPreferredGenders(currentUser.preferredGenders));
-    if (!isCityBeingEdited) {
-      setCity(currentUser.city ?? '');
-    }
-    if (!isCityBeingEdited) {
-      setRemoteCitySuggestions([]);
-      setSelectedCitySuggestion(null);
-      setIsCityFieldFocused(false);
-    }
+    setCity(currentUser.city ?? '');
+    setRemoteCitySuggestions([]);
+    setSelectedCitySuggestion(null);
+    setIsCityFieldFocused(false);
+    cityIsDirtyRef.current = false;
     setSmokes(Boolean(currentUser.smokes));
     setDrinks(Boolean(currentUser.drinks));
     setExcludeSmokers(Boolean(currentUser.excludeSmokers));
@@ -273,7 +277,7 @@ export function AccountPage(): JSX.Element {
     setSpotifyTag(currentUser.spotifyTag ?? '');
     accountAutosaveReadyRef.current = false;
     lastAccountAutosaveKeyRef.current = '';
-  }, [city, currentUser, isCityFieldFocused]);
+  }, [currentUser]);
 
   const accountAutosaveKey = useMemo(
     () =>
@@ -315,7 +319,10 @@ export function AccountPage(): JSX.Element {
     ]
   );
 
+  currentDraftKeyRef.current = accountAutosaveKey;
+
   const savePreferences = useCallback(async () => {
+    const submittedKey = accountAutosaveKey;
     setProfileFeedback(null);
     if (!currentUser) {
       return;
@@ -362,6 +369,7 @@ export function AccountPage(): JSX.Element {
       instagramTag,
       spotifyTag
     });
+    if (submittedKey !== currentDraftKeyRef.current) return;
     setProfileFeedback(
       error
         ? { isError: true, message: error }
@@ -376,6 +384,7 @@ export function AccountPage(): JSX.Element {
       cityIsDirtyRef.current = false;
     }
   }, [
+    accountAutosaveKey,
     ageRangeMax,
     ageRangeMin,
     bio,
@@ -981,6 +990,7 @@ export function AccountPage(): JSX.Element {
             {profileFeedback && (
               <p className={profileFeedback.isError ? 'form-feedback form-feedback--error' : 'form-feedback'}>
                 {profileFeedback.message}
+                {profileFeedback.isError && <button type="button" onClick={() => void savePreferences()}>{persisted.settings.language === 'it' ? 'Riprova' : 'Try again'}</button>}
               </p>
             )}
           </Card>

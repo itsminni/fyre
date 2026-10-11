@@ -1,4 +1,5 @@
-import { CSSProperties, ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { CHAT_ATTACHMENT_LIMIT, validateUpload } from '../../services/uploads';
+import { CSSProperties, ChangeEvent, FormEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChatAvatar } from '../../components/messages/ChatAvatar';
 import { Button } from '../../components/ui/Button';
@@ -20,7 +21,6 @@ const CHAT_ATTACHMENT_EXTENSIONS = [
   'mov'
 ] as const;
 const CHAT_ATTACHMENT_ACCEPT = CHAT_ATTACHMENT_EXTENSIONS.map((extension) => `.${extension}`).join(',');
-const CHAT_ATTACHMENT_EXTENSION_SET = new Set<string>(CHAT_ATTACHMENT_EXTENSIONS);
 type VoiceRecorderState = 'idle' | 'recording' | 'processing';
 const CHAT_LINK_PATTERN =
   /\b((?:https?:\/\/|www\.)[^\s<]+|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?:\/[^\s<]*)?)/gi;
@@ -109,11 +109,6 @@ function attachmentMetadata(file: File, type: ChatAttachment['type']): Promise<P
   return Promise.resolve({});
 }
 
-function fileExtension(fileName: string): string {
-  const extension = fileName.split('.').pop()?.trim().toLowerCase() ?? '';
-  return extension;
-}
-
 function getAudioContextConstructor(): typeof AudioContext | null {
   const candidate = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
   return candidate.AudioContext ?? candidate.webkitAudioContext ?? null;
@@ -197,23 +192,15 @@ function fileToAttachment(file: File): Promise<ChatAttachment> {
   });
 }
 
-function formatDeliveryLabel(deliveryState: string | undefined, readAt: string | undefined): string {
-  if (deliveryState === 'read' || readAt) {
-    return 'Letto';
-  }
-  if (deliveryState === 'delivered') {
-    return 'Consegnato';
-  }
-  if (deliveryState === 'sent') {
-    return 'Inviato';
-  }
-  if (deliveryState === 'sending') {
-    return 'Invio...';
-  }
-  return 'Inviato';
+function formatDeliveryLabel(deliveryState: string | undefined, readAt: string | undefined, language = 'it'): string {
+  const labels: Record<string, [string, string]> = {
+    read: ['Letto', 'Read'], delivered: ['Consegnato', 'Delivered'], sent: ['Inviato', 'Sent'],
+    sending: ['Invio…', 'Sending…'], failed: ['Invio non riuscito', 'Send failed'], cancelled: ['Annullato', 'Cancelled']
+  };
+  return (labels[readAt ? 'read' : deliveryState ?? 'sent'] ?? labels.sent)[language === 'it' ? 0 : 1];
 }
 
-function formatMessageDateTime(value: string | undefined): string {
+function formatMessageDateTime(value: string | undefined, language = 'it'): string {
   if (!value) {
     return 'Non disponibile';
   }
@@ -223,7 +210,7 @@ function formatMessageDateTime(value: string | undefined): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat('it-IT', {
+  return new Intl.DateTimeFormat(language === 'it' ? 'it-IT' : 'en-GB', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -359,7 +346,9 @@ function MessageInfoDialog({
   message: ChatMessage;
   onClose: () => void;
 }): JSX.Element {
-  const deliveryLabel = formatDeliveryLabel(message.deliveryState, message.readAt);
+  const { persisted: { settings: { language } } } = useAppStore();
+  const italian = language === 'it';
+  const deliveryLabel = formatDeliveryLabel(message.deliveryState, message.readAt, language);
 
   return (
     <div
@@ -372,7 +361,7 @@ function MessageInfoDialog({
       <article className="chat-message-info__panel" onClick={(event) => event.stopPropagation()}>
         <header>
           <div>
-            <small>Messaggio</small>
+            <small>{italian ? 'Messaggio' : 'Message'}</small>
             <h3>Info</h3>
           </div>
           <button type="button" onClick={onClose} aria-label="Chiudi info messaggio">
@@ -382,16 +371,16 @@ function MessageInfoDialog({
 
         <dl className="chat-message-info__list">
           <div>
-            <dt>Stato</dt>
+            <dt>{italian ? 'Stato' : 'Status'}</dt>
             <dd>{deliveryLabel}</dd>
           </div>
           <div>
-            <dt>Inviato</dt>
-            <dd>{formatMessageDateTime(message.createdAt)}</dd>
+            <dt>{italian ? 'Inviato' : 'Sent'}</dt>
+            <dd>{formatMessageDateTime(message.createdAt, language)}</dd>
           </div>
           <div>
-            <dt>Letto</dt>
-            <dd>{message.readAt ? formatMessageDateTime(message.readAt) : 'Non ancora letto'}</dd>
+            <dt>{italian ? 'Letto' : 'Read'}</dt>
+            <dd>{message.readAt ? formatMessageDateTime(message.readAt, language) : (italian ? 'Non ancora letto' : 'Not read yet')}</dd>
           </div>
           {message.replyToMessageId && (
             <div>
@@ -587,7 +576,7 @@ export function ChatDetailPage(): JSX.Element {
   const { threadId } = useParams();
   const {
     persisted,
-    sendMessage,
+    sendMessage, retryMessage, cancelMessage, openThread, loadOlderMessages,
     markThreadRead,
     setThreadNotifications,
     applyRelationshipAction
@@ -603,6 +592,14 @@ export function ChatDetailPage(): JSX.Element {
   const [voiceRecorderState, setVoiceRecorderState] = useState<VoiceRecorderState>('idle');
   const [voiceRecorderElapsed, setVoiceRecorderElapsed] = useState(0);
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const pinnedRef = useRef(true);
+  const historyViewGenerationRef = useRef(0);
+  const historyBusyRef = useRef(false);
+  const anchorRef = useRef<{ id: string; offset: number } | null>(null);
+  const voiceSampleCountRef = useRef(0);
   const voiceRecorderRef = useRef<VoiceRecorderResources | null>(null);
   const voiceSamplesRef = useRef<Float32Array[]>([]);
 
@@ -620,6 +617,56 @@ export function ChatDetailPage(): JSX.Element {
 
   const themedSurfaceStyle = useMemo(() => chatSurfaceStyle(persisted.settings), [persisted.settings]);
   const resolvedThreadId = thread?.id ?? null;
+  const italian = persisted.settings.language === 'it';
+  const firstMessageId = thread?.messages[0]?.id;
+
+  useEffect(() => {
+    pinnedRef.current = true;
+    historyViewGenerationRef.current++;
+    historyBusyRef.current = false;
+    anchorRef.current = null;
+    setHistoryLoading(false);
+    setHistoryError(false);
+    setHasNewMessages(false);
+    openThread(threadId ?? null);
+    return () => openThread(null);
+  }, [threadId, openThread]);
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const container = messagesRef.current;
+    if (!anchor || !container) return;
+    const row = Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]')).find((element) => element.dataset.messageId === anchor.id);
+    if (row) container.scrollTop += row.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.offset;
+    anchorRef.current = null;
+  }, [firstMessageId]);
+
+  async function loadHistory(): Promise<void> {
+    if (!thread?.historyCursor || historyBusyRef.current) return;
+    historyBusyRef.current = true;
+    const viewGeneration = historyViewGenerationRef.current;
+    setHistoryLoading(true);
+    setHistoryError(false);
+    try {
+      await loadOlderMessages(thread.id, () => {
+        if (viewGeneration !== historyViewGenerationRef.current) return;
+        const container = messagesRef.current;
+        if (!container) return;
+        const top = container.getBoundingClientRect().top;
+        const row = Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]')).find((element) => element.getBoundingClientRect().bottom > top);
+        if (row?.dataset.messageId) anchorRef.current = { id: row.dataset.messageId, offset: row.getBoundingClientRect().top - top };
+      });
+    } catch { if (viewGeneration === historyViewGenerationRef.current) setHistoryError(true); }
+    finally { if (viewGeneration === historyViewGenerationRef.current) { historyBusyRef.current = false; setHistoryLoading(false); } }
+  }
+
+  function scrollToLatest(): void {
+    const container = messagesRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
+    pinnedRef.current = true;
+    setHasNewMessages(false);
+  }
+
   const latestMessageId = thread && thread.messages.length > 0
     ? thread.messages[thread.messages.length - 1].id
     : null;
@@ -642,10 +689,8 @@ export function ChatDetailPage(): JSX.Element {
       return;
     }
 
-    messagesElement.scrollTo({
-      top: messagesElement.scrollHeight,
-      behavior: 'smooth'
-    });
+    if (pinnedRef.current) messagesElement.scrollTop = messagesElement.scrollHeight;
+    else setHasNewMessages(true);
   }, [latestMessageId, resolvedThreadId]);
 
   useEffect(() => {
@@ -704,8 +749,17 @@ export function ChatDetailPage(): JSX.Element {
 
       gain.gain.value = 0;
       voiceSamplesRef.current = [];
+    voiceSampleCountRef.current = 0;
       processor.onaudioprocess = (event) => {
         const input = event.inputBuffer.getChannelData(0);
+        if (44 + (voiceSampleCountRef.current + input.length) * 2 > CHAT_ATTACHMENT_LIMIT) {
+          cleanupVoiceRecorder();
+          voiceSamplesRef.current = [];
+          setVoiceRecorderState('idle');
+          setUploadError(persisted.settings.language === 'it' ? 'Registrazione troppo grande (massimo 20 MiB).' : 'Recording too large (maximum 20 MiB).');
+          return;
+        }
+        voiceSampleCountRef.current += input.length;
         voiceSamplesRef.current.push(new Float32Array(input));
       };
 
@@ -770,6 +824,7 @@ export function ChatDetailPage(): JSX.Element {
       setUploadError('Impossibile preparare il messaggio vocale.');
     } finally {
       voiceSamplesRef.current = [];
+    voiceSampleCountRef.current = 0;
       setVoiceRecorderElapsed(0);
       setVoiceRecorderState('idle');
     }
@@ -778,6 +833,7 @@ export function ChatDetailPage(): JSX.Element {
   function cancelVoiceRecording(): void {
     cleanupVoiceRecorder();
     voiceSamplesRef.current = [];
+    voiceSampleCountRef.current = 0;
     setVoiceRecorderElapsed(0);
     setVoiceRecorderState('idle');
   }
@@ -790,24 +846,20 @@ export function ChatDetailPage(): JSX.Element {
 
     setUploadError(null);
 
+    const input = event.target;
     const selectedFiles = Array.from(files);
-    const unsupportedFile = selectedFiles.find(
-      (file) => !CHAT_ATTACHMENT_EXTENSION_SET.has(fileExtension(file.name))
-    );
-
-    if (unsupportedFile) {
-      setUploadError(`Formato non supportato: ${unsupportedFile.name}.`);
-      event.target.value = '';
-      return;
-    }
-
+    input.value = '';
     try {
-      const loaded = await Promise.all(selectedFiles.map((file) => fileToAttachment(file)));
+      if (attachments.length + selectedFiles.length > 6
+        || attachments.reduce((size, attachment) => size + attachment.sizeBytes, 0) + selectedFiles.reduce((size, file) => size + file.size, 0) > CHAT_ATTACHMENT_LIMIT) {
+        throw new Error('Attachment limit');
+      }
+      selectedFiles.forEach((file) => validateUpload(file));
+      const loaded: ChatAttachment[] = [];
+      for (const file of selectedFiles) loaded.push(await fileToAttachment(file));
       setAttachments((prev) => [...prev, ...loaded]);
     } catch {
-      setUploadError('Impossibile allegare uno o più file.');
-    } finally {
-      event.target.value = '';
+      setUploadError(italian ? 'Scegliere fino a 6 allegati supportati, per un totale massimo di 20 MiB.' : 'Choose up to 6 supported attachments, with a maximum total size of 20 MiB.');
     }
   }
 
@@ -917,7 +969,7 @@ export function ChatDetailPage(): JSX.Element {
         </button>
         <div>
           <h2>{thread.name}</h2>
-          <p>{thread.isOnline ? 'Online ora' : formatLastSeen(thread.lastSeenAt)}</p>
+          <p>{thread.isOnline ? (italian ? 'Online ora' : 'Online now') : formatLastSeen(thread.lastSeenAt, persisted.settings.language)}</p>
         </div>
         <div className="chat-detail-page__actions">
           <Button variant="ghost" onClick={() => void handleThreadNotifications()}>
@@ -929,7 +981,19 @@ export function ChatDetailPage(): JSX.Element {
         </div>
       </header>
 
-      <div className="chat-messages" ref={messagesRef}>
+      <div className="chat-messages" ref={messagesRef} tabIndex={0} aria-label={italian ? 'Messaggi' : 'Messages'} onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === 'Home') { event.preventDefault(); event.currentTarget.scrollTop = 0; void loadHistory(); }
+        if (event.key === 'End') { event.preventDefault(); scrollToLatest(); }
+      }} onScroll={() => {
+        const container = messagesRef.current;
+        if (!container) return;
+        pinnedRef.current = container.scrollHeight - container.clientHeight - container.scrollTop < 80;
+        if (pinnedRef.current) setHasNewMessages(false);
+        if (container.scrollTop < 30 && !historyError) void loadHistory();
+      }}>
+        {thread.historyCursor && <button type="button" disabled={historyLoading} onClick={() => void loadHistory()}>{historyLoading ? (italian ? 'Caricamento…' : 'Loading…') : (italian ? 'Carica messaggi precedenti' : 'Load older messages')}</button>}
+        {historyError && <p role="status">{italian ? 'Caricamento non riuscito. Riprova.' : 'Unable to load messages. Try again.'}</p>}
         {thread.messages.map((message, index) => {
           const replied = message.replyToMessageId
             ? thread.messages.find((candidate) => candidate.id === message.replyToMessageId)
@@ -945,7 +1009,7 @@ export function ChatDetailPage(): JSX.Element {
           ].filter(Boolean).join(' ');
 
           return (
-            <article key={message.id} className={rowClassName}>
+            <article key={message.id} data-message-id={message.id} className={rowClassName}>
               <div className="chat-message-row__body">
                 <div className={message.isMe ? 'chat-bubble chat-bubble--me' : 'chat-bubble'}>
                   {replied && (
@@ -994,12 +1058,19 @@ export function ChatDetailPage(): JSX.Element {
                 </div>
               </div>
 
+              {message.isMe && message.deliveryState === 'sending' && <div role="status">
+                {typeof message.uploadProgress === 'number' && message.attachments?.length ? <progress max={1} value={message.uploadProgress} aria-label={italian ? 'Caricamento allegato' : 'Attachment upload'} /> : null}
+                {message.canCancel && <button type="button" onClick={() => cancelMessage(message.id)}>{italian ? 'Annulla' : 'Cancel'}</button>}
+              </div>}
+              {message.isMe && ['failed', 'cancelled'].includes(message.deliveryState ?? '') && <button type="button" onClick={() => retryMessage(message.id)}>{italian ? 'Riprova invio' : 'Retry send'}</button>}
               {shouldShowMeta && (
                 <div className="chat-message-row__meta">
-                  <span>{message.time}</span>
+                  <span>{new Date(message.createdAt).toLocaleTimeString(italian ? 'it-IT' : 'en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
                   {message.isMe && (
                     <span className="chat-bubble__delivery">
-                      {formatDeliveryLabel(message.deliveryState, message.readAt)}
+                      {message.deliveryState === 'failed' ? (italian ? 'Invio non riuscito' : 'Send failed')
+                        : message.deliveryState === 'cancelled' ? (italian ? 'Annullato' : 'Cancelled')
+                        : formatDeliveryLabel(message.deliveryState, message.readAt, persisted.settings.language)}
                     </span>
                   )}
                 </div>
@@ -1009,6 +1080,7 @@ export function ChatDetailPage(): JSX.Element {
         })}
       </div>
 
+      {hasNewMessages && <button type="button" onClick={scrollToLatest}>{italian ? 'Nuovi messaggi' : 'New messages'}</button>}
       {replyMessage && (
         <div className="chat-replying-banner">
           <div>
@@ -1026,7 +1098,8 @@ export function ChatDetailPage(): JSX.Element {
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Messaggio"
+            placeholder={italian ? 'Messaggio' : 'Message'}
+            aria-label={italian ? 'Messaggio' : 'Message'}
           />
           <div className="chat-composer__tools">
             <label className="chat-attach-button">

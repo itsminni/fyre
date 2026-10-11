@@ -1,3 +1,6 @@
+import { AppwriteServiceError } from './appwriteError';
+export { AppwriteServiceError } from './appwriteError';
+import { dataUrlToFile, messageOperationId, uploadInChunks, UploadControl } from './uploads';
 import {
   ChatAttachment,
   ChatMessage,
@@ -75,29 +78,12 @@ interface ChatPeerProjection {
   lastSeenAt: string | null;
 }
 
-export class AppwriteServiceError extends Error {
-  readonly statusCode: number | null;
-  readonly type: string | null;
-  readonly payload: unknown;
-
-  constructor(message: string, statusCode: number | null = null, type: string | null = null, payload: unknown = null) {
-    super(message);
-    this.name = 'AppwriteServiceError';
-    this.statusCode = statusCode;
-    this.type = type;
-    this.payload = payload;
-  }
-
-  get isUnauthorized(): boolean {
-    return this.statusCode === 401;
-  }
-}
-
 export class AppwriteService {
   private readonly endpoint: string;
   private readonly projectId: string;
   private readonly configuration: AppwriteConfiguration;
   private realtimeClient: Client | null = null;
+  private pendingAttachments = new Map<string, { fileId: string; complete: boolean }>();
   private cachedFunctionJwt: { value: string; expiresAt: number } | null = null;
 
   constructor(configuration: AppwriteConfiguration) {
@@ -144,6 +130,7 @@ export class AppwriteService {
 
   async logOut(): Promise<void> {
     this.cachedFunctionJwt = null;
+    this.pendingAttachments.clear();
     try {
       await this.sendJsonRequest('DELETE', '/account/sessions/current', {
         // An expired/missing session is already logged out and must not leave
@@ -160,7 +147,7 @@ export class AppwriteService {
 
     let nextAvatarFileId = user.avatarFileId ?? null;
     if (user.profileImageData && user.profileImageData.trim().length > 0 && !nextAvatarFileId) {
-      nextAvatarFileId = this.makeRandomIdentifier();
+      nextAvatarFileId = await this.reserveProfileUpload(accountId);
       await this.uploadAvatarDataUrl(user.profileImageData, nextAvatarFileId, accountId);
     }
 
@@ -198,6 +185,7 @@ export class AppwriteService {
 
     await this.executeUserFunction(this.configuration.manageProfileFunctionId, {
       action: 'upsert',
+      currentUserId: accountId,
       ...payload
     });
 
@@ -210,51 +198,28 @@ export class AppwriteService {
   }
 
   async updateProfileImage(user: User, profileImageData: string): Promise<User> {
-    const accountId = await this.resolveRequiredAccountId(user);
-    const previousAvatarFileId = user.avatarFileId ?? null;
-    const trimmedImageData = profileImageData.trim();
+    // The server ledger cleans unused reservations. Never delete after an uncertain
+    // profile commit: the new image may already be referenced by the account.
+    return this.updateProfile({ ...user, avatarFileId: undefined,
+      profileImageData: profileImageData.trim() || undefined });
+  }
 
-    if (trimmedImageData.length === 0) {
-      const updated = await this.updateProfile({
-        ...user,
-        appwriteUserId: accountId,
-        avatarFileId: undefined,
-        profileImageData: undefined
-      });
-
-      if (previousAvatarFileId) {
-        await this.deleteAvatarFile(previousAvatarFileId).catch(() => undefined);
-      }
-
-      return updated;
+  private async reserveProfileUpload(owner: string): Promise<string> {
+    const result = await this.executeUserFunction(this.configuration.manageProfileFunctionId, { action: 'reserveUpload', currentUserId: owner });
+    if (result.supported !== true || typeof result.fileId !== 'string' || !/^p_[a-f0-9]{32}$/.test(result.fileId)) {
+      throw new AppwriteServiceError('Managed uploads unavailable', 503);
     }
-
-    const nextAvatarFileId = this.makeRandomIdentifier();
-
-    await this.uploadAvatarDataUrl(trimmedImageData, nextAvatarFileId, accountId);
-
-    try {
-      const updated = await this.updateProfile({
-        ...user,
-        appwriteUserId: accountId,
-        avatarFileId: nextAvatarFileId,
-        profileImageData: trimmedImageData
-      });
-
-      if (previousAvatarFileId && previousAvatarFileId !== nextAvatarFileId) {
-        await this.deleteAvatarFile(previousAvatarFileId).catch(() => undefined);
-      }
-
-      return updated;
-    } catch (error) {
-      await this.deleteAvatarFile(nextAvatarFileId).catch(() => undefined);
-      throw error;
-    }
+    return result.fileId;
   }
 
   async fetchDiscoverProfiles(): Promise<DiscoverProfile[]> {
+    return (await this.fetchDiscoverPage()).profiles;
+  }
+
+  async fetchDiscoverPage(cursor: string | null = null): Promise<{ profiles: DiscoverProfile[]; nextCursor: string | null }> {
     const usedCursors = new Set<string>();
-    let profileCursor: string | null = null;
+    let profileCursor: string | null = cursor;
+    if (cursor) usedCursors.add(cursor);
 
     for (let window = 0; window < MAX_DISCOVERY_WINDOWS; window += 1) {
       const payload = await this.executeUserFunction(
@@ -267,26 +232,21 @@ export class AppwriteService {
 
       const profiles = parseDiscoverProfilesPayload(payload.profiles)
         .map((profile) => this.mapContractDiscoverProfile(profile));
-      if (payload.profiles.length > 0) {
-        return profiles;
-      }
-
-      if (payload.nextCursor == null) {
-        return [];
-      }
+      const suppliedCursor = payload.nextCursor == null ? null : this.stringValue(payload.nextCursor);
+      if (payload.nextCursor != null && !suppliedCursor) throw new AppwriteServiceError('Invalid discovery cursor', 502);
+      if (payload.profiles.length > 0) return { profiles, nextCursor: suppliedCursor && !usedCursors.has(suppliedCursor) ? suppliedCursor : null };
+      if (payload.nextCursor == null) return { profiles: [], nextCursor: null };
       const nextCursor = this.stringValue(payload.nextCursor);
       if (!nextCursor) {
         throw new AppwriteServiceError('Invalid discover profiles cursor', 500, null, payload);
       }
-      if (usedCursors.has(nextCursor)) {
-        return [];
-      }
+      if (usedCursors.has(nextCursor)) throw new AppwriteServiceError('Repeated discovery cursor', 502);
 
       usedCursors.add(nextCursor);
       profileCursor = nextCursor;
     }
 
-    return [];
+    return { profiles: [], nextCursor: profileCursor };
   }
 
   async fetchThreads(): Promise<ChatThread[]> {
@@ -307,7 +267,7 @@ export class AppwriteService {
       }
 
       const threadRow = await this.fetchRowIfAccessible(this.configuration.threadsTableId, threadId);
-      let thread = await this.fetchThread(threadId, currentAccountId);
+      let thread = await this.fetchThread(threadId, currentAccountId, undefined, true, threadRow);
       if (!thread) {
         thread = await this.recoverThreadFromReference(currentAccountId, threadId);
       }
@@ -334,79 +294,96 @@ export class AppwriteService {
   }
 
   async sendMessage(input: {
-    threadId: string;
-    text: string;
-    replyToMessageId?: string;
-    attachment?: ChatAttachment;
+    threadId: string; text: string; replyToMessageId?: string; attachment?: ChatAttachment;
+    operationId?: string; control?: UploadControl;
   }): Promise<ChatMessage> {
-    const trimmedText = input.text.trim();
-    if (!trimmedText && !input.attachment) {
-      throw new AppwriteServiceError('Message cannot be empty', 400);
-    }
-
-    const uploadedAttachment = input.attachment
-      ? await this.uploadChatAttachment(input.attachment)
-      : null;
-
-    const attemptedAt = new Date(Date.now() - 12_000);
-    let response: Record<string, unknown>;
+    const text = input.text.trim();
+    if (!text && !input.attachment) throw new AppwriteServiceError('Message cannot be empty', 400);
+    const owner = await this.fetchCurrentAccountId(true);
+    if (!owner) throw new AppwriteServiceError('Missing session', 401);
+    const attachmentFile = input.attachment ? dataUrlToFile(input.attachment.dataUrl, input.attachment.name) : null;
+    const operationId = input.operationId ?? crypto.randomUUID();
+    const id = await messageOperationId(owner, input.threadId, operationId);
+    const key = `${owner}/${input.threadId}/${operationId}`;
+    const recover = async (): Promise<ChatMessage | null> => {
+      const row = await this.fetchRowIfAccessible(this.configuration.messagesTableId, id);
+      if (!row) return null;
+      if (row.senderUserId !== owner || row.threadId !== input.threadId || (row.text ?? '') !== text
+        || (row.replyToMessageId ?? '') !== (input.replyToMessageId ?? '')) {
+        throw new AppwriteServiceError('Operation conflict', 409);
+      }
+      if (Boolean(row.attachmentFileId) !== Boolean(input.attachment) || (input.attachment && (row.attachmentName !== input.attachment.name || row.attachmentSize !== attachmentFile?.size || row.attachmentMimeType !== attachmentFile?.type))) throw new AppwriteServiceError('Attachment operation conflict', 409);
+      const message = this.makeChatMessage(row, owner);
+      if (!message) throw new AppwriteServiceError('Invalid message response', 502);
+      return message;
+    };
+    const existing = await recover();
+    if (existing) { this.pendingAttachments.delete(key); return existing; }
+    let attachment: ChatAttachment | undefined;
     try {
-      response = await this.executeUserFunction(this.configuration.sendMessageFunctionId, {
-        threadId: input.threadId,
-        text: trimmedText,
-        replyToMessageId: input.replyToMessageId,
-        messageType: uploadedAttachment?.type ?? undefined,
-        attachmentFileId: uploadedAttachment?.fileId ?? undefined,
-        attachmentName: uploadedAttachment?.name ?? undefined,
-        attachmentMimeType: uploadedAttachment?.mimeType ?? undefined,
-        attachmentSize: uploadedAttachment?.sizeBytes ?? undefined,
-        attachmentWidth: uploadedAttachment?.width ?? undefined,
-        attachmentHeight: uploadedAttachment?.height ?? undefined,
-        attachmentDuration: uploadedAttachment?.duration ?? undefined
+      input.control?.checkCancellation();
+      if (input.attachment) {
+        const file = attachmentFile!;
+        let pending = this.pendingAttachments.get(key);
+        if (pending && !pending.complete) {
+          const decision = await this.reconcileAttachment(input.threadId, pending.fileId, owner);
+          if (decision.status !== 'discarded') {
+            const message = await recover();
+            if (message) return message;
+            throw new AppwriteServiceError('Pending attachment commit', 503);
+          }
+          this.pendingAttachments.delete(key);
+          pending = undefined;
+        }
+        if (!pending) {
+          const reservation = await this.executeUserFunction(this.configuration.sendMessageFunctionId,
+            { action: 'reserveAttachment', currentUserId: owner, threadId: input.threadId, operationId });
+          if (reservation.supported !== true || typeof reservation.fileId !== 'string'
+            || !/^u_[a-f0-9]{32}$/.test(reservation.fileId)) throw new AppwriteServiceError('Managed uploads unavailable', 503);
+          pending = { fileId: reservation.fileId, complete: false };
+          this.pendingAttachments.set(key, pending);
+        }
+        if (!pending.complete) {
+          await this.uploadFile(file, pending.fileId, owner, false, input.control);
+          pending.complete = true;
+        }
+        attachment = { ...input.attachment, id: pending.fileId, sizeBytes: file.size, mimeType: file.type };
+      }
+      input.control?.beginCommit();
+      const response = await this.executeUserFunction(this.configuration.sendMessageFunctionId, {
+        currentUserId: owner, threadId: input.threadId, operationId, text, replyToMessageId: input.replyToMessageId,
+        messageType: attachment?.type, attachmentFileId: attachment?.id, attachmentName: attachment?.name,
+        attachmentMimeType: attachment?.mimeType, attachmentSize: attachment?.sizeBytes,
+        attachmentWidth: attachment?.width, attachmentHeight: attachment?.height, attachmentDuration: attachment?.duration
       });
+      const payload = parseChatMessageContract(response);
+      if ((payload?.messageId ?? response.messageId) !== id) throw new AppwriteServiceError('Invalid message identity', 502);
+      this.pendingAttachments.delete(key);
+      const createdAt = this.dateValue(payload?.createdAt) ?? this.dateValue(response.createdAt) ?? new Date();
+      return { id, text, isMe: true, time: formatTime(createdAt), createdAt: createdAt.toISOString(),
+        replyToMessageId: input.replyToMessageId,
+        attachments: attachment ? [{ ...attachment, dataUrl: this.attachmentUrl(attachment.id) ?? attachment.dataUrl }] : undefined,
+        deliveryState: 'sent' };
     } catch (error) {
-      if (error instanceof AppwriteServiceError && error.statusCode === 500) {
-        const recovered = await this.recoverRecentlySentMessage(
-          input.threadId,
-          trimmedText,
-          input.replyToMessageId,
-          uploadedAttachment?.fileId ?? null,
-          attemptedAt
-        );
-        if (recovered) {
-          return recovered;
+      const recovered = await recover().catch(() => null);
+      if (recovered) { this.pendingAttachments.delete(key); return recovered; }
+      const pending = this.pendingAttachments.get(key);
+      if (pending) {
+        // Atomic server reconciliation protects commits with a lost response.
+        const decision = await this.reconcileAttachment(input.threadId, pending.fileId, owner).catch(() => null);
+        if (decision?.status === 'discarded') this.pendingAttachments.delete(key);
+        if (decision?.status === 'referenced') {
+          const message = await recover().catch(() => null);
+          if (message) { this.pendingAttachments.delete(key); return message; }
         }
       }
       throw error;
     }
-    const payload = parseChatMessageContract(response);
-    const messageId = payload?.messageId ?? this.stringValue(response.messageId) ?? crypto.randomUUID();
-    const createdAt = this.dateValue(payload?.createdAt) ?? this.dateValue(response.createdAt) ?? new Date();
+  }
 
-    return {
-      id: messageId,
-      text: payload?.text ?? this.stringValue(response.text) ?? trimmedText,
-      isMe: true,
-      time: formatTime(createdAt),
-      createdAt: createdAt.toISOString(),
-      replyToMessageId: payload?.replyToMessageId ?? input.replyToMessageId,
-      attachments: uploadedAttachment
-        ? [
-            {
-              id: uploadedAttachment.fileId,
-              type: uploadedAttachment.type,
-              name: uploadedAttachment.name,
-              mimeType: uploadedAttachment.mimeType,
-              sizeBytes: uploadedAttachment.sizeBytes,
-              dataUrl: this.attachmentUrl(uploadedAttachment.fileId) ?? input.attachment?.dataUrl ?? '',
-              width: uploadedAttachment.width,
-              height: uploadedAttachment.height,
-              duration: uploadedAttachment.duration
-            }
-          ]
-        : undefined,
-      deliveryState: 'sent'
-    };
+  private reconcileAttachment(threadId: string, attachmentFileId: string, owner: string): Promise<Record<string, unknown>> {
+    return this.executeUserFunction(this.configuration.sendMessageFunctionId,
+      { action: 'reconcileAttachment', threadId, attachmentFileId, currentUserId: owner });
   }
 
   async markThreadRead(threadId: string): Promise<void> {
@@ -724,17 +701,19 @@ export class AppwriteService {
     await this.executeFunction(this.configuration.cancelEventRegistrationFunctionId, payload);
   }
 
-  private async fetchThread(
+  async fetchThread(
     threadId: string,
     currentAccountId?: string,
-    knownPeer?: ChatPeerProjection | null
+    knownPeer?: ChatPeerProjection | null,
+    summaryOnly = false,
+    knownRow?: Record<string, unknown> | null
   ): Promise<ChatThread | null> {
     const resolvedCurrentAccountId = currentAccountId ?? (await this.fetchCurrentAccountId(false));
     if (!resolvedCurrentAccountId) {
       return null;
     }
 
-    const threadRow = await this.fetchRowIfAccessible(this.configuration.threadsTableId, threadId);
+    const threadRow = knownRow ?? await this.fetchRowIfAccessible(this.configuration.threadsTableId, threadId);
 
     const participantRows = await this.listRows(this.configuration.threadParticipantsTableId, [
       appwriteQueryEqual('threadId', [threadId])
@@ -779,25 +758,14 @@ export class AppwriteService {
       }
     }
 
-    const messageRows = await this.listRows(this.configuration.messagesTableId, [
-      appwriteQueryEqual('threadId', [threadId]),
-      appwriteQueryOrderAsc('createdAt')
-    ]);
-
-    const messages = messageRows
-      .map((row) => this.makeChatMessage(row, resolvedCurrentAccountId, otherParticipantReadAt))
-      .filter((message): message is ChatMessage => message !== null);
-    const unreadCount = messages.filter((message) => {
-      if (message.isMe) {
-        return false;
-      }
-
-      if (!currentUserReadAt) {
-        return true;
-      }
-
-      return Date.parse(message.createdAt) > currentUserReadAt.getTime();
-    }).length;
+    const page = await this.fetchMessagePage(threadId, undefined, resolvedCurrentAccountId, otherParticipantReadAt, summaryOnly ? 1 : 50);
+    const messages = page.messages;
+    const unreadQueries = [appwriteQueryEqual('threadId', [threadId]),
+      JSON.stringify({ method: 'notEqual', attribute: 'senderUserId', values: [resolvedCurrentAccountId] }), appwriteQueryLimit(1)];
+    if (currentUserReadAt) unreadQueries.push(JSON.stringify({ method: 'greaterThan', attribute: 'createdAt', values: [currentUserReadAt.toISOString()] }));
+    const unreadResult = await this.sendJsonRequest('GET', this.tableRowsPath(this.configuration.messagesTableId),
+      { queryItems: unreadQueries.map((value) => ({ name: 'queries[]', value })) });
+    const unreadCount = this.integerValue(unreadResult.total) ?? 0;
 
     const threadName = peer?.displayName ?? 'Match';
 
@@ -819,8 +787,25 @@ export class AppwriteService {
         ? this.threadNotificationsEnabled(currentParticipantRow)
         : true,
       relationshipState,
+      peerReadAt: otherParticipantReadAt?.toISOString(),
+      historyLoaded: !summaryOnly,
+      historyCursor: summaryOnly ? undefined : page.nextCursor,
       messages
     };
+  }
+
+  async fetchMessagePage(threadId: string, before?: string, owner?: string, readAt?: Date | null, size = 50): Promise<{ messages: ChatMessage[]; nextCursor: string | null }> {
+    const accountId = owner ?? await this.fetchCurrentAccountId(true);
+    if (!accountId) throw new AppwriteServiceError('Missing session', 401);
+    const queries = [appwriteQueryEqual('threadId', [threadId]),
+      JSON.stringify({ method: 'orderDesc', attribute: 'createdAt' }),
+      JSON.stringify({ method: 'orderDesc', attribute: '$id' })];
+    if (before) queries.push(appwriteQueryCursorAfter(before));
+    const rows = await this.listRows(this.configuration.messagesTableId, queries, size === 1 ? 1 : size + 1);
+    const selected = rows.slice(0, size);
+    return { messages: selected.map((row) => this.makeChatMessage(row, accountId, readAt))
+      .filter((message): message is ChatMessage => message !== null).reverse(),
+      nextCursor: rows.length > size ? this.stringValue(selected[selected.length - 1]?.$id) : null };
   }
 
   private async fetchRelationshipState(
@@ -1058,53 +1043,6 @@ export class AppwriteService {
       readAt: isReadByOther ? otherParticipantReadAt?.toISOString() : undefined,
       deliveryState: isReadByOther ? 'read' : isMe ? 'sent' : 'delivered'
     };
-  }
-
-  private async recoverRecentlySentMessage(
-    threadId: string,
-    text: string,
-    replyToMessageId: string | undefined,
-    attachmentFileId: string | null,
-    notBefore: Date
-  ): Promise<ChatMessage | null> {
-    const currentAccountId = await this.fetchCurrentAccountId(false);
-    if (!currentAccountId) {
-      return null;
-    }
-
-    const rows = await this.listRows(this.configuration.messagesTableId, [
-      appwriteQueryEqual('threadId', [threadId]),
-      appwriteQueryOrderAsc('createdAt')
-    ]);
-
-    for (const row of rows.slice().reverse()) {
-      if (this.stringValue(row.senderUserId) !== currentAccountId) {
-        continue;
-      }
-
-      const rowText = this.stringValue(row.text) ?? '';
-      const rowAttachmentFileId = this.stringValue(row.attachmentFileId);
-      if (rowText !== text || rowAttachmentFileId !== attachmentFileId) {
-        continue;
-      }
-
-      const createdAt = this.dateValue(row.createdAt) ?? this.dateValue(row.$createdAt);
-      if (!createdAt || createdAt < notBefore) {
-        continue;
-      }
-
-      const message = this.makeChatMessage(row, currentAccountId);
-      if (message) {
-        return {
-          ...message,
-          isMe: true,
-          replyToMessageId: message.replyToMessageId ?? replyToMessageId,
-          deliveryState: message.deliveryState ?? 'sent'
-        };
-      }
-    }
-
-    return null;
   }
 
   private async createAccount(email: string, password: string): Promise<void> {
@@ -1898,50 +1836,12 @@ export class AppwriteService {
     return url.toString();
   }
 
-  private async uploadChatAttachment(attachment: ChatAttachment): Promise<{
-    fileId: string;
-    type: ChatAttachment['type'];
-    name: string;
-    mimeType: string;
-    sizeBytes: number;
-    width?: number;
-    height?: number;
-    duration?: number;
-  }> {
-    if (!this.configuration.chatAttachmentsBucketId) {
-      throw new AppwriteServiceError('Chat attachments bucket not configured', 400);
-    }
-
-    const currentUserId = await this.fetchCurrentAccountId(true);
-    if (!currentUserId) {
-      throw new AppwriteServiceError('Missing current Appwrite account id', 401);
-    }
-
-    const fileId = this.makeRandomIdentifier();
-    const file = dataUrlToFile(attachment.dataUrl, attachment.name, attachment.mimeType);
-    const formData = new FormData();
-    formData.append('fileId', fileId);
-    formData.append('file', file);
-    for (const permission of this.ownerFilePermissions(currentUserId)) {
-      formData.append('permissions[]', permission);
-    }
-
-    await this.sendRequest('POST', `/storage/buckets/${this.configuration.chatAttachmentsBucketId}/files`, {
-      body: formData,
-      expectedStatusCodes: [201],
-      isFormData: true
-    });
-
-    return {
-      fileId,
-      type: attachment.type,
-      name: attachment.name,
-      mimeType: attachment.mimeType,
-      sizeBytes: attachment.sizeBytes,
-      width: attachment.width,
-      height: attachment.height,
-      duration: attachment.duration
-    };
+  private async uploadFile(file: File, fileId: string, owner: string, profile: boolean, control?: UploadControl): Promise<void> {
+    const bucket = profile ? this.configuration.avatarsBucketId : this.configuration.chatAttachmentsBucketId;
+    if (!bucket) throw new AppwriteServiceError('Upload bucket unavailable', 503);
+    await uploadInChunks(file, fileId, (profile ? this.avatarFilePermissions(owner) : this.ownerFilePermissions(owner)),
+      (body, headers, signal) => this.sendJsonRequest('POST', `/storage/buckets/${bucket}/files`,
+        { body, headers, signal, expectedStatusCodes: [200, 201], isFormData: true }), control);
   }
 
   private makeMessageAttachments(row: Record<string, unknown>): ChatAttachment[] | undefined {
@@ -1990,42 +1890,20 @@ export class AppwriteService {
   }
 
   private async uploadAvatarDataUrl(dataUrl: string, fileId: string, ownerUserId: string): Promise<void> {
-    const file = dataUrlToFile(dataUrl, `avatar-${fileId}.jpg`);
-    const formData = new FormData();
-    formData.append('fileId', fileId);
-    formData.append('file', file);
-    for (const permission of this.avatarFilePermissions(ownerUserId)) {
-      formData.append('permissions[]', permission);
-    }
-
-    await this.sendRequest('POST', `/storage/buckets/${this.configuration.avatarsBucketId}/files`, {
-      body: formData,
-      expectedStatusCodes: [201],
-      isFormData: true
-    });
+    const mime = /^data:([^;,]+)/.exec(dataUrl)?.[1];
+    const extension = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heic' } as Record<string, string>)[mime ?? ''];
+    const file = dataUrlToFile(dataUrl, `profile.${extension ?? 'invalid'}`, true);
+    await this.uploadFile(file, fileId, ownerUserId, true);
   }
 
   private async uploadProfilePhotoDataUrls(dataUrls: string[], ownerUserId: string): Promise<string[]> {
-    const uploadedFileIds: string[] = [];
-
-    try {
-      for (const dataUrl of dataUrls) {
-        const fileId = this.makeRandomIdentifier();
-        await this.uploadAvatarDataUrl(dataUrl, fileId, ownerUserId);
-        uploadedFileIds.push(fileId);
-      }
-
-      return uploadedFileIds;
-    } catch (error) {
-      await Promise.all(uploadedFileIds.map((fileId) => this.deleteAvatarFile(fileId).catch(() => undefined)));
-      throw error;
+    const fileIds: string[] = [];
+    for (const dataUrl of dataUrls) {
+      const id = await this.reserveProfileUpload(ownerUserId);
+      await this.uploadAvatarDataUrl(dataUrl, id, ownerUserId);
+      fileIds.push(id);
     }
-  }
-
-  private async deleteAvatarFile(fileId: string): Promise<void> {
-    await this.sendJsonRequest('DELETE', `/storage/buckets/${this.configuration.avatarsBucketId}/files/${fileId}`, {
-      expectedStatusCodes: [204]
-    });
+    return fileIds;
   }
 
   private async fetchAvatarDataUrl(fileId: string | null): Promise<string | null> {
@@ -2247,34 +2125,46 @@ export class AppwriteService {
     const headers = new Headers();
     headers.set('X-Appwrite-Project', this.projectId);
     headers.set('X-Appwrite-Response-Format', RESPONSE_FORMAT);
+    for (const [name, value] of Object.entries(options.headers ?? {})) headers.set(name, value);
 
     if (!options.isFormData && !options.asBlob) {
       headers.set('Content-Type', 'application/json');
     }
 
-    const response = await fetch(url, {
-      method,
-      credentials: 'include',
-      headers,
-      body: this.requestBody(options.body, options.isFormData ?? false)
-    });
+    const controller = new AbortController();
+    const cancel = () => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener('abort', cancel, { once: true });
+    if (options.signal?.aborted) cancel();
+    const timeout = setTimeout(() => controller.abort(new DOMException('Request timed out', 'TimeoutError')), 20_000);
+    try {
+      const response = await fetch(url, {
+        method,
+        credentials: 'include',
+        signal: controller.signal,
+        headers,
+        body: this.requestBody(options.body, options.isFormData ?? false)
+      });
 
-    if (options.asBlob) {
-      if (!this.expectedStatus(response.status, options.expectedStatusCodes)) {
-        const errorPayload = await this.parseResponsePayload(response);
-        throw this.makeServiceError(response.status, errorPayload);
+      if (options.asBlob) {
+        if (!this.expectedStatus(response.status, options.expectedStatusCodes)) {
+          const errorPayload = await this.parseResponsePayload(response);
+          throw this.makeServiceError(response.status, errorPayload);
+        }
+
+        return await response.blob();
       }
 
-      return response.blob();
+      const payload = await this.parseResponsePayload(response);
+
+      if (!this.expectedStatus(response.status, options.expectedStatusCodes)) {
+        throw this.makeServiceError(response.status, payload);
+      }
+
+      return payload;
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', cancel);
     }
-
-    const payload = await this.parseResponsePayload(response);
-
-    if (!this.expectedStatus(response.status, options.expectedStatusCodes)) {
-      throw this.makeServiceError(response.status, payload);
-    }
-
-    return payload;
   }
 
   private requestBody(body: unknown, isFormData: boolean): BodyInit | undefined {
@@ -2419,6 +2309,8 @@ export class AppwriteService {
 }
 
 interface RequestOptions {
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
   body?: unknown;
   expectedStatusCodes?: number[];
   queryItems?: Array<{ name: string; value: string }>;
@@ -2450,24 +2342,6 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
   });
-}
-
-function dataUrlToFile(dataUrl: string, fileName: string, fallbackMimeType?: string): File {
-  const [metadata, encoded] = dataUrl.split(',');
-  if (!metadata || !encoded) {
-    throw new AppwriteServiceError('Invalid image payload', 400);
-  }
-
-  const mimeMatch = metadata.match(/data:([^;]+);base64/);
-  const mimeType = mimeMatch ? mimeMatch[1] : fallbackMimeType ?? 'application/octet-stream';
-  const bytes = atob(encoded);
-  const buffer = new Uint8Array(bytes.length);
-
-  for (let index = 0; index < bytes.length; index += 1) {
-    buffer[index] = bytes.charCodeAt(index);
-  }
-
-  return new File([buffer], fileName, { type: mimeType });
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

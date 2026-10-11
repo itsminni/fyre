@@ -94,7 +94,7 @@ function makeDraftFormState(state: EventAdminState): AdminDraftFormState {
   };
 }
 
-function participantSubtitle(participant: EventAdminParticipant): string {
+function participantSubtitle(participant: EventAdminParticipant, language: string): string {
   if (!participant.createdAt) {
     return 'Data non disponibile';
   }
@@ -104,7 +104,7 @@ function participantSubtitle(participant: EventAdminParticipant): string {
     return 'Data non disponibile';
   }
 
-  return new Intl.DateTimeFormat('it-IT', {
+  return new Intl.DateTimeFormat(language === 'it' ? 'it-IT' : 'en-GB', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -115,6 +115,7 @@ function participantSubtitle(participant: EventAdminParticipant): string {
 
 export function EventAdminPage(): JSX.Element {
   const {
+    persisted,
     isEventAdminEnabled,
     fetchMainEventAdminState,
     updateMainEventAsAdmin,
@@ -539,7 +540,7 @@ export function EventAdminPage(): JSX.Element {
                     <div className="admin-participant-row__meta">
                       <p>{participant.displayName}</p>
                       <small>
-                        {participant.email} - {PARTICIPANT_STATUS_LABEL[participant.status]} - {participantSubtitle(participant)}
+                        {participant.email} - {PARTICIPANT_STATUS_LABEL[participant.status]} - {participantSubtitle(participant, persisted.settings.language)}
                       </small>
                     </div>
 

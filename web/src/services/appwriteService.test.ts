@@ -459,6 +459,7 @@ describe('Appwrite chat peer projection', () => {
     }));
     service.fetchProfileRow = fetchProfileRow;
 
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([], 0)));
     const thread = await service.fetchThread('thread-1', 'user-a');
 
     expect(thread?.name).toBe('Bea Rossi');
@@ -548,14 +549,14 @@ describe('Appwrite discovery pagination', () => {
     ]);
   });
 
-  it('stops when an empty page repeats a cursor', async () => {
+  it('reports a repeated cursor as an error instead of exhaustion', async () => {
     const service = new AppwriteService(configuration) as unknown as DiscoveryFetchAccess;
     const executeUserFunction = vi.fn()
       .mockResolvedValueOnce({ profiles: [], nextCursor: 'profile-100' })
       .mockResolvedValueOnce({ profiles: [], nextCursor: 'profile-100' });
     service.executeUserFunction = executeUserFunction;
 
-    await expect(service.fetchDiscoverProfiles()).resolves.toEqual([]);
+    await expect(service.fetchDiscoverProfiles()).rejects.toThrow('Repeated discovery cursor');
     expect(executeUserFunction).toHaveBeenCalledTimes(2);
   });
 
@@ -570,5 +571,143 @@ describe('Appwrite discovery pagination', () => {
 
     await expect(service.fetchDiscoverProfiles()).resolves.toEqual([]);
     expect(executeUserFunction).toHaveBeenCalledTimes(4);
+  });
+});
+
+interface SendAccess {
+  sendMessage: AppwriteService['sendMessage'];
+  fetchCurrentAccountId(required: boolean): Promise<string | null>;
+  fetchRowIfAccessible(tableId: string, rowId: string): Promise<Record<string, unknown> | null>;
+  executeUserFunction(functionId: string, body: Record<string, unknown>): Promise<Record<string, unknown>>;
+  uploadFile(file: File, fileId: string, owner: string, profile: boolean): Promise<void>;
+}
+
+function messageRow(id: string, body: Record<string, unknown>): Record<string, unknown> {
+  return { $id: id, senderUserId: 'owner', createdAt: '2030-01-01T12:00:00.000Z', ...body };
+}
+
+const pendingFileId = 'u_' + 'a'.repeat(32);
+const attachment = { id: 'draft', type: 'file' as const, name: 'test.pdf', mimeType: 'application/pdf', sizeBytes: 4, dataUrl: 'data:application/pdf;base64,ZGF0YQ==' };
+
+describe('idempotent web sends', () => {
+  it('recovers a committed message after a lost response by identity', async () => {
+    const { messageOperationId } = await import('./uploads');
+    const service = new AppwriteService(configuration) as unknown as SendAccess;
+    const operationId = '550e8400-e29b-41d4-a716-446655440000';
+    const id = await messageOperationId('owner', 'chat', operationId);
+    const row = messageRow(id, { threadId: 'chat', text: 'hello' });
+    service.fetchCurrentAccountId = vi.fn(async () => 'owner');
+    service.fetchRowIfAccessible = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(row);
+    service.executeUserFunction = vi.fn(async () => { throw new TypeError('Lost response'); });
+    await expect(service.sendMessage({ threadId: 'chat', text: 'hello', operationId })).resolves.toMatchObject({ id, text: 'hello', deliveryState: 'sent' });
+    expect(service.executeUserFunction).toHaveBeenCalledWith('send-message', expect.objectContaining({ operationId, currentUserId: 'owner' }));
+  });
+
+  it('reuses an uploaded attachment on retry when reconciliation is unavailable', async () => {
+    const { messageOperationId } = await import('./uploads');
+    const service = new AppwriteService(configuration) as unknown as SendAccess;
+    const operationId = '550e8400-e29b-41d4-a716-446655440000';
+    const id = await messageOperationId('owner', 'chat', operationId);
+    service.fetchCurrentAccountId = vi.fn(async () => 'owner');
+    service.fetchRowIfAccessible = vi.fn(async () => null);
+    service.uploadFile = vi.fn(async () => undefined);
+    let fail = true;
+    const execute = vi.fn(async (_function: string, body: Record<string, unknown>) => {
+      if (body.action === 'reserveAttachment') return { supported: true, fileId: pendingFileId };
+      if (body.action === 'reconcileAttachment' || fail) throw new TypeError('Offline');
+      return { messageId: id, threadId: 'chat', senderUserId: 'owner', text: 'hello', createdAt: '2030-01-01T12:00:00.000Z' };
+    });
+    service.executeUserFunction = execute;
+    const input = { threadId: 'chat', text: 'hello', operationId, attachment };
+    await expect(service.sendMessage(input)).rejects.toThrow('Offline');
+    fail = false;
+    await expect(service.sendMessage(input)).resolves.toMatchObject({ id });
+    expect(service.uploadFile).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls.filter(([, body]) => body.action === 'reserveAttachment')).toHaveLength(1);
+    expect(execute.mock.calls.filter(([, body]) => !body.action).map(([, body]) => body.operationId)).toEqual([operationId, operationId]);
+  });
+
+  it('reconciles a partial upload and never sends its message', async () => {
+    const service = new AppwriteService(configuration) as unknown as SendAccess;
+    service.fetchCurrentAccountId = vi.fn(async () => 'owner');
+    service.fetchRowIfAccessible = vi.fn(async () => null);
+    service.uploadFile = vi.fn(async () => { throw new Error('Upload failed'); });
+    const execute = vi.fn(async (_function: string, body: Record<string, unknown>) => body.action === 'reserveAttachment'
+      ? { supported: true, fileId: pendingFileId } : { status: 'discarded', fileId: pendingFileId });
+    service.executeUserFunction = execute;
+    await expect(service.sendMessage({ threadId: 'chat', text: 'hello', operationId: 'op', attachment })).rejects.toThrow('Upload failed');
+    expect(execute.mock.calls.map(([, body]) => body.action)).toEqual(['reserveAttachment', 'reconcileAttachment']);
+  });
+
+  it('does not reuse an identity for different content', async () => {
+    const { messageOperationId } = await import('./uploads');
+    const service = new AppwriteService(configuration) as unknown as SendAccess;
+    const id = await messageOperationId('owner', 'chat', 'op');
+    service.fetchCurrentAccountId = vi.fn(async () => 'owner');
+    service.fetchRowIfAccessible = vi.fn(async () => messageRow(id, { threadId: 'chat', text: 'original' }));
+    const execute = vi.fn(); service.executeUserFunction = execute;
+    await expect(service.sendMessage({ threadId: 'chat', text: 'different', operationId: 'op' })).rejects.toThrow('Operation conflict');
+    expect(execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('bounded chat history', () => {
+  it('requests one descending page, uses the oldest visible ID and reverses it for display', async () => {
+    const service = new AppwriteService(configuration);
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => jsonResponse(Array.from({ length: 51 }, (_, index) => messageRow(`message-${100 - index}`, {
+      text: 'hello', threadId: 'chat', createdAt: new Date(Date.UTC(2030, 0, 1, 0, 100 - index)).toISOString()
+    })), 100));
+    vi.stubGlobal('fetch', fetchMock);
+    const page = await service.fetchMessagePage('chat', 'message-101', 'owner');
+    expect(page.messages).toHaveLength(50);
+    expect(page.messages[0].id).toBe('message-51');
+    expect(page.messages[49].id).toBe('message-100');
+    expect(page.nextCursor).toBe('message-51');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const queries = queryMethods(fetchMock.mock.calls[0][0] as RequestInfo);
+    expect(queryValue(queries, 'cursorAfter')).toBe('message-101');
+    expect(queryValue(queries, 'limit')).toBe(51);
+  });
+});
+
+describe('network timeouts', () => {
+  it('bounds a stalled session check and keeps it distinct from a missing session', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, options?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+    })));
+    try {
+      const result = new AppwriteService(configuration).restoreCurrentUser();
+      const rejection = expect(result).rejects.toMatchObject({ name: 'TimeoutError' });
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejection;
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+interface ProfileWriteAccess {
+  updateProfileImage: AppwriteService['updateProfileImage'];
+  resolveRequiredAccountId(user: User): Promise<string>;
+  reserveProfileUpload(owner: string): Promise<string>;
+  uploadAvatarDataUrl(data: string, fileId: string, owner: string): Promise<void>;
+  executeUserFunction(functionId: string, body: Record<string, unknown>): Promise<Record<string, unknown>>;
+}
+
+describe('profile upload safety', () => {
+  it('retains a managed avatar after an uncertain profile commit', async () => {
+    const service = new AppwriteService(configuration) as unknown as ProfileWriteAccess;
+    const id = 'p_' + 'b'.repeat(32);
+    service.resolveRequiredAccountId = vi.fn(async () => 'owner');
+    service.reserveProfileUpload = vi.fn(async () => id);
+    service.uploadAvatarDataUrl = vi.fn(async () => undefined);
+    const execute = vi.fn(async () => { throw new TypeError('Lost commit response'); });
+    service.executeUserFunction = execute;
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
+    const user: User = { email: 'owner@example.test', appwriteUserId: 'owner', avatarFileId: 'previous' };
+    await expect(service.updateProfileImage(user, 'data:image/jpeg;base64,ZGF0YQ==')).rejects.toThrow('Lost commit response');
+    expect(service.reserveProfileUpload).toHaveBeenCalledWith('owner');
+    expect(service.uploadAvatarDataUrl).toHaveBeenCalledWith('data:image/jpeg;base64,ZGF0YQ==', id, 'owner');
+    expect(execute).toHaveBeenCalledWith('manage-profile', expect.objectContaining({ action: 'upsert', currentUserId: 'owner', avatarFileId: id }));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

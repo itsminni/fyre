@@ -80,19 +80,21 @@ function RootRedirect(): JSX.Element {
 }
 
 function AppRoutes(): JSX.Element {
-  const { isAuthInitialized, persisted } = useAppStore();
+  const { isAuthInitialized, authError, retrySession, persisted } = useAppStore();
 
   if (!isAuthInitialized) {
-    const message = persisted.settings.language === 'it'
-      ? 'Ripristino della sessione…'
-      : 'Restoring your session…';
+    const italian = persisted.settings.language === 'it';
+    const message = authError
+      ? (italian ? 'Impossibile verificare la sessione. Controllare la connessione e riprovare.' : 'Unable to verify your session. Check your connection and try again.')
+      : (italian ? 'Ripristino della sessione…' : 'Restoring your session…');
 
     return (
       <>
         <ThemeBridge />
-        <main className="auth-bootstrap" role="status" aria-live="polite" aria-busy="true">
+        <main className="auth-bootstrap" role="status" aria-live="polite" aria-busy={!authError}>
           <img src="/images/fyre-app-icon.png" alt="" aria-hidden />
           <span>{message}</span>
+          {authError && <button type="button" onClick={retrySession}>{italian ? 'Riprova' : 'Try again'}</button>}
         </main>
       </>
     );

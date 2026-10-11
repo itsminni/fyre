@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/Button';
 import { SwipeCard } from '../../components/home/SwipeCard';
@@ -12,7 +12,7 @@ export function HomePage(): JSX.Element {
   const navigate = useNavigate();
   const {
     currentUser,
-    discoverProfiles,
+    discoverProfiles, discoveryLoading, discoveryError, discoveryExhausted, loadMoreProfiles,
     submitSwipeDecision,
     persisted: { settings }
   } = useAppStore();
@@ -30,15 +30,18 @@ export function HomePage(): JSX.Element {
     });
   }, [currentUser?.preferredGenders, discoverProfiles]);
 
-  const [index, setIndex] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [swipeFeedback, setSwipeFeedback] = useState<string | null>(null);
   const [lastMatch, setLastMatch] = useState<{ name: string; threadId: string } | null>(null);
   const pointerStart = useRef<number | null>(null);
 
-  const activeProfile = filteredProfiles[index] ?? null;
-  const queuedProfiles = filteredProfiles.slice(index, index + 3);
+  const activeProfile = filteredProfiles[0] ?? null;
+  const queuedProfiles = filteredProfiles.slice(0, 3);
+
+  useEffect(() => {
+    if (filteredProfiles.length <= 3 && !discoveryLoading && !discoveryError && !discoveryExhausted) void loadMoreProfiles();
+  }, [filteredProfiles.length, discoveryLoading, discoveryError, discoveryExhausted, loadMoreProfiles]);
 
   async function performDecision(decision: Decision): Promise<void> {
     if (!activeProfile) {
@@ -66,9 +69,6 @@ export function HomePage(): JSX.Element {
 
     pointerStart.current = null;
     setDragOffset(0);
-    if (result.recorded) {
-      setIndex((prev) => prev + 1);
-    }
   }
 
   function onDecision(decision: Decision): void {
@@ -104,6 +104,8 @@ export function HomePage(): JSX.Element {
         <h2>{t('home.title')}</h2>
       </header>
 
+      {discoveryLoading && <p role="status">{settings.language === 'it' ? 'Caricamento profili…' : 'Loading profiles…'}</p>}
+      {discoveryError && <div role="status"><p>{settings.language === 'it' ? 'Impossibile aggiornare i profili.' : 'Unable to refresh profiles.'}</p><Button onClick={() => void loadMoreProfiles()}>{settings.language === 'it' ? 'Riprova' : 'Try again'}</Button></div>}
       {activeProfile ? (
         <div className="swipe-card-wrap">
           <div
@@ -179,7 +181,7 @@ export function HomePage(): JSX.Element {
         </div>
       ) : (
         <div className="empty-panel">
-          <h3>{t('home.empty.title')}</h3>
+          <h3>{discoveryExhausted ? t('home.empty.title') : (settings.language === 'it' ? 'Ricerca profili…' : 'Finding profiles…')}</h3>
         </div>
       )}
     </section>
