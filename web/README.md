@@ -28,6 +28,7 @@ City search uses Photon.
 | --- | --- |
 | `npm run dev` | Development server |
 | `npm run check` | Lint, tests, and production build |
+| `npm run test:e2e` | Browser tests with a simulated backend (install Chromium with `npx playwright install chromium`) |
 | `npm run preview` | Local production-build preview |
 
 See the [main README](../README.md), [Appwrite setup](../appwrite/README.md), and [CI workflow](../.github/workflows/ci.yml).
@@ -64,6 +65,7 @@ La ricerca delle città usa Photon.
 | --- | --- |
 | `npm run dev` | Server di sviluppo |
 | `npm run check` | Lint, test e build di produzione |
+| `npm run test:e2e` | Test browser con backend simulato (installare Chromium con `npx playwright install chromium`) |
 | `npm run preview` | Anteprima locale della build di produzione |
 
 Consultare il [README principale](../README.md#italiano), la [configurazione Appwrite](../appwrite/README.md#italiano) e la [CI](../.github/workflows/ci.yml).

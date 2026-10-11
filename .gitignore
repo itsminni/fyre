@@ -67,3 +67,7 @@ web/vite.config.d.ts
 
 .idea/
 android/Fyre/.idea/
+
+# Browser test artifacts
+web/test-results/
+web/playwright-report/
