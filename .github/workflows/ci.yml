@@ -33,6 +33,10 @@ jobs:
         run: npm ci
         working-directory: web
 
+      - name: Audit web dependencies
+        run: npm audit --audit-level=moderate
+        working-directory: web
+
       - name: Check web application
         run: npm run check
         working-directory: web
@@ -50,6 +54,9 @@ jobs:
 
       - name: Test Appwrite endpoint validation
         run: ruby scripts/secure_appwrite_endpoint.test.rb
+
+      - name: Test dependency automation
+        run: ruby scripts/merge-dependabot.test.rb
 
       - name: Test upload maintenance tools
         run: python3 -m unittest discover -s scripts -p "*_test.py"

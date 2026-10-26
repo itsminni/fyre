@@ -59,10 +59,6 @@ open Fyre.xcodeproj
 
 Select the shared `Fyre` scheme and a simulator or device.
 
-## Checks
-
-CI runs web lint, tests, and production builds; shared-contract and function tests, Appwrite configuration validation, Android tests, lint, and release builds, and iOS unit tests. Each component README contains the matching local commands.
-
 ---
 
 ## Italiano
@@ -122,7 +118,3 @@ open Fyre.xcodeproj
 ```
 
 Selezionare lo schema condiviso `Fyre` e un simulatore o dispositivo.
-
-### Verifiche
-
-La CI esegue lint, test e build di produzione web, test dei contratti condivisi e delle funzioni, validazione della configurazione Appwrite, test, lint e release build Android, test unitari iOS. I README dei singoli componenti contengono i comandi locali equivalenti.

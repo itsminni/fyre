@@ -1,17 +1,34 @@
 version: 2
+# Routine updates stay within the current major. Security updates can still
+# propose a major upgrade, which the merge workflow leaves for human review.
 updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 1
+    allow:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+    groups:
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: npm
     directory: "/web"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 3
+    allow:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
     groups:
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      eslint:
+        patterns: ["eslint", "@eslint/*", "typescript-eslint", "@typescript-eslint/*", "eslint-plugin-*"]
+      web:
+        patterns: ["*"]
       react-security:
         applies-to: security-updates
         patterns:
@@ -19,15 +36,36 @@ updates:
           - "react-dom"
           - "@types/react"
           - "@types/react-dom"
+      web-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
   - package-ecosystem: npm
-    directory: "/functions"
+    directories: ["/functions", "/functions/*"]
     schedule:
       interval: weekly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 1
+    allow:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+    groups:
+      functions:
+        patterns: ["*"]
+      functions-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
   - package-ecosystem: gradle
     directory: "/android/Fyre"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 1
+    allow:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+    groups:
+      android:
+        patterns: ["*"]
+      android-security:
+        applies-to: security-updates
+        patterns: ["*"]
