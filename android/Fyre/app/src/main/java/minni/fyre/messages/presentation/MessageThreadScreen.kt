@@ -76,6 +76,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -176,6 +177,7 @@ fun MessageThreadScreen(
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val resources = LocalResources.current
     var attachmentSelectionError by remember { mutableStateOf<String?>(null) }
     val attachmentScope = rememberCoroutineScope()
     val voiceController = remember(context.applicationContext) {
@@ -194,7 +196,7 @@ fun MessageThreadScreen(
                 fallbackNamePrefix = "image"
             )
             if (attachment == null) {
-                attachmentSelectionError = context.getString(R.string.messages_attachment_unsupported)
+                attachmentSelectionError = resources.getString(R.string.messages_attachment_unsupported)
             } else {
                 attachmentSelectionError = null
                 onSendAttachment(attachment)
@@ -212,7 +214,7 @@ fun MessageThreadScreen(
                 fallbackNamePrefix = "file"
             )
             if (attachment == null) {
-                attachmentSelectionError = context.getString(R.string.messages_attachment_unsupported)
+                attachmentSelectionError = resources.getString(R.string.messages_attachment_unsupported)
             } else {
                 attachmentSelectionError = null
                 onSendAttachment(attachment)
@@ -230,7 +232,7 @@ fun MessageThreadScreen(
                 fallbackNamePrefix = "video"
             )
             if (attachment == null) {
-                attachmentSelectionError = context.getString(R.string.messages_attachment_unsupported)
+                attachmentSelectionError = resources.getString(R.string.messages_attachment_unsupported)
             } else {
                 attachmentSelectionError = null
                 onSendAttachment(attachment)
@@ -489,7 +491,7 @@ fun MessageThreadScreen(
                             }.onSuccess { uri ->
                                 context.openAttachmentExternally(uri, attachment)
                             }.onFailure {
-                                attachmentSelectionError = context.getString(
+                                attachmentSelectionError = resources.getString(
                                     R.string.messages_attachment_open_failed
                                 )
                             }

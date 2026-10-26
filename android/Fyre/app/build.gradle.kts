@@ -50,9 +50,7 @@ fun asBuildConfigString(value: String): String {
 android {
     namespace = "minni.fyre"
     compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
+        version = release(37)
     }
 
     defaultConfig {

@@ -87,12 +87,63 @@ class DependabotMergeTest < Minitest::Test
 
   def run_merge
     api = FakeAPI.new(@responses)
-    capture_io { DependabotMerge.merge(api, { "workflow_run" => { "id" => 42 } }, "itsminni/fyre") }
+    @merge_output, = capture_io { DependabotMerge.merge(api, { "workflow_run" => { "id" => 42 } }, "itsminni/fyre") }
     api.writes
+  end
+
+  def use_android_wrapper_update
+    files = %w[
+      android/Fyre/gradle/libs.versions.toml
+      android/Fyre/gradle/wrapper/gradle-wrapper.properties
+      android/Fyre/gradle/wrapper/gradle-wrapper.jar
+      android/Fyre/gradlew
+      android/Fyre/gradlew.bat
+    ]
+    @responses["/pulls/12/files"] = files.map { |file| { "filename" => file, "status" => "modified" } }
+    @responses["/pulls/12"]["changed_files"] = files.length
+    @responses["/pulls/12/commits"].first["commit"]["message"] =
+      update_message("version-update:semver-minor").gsub("vitest", "gradle-wrapper")
   end
 
   def test_merges_only_the_tested_head_after_all_jobs_pass
     assert_equal [["/pulls/12/merge", { "sha" => "tested-head", "merge_method" => "squash" }]], run_merge
+  end
+
+  def test_merges_verified_gradle_wrapper_updates_after_ci
+    use_android_wrapper_update
+    assert_equal [["/pulls/12/merge", { "sha" => "tested-head", "merge_method" => "squash" }]], run_merge
+    assert_includes @merge_output, "Merged Dependabot PR #12"
+  end
+
+  def test_wrapper_updates_still_require_successful_ci_and_signed_non_major_commits
+    use_android_wrapper_update
+    android = @responses["/actions/runs/42/attempts/1/jobs"].find { |job| job["name"] == "Android" }
+    android["conclusion"] = "failure"
+    assert_empty run_merge
+    assert_includes @merge_output, "Android"
+    android["conclusion"] = "success"
+
+    commit = @responses["/pulls/12/commits"].first
+    commit["commit"]["verification"]["verified"] = false
+    assert_empty run_merge
+    commit["commit"]["verification"]["verified"] = true
+    commit["commit"]["message"] = update_message("version-update:semver-major").gsub("vitest", "gradle-wrapper")
+    assert_empty run_merge
+    assert_includes @merge_output, "major or unclassified updates need review"
+  end
+
+  def test_wrapper_allowlist_rejects_other_scripts_and_files
+    use_android_wrapper_update
+    file = @responses["/pulls/12/files"].last
+    %w[android/Fyre/gradlew.sh android/Fyre/gradle/wrapper/custom.jar android/Fyre/gradlew.bat/extra
+       android/Fyre/gradle.properties android/Fyre/app/src/main/AndroidManifest.xml].each do |path|
+      file["filename"] = path
+      assert_empty run_merge
+      assert_includes @merge_output, path
+    end
+    file["filename"] = "android/Fyre/gradlew.bat"
+    file["status"] = "added"
+    assert_empty run_merge
   end
 
   def test_rejects_failed_skipped_missing_or_cancelled_jobs
@@ -156,8 +207,16 @@ class DependabotMergeTest < Minitest::Test
   def test_rejects_incomplete_file_list_and_base_that_moved
     @responses["/pulls/12"]["changed_files"] = 3
     assert_empty run_merge
+    assert_includes @merge_output, "changed-file list is empty or incomplete"
     @responses["/pulls/12"]["changed_files"] = 2
     @responses["/compare/current-main...tested-head"] = { "behind_by" => 1, "status" => "diverged" }
     assert_empty run_merge
+    assert_includes @merge_output, "needs a Dependabot rebase"
+  end
+
+  def test_reports_when_no_open_pull_request_matches_the_run
+    @responses["/pulls?state=open&head=itsminni%3Adependabot%2Fnpm_and_yarn%2Fweb%2Fweb-123"] = []
+    assert_empty run_merge
+    assert_includes @merge_output, "no open pull request matches this branch"
   end
 end

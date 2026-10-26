@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,6 +97,7 @@ fun DiscoverScreen(
     repository: DiscoveryRepository? = null
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val appGraph = remember(context.applicationContext) {
         AppGraphProvider.get(context.applicationContext)
     }
@@ -248,8 +250,8 @@ fun DiscoverScreen(
         if (!notificationSettings.pushEnabled || !notificationSettings.matchNotifications) return@LaunchedEffect
 
         notificationGateway?.showLocalNotification(
-            title = context.getString(R.string.account_switch_matches),
-            body = context.getString(R.string.discover_match_notification_body, payload.profileName),
+            title = resources.getString(R.string.account_switch_matches),
+            body = resources.getString(R.string.discover_match_notification_body, payload.profileName),
             channelId = NotificationChannels.MATCHES
         )
     }

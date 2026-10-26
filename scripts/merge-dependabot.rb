@@ -9,7 +9,17 @@ module DependabotMerge
   BOT = "dependabot[bot]"
   REQUIRED_JOBS = ["Web, shared contracts and functions", "Android", "iOS"].freeze
   ALLOWED_TYPES = %w[version-update:semver-patch version-update:semver-minor].freeze
-  ALLOWED_FILES = %r{\A(?:web/package(?:-lock)?\.json|functions/(?:[a-z]+/)?package(?:-lock)?\.json|android/Fyre/(?:gradle/libs\.versions\.toml|(?:app/)?build\.gradle\.kts|settings\.gradle\.kts)|\.github/workflows/ci\.yml)\z}
+  ALLOWED_FILES = %r{\A(?:
+    web/package(?:-lock)?\.json|
+    functions/(?:[a-z]+/)?package(?:-lock)?\.json|
+    android/Fyre/(?:
+      gradle/libs\.versions\.toml|
+      gradle/wrapper/gradle-wrapper\.(?:jar|properties)|
+      gradlew(?:\.bat)?|
+      (?:app/)?build\.gradle\.kts|settings\.gradle\.kts
+    )|
+    \.github/workflows/ci\.yml
+  )\z}x
 
   def self.safe_update?(message)
     fragment = message.match(/^---\n(.*?)^\.\.\.\s*$/m)
@@ -83,32 +93,52 @@ module DependabotMerge
 
   def self.merge(api, event, repository)
     run = api.call("get", "/actions/runs/#{Integer(event.fetch('workflow_run').fetch('id'))}")
-    return unless run["event"] == "pull_request" && run["conclusion"] == "success" &&
-                  run["path"] == ".github/workflows/ci.yml" && run.dig("head_repository", "full_name") == repository
+    unless run["event"] == "pull_request" && run["conclusion"] == "success" &&
+           run["path"] == ".github/workflows/ci.yml" && run.dig("head_repository", "full_name") == repository
+      puts "Skipping run: expected a successful CI pull request run from this repository."
+      return
+    end
 
     jobs = api.list("/actions/runs/#{run.fetch('id')}/attempts/#{run.fetch('run_attempt')}/jobs", "jobs")
-    return unless REQUIRED_JOBS.all? { |name| jobs.any? { |job| job["name"] == name && job["conclusion"] == "success" } }
-    return unless jobs.all? { |job| job["conclusion"] == "success" }
+    missing = REQUIRED_JOBS.reject { |name| jobs.any? { |job| job["name"] == name && job["conclusion"] == "success" } }
+    unless missing.empty? && jobs.all? { |job| job["conclusion"] == "success" }
+      puts "Skipping run: all CI jobs must succeed; missing or unsuccessful required jobs: #{missing.inspect}."
+      return
+    end
 
-    # Query by head as workflow_run.pull_requests can be empty.
     owner = repository.split("/").first
     head = URI.encode_www_form_component("#{owner}:#{run.fetch('head_branch')}")
-    api.list("/pulls?state=open&head=#{head}").each do |candidate|
+    candidates = api.list("/pulls?state=open&head=#{head}")
+    puts "Skipping run: no open pull request matches this branch." if candidates.empty?
+    candidates.each do |candidate|
       pr = api.call("get", "/pulls/#{candidate.fetch('number')}")
-      next unless pr["state"] == "open" && !pr["draft"] && pr.dig("user", "login") == BOT &&
-                  pr.dig("head", "repo", "full_name") == repository &&
-                  pr.dig("base", "repo", "full_name") == repository && pr.dig("base", "ref") == "main" &&
-                  pr.dig("head", "ref") == run["head_branch"] && pr.dig("head", "sha") == run["head_sha"]
+      unless pr["state"] == "open" && !pr["draft"] && pr.dig("user", "login") == BOT &&
+             pr.dig("head", "repo", "full_name") == repository &&
+             pr.dig("base", "repo", "full_name") == repository && pr.dig("base", "ref") == "main" &&
+             pr.dig("head", "ref") == run["head_branch"] && pr.dig("head", "sha") == run["head_sha"]
+        puts "Skipping PR ##{pr['number']}: expected an open, non-draft Dependabot PR to main at the tested head in this repository."
+        next
+      end
 
       commits = api.list("/pulls/#{pr.fetch('number')}/commits")
-      next unless !commits.empty? && commits.last["sha"] == run["head_sha"] && commits.all? do |commit|
+      verified_updates = !commits.empty? && commits.last["sha"] == run["head_sha"] && commits.all? do |commit|
         commit.dig("author", "login") == BOT && commit.dig("commit", "verification", "verified") == true &&
           safe_update?(commit.dig("commit", "message").to_s)
       end
+      unless verified_updates
+        puts "Skipping PR ##{pr['number']}: commits must be signed Dependabot patch/minor updates ending at the tested head; major or unclassified updates need review."
+        next
+      end
 
       files = api.list("/pulls/#{pr.fetch('number')}/files")
-      next unless !files.empty? && files.length == pr["changed_files"] && files.all? do |file|
-        file["status"] == "modified" && ALLOWED_FILES.match?(file.fetch("filename"))
+      if files.empty? || files.length != pr["changed_files"]
+        puts "Skipping PR ##{pr['number']}: changed-file list is empty or incomplete."
+        next
+      end
+      rejected = files.reject { |file| file["status"] == "modified" && ALLOWED_FILES.match?(file.fetch("filename")) }
+      unless rejected.empty?
+        puts "Skipping PR ##{pr['number']}: files outside the permitted dependency updates: #{rejected.map { |file| file['filename'] }.inspect}."
+        next
       end
 
       base = api.call("get", "/git/ref/heads/main").fetch("object").fetch("sha")
@@ -118,8 +148,6 @@ module DependabotMerge
         next
       end
 
-      # GitHub enforces branch rules. The expected head prevents merging a
-      # replacement commit that arrived after the successful CI run.
       result = api.call("put", "/pulls/#{pr.fetch('number')}/merge", { "sha" => run.fetch("head_sha"), "merge_method" => "squash" })
       raise "GitHub did not merge PR ##{pr['number']}" unless result["merged"]
 

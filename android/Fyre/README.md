@@ -5,7 +5,7 @@ Kotlin app built with Jetpack Compose.
 ## Requirements
 
 - JDK 21;
-- Android Studio and the Android SDK required by the project;
+- Android Studio and Android SDK Platform 37 (the app targets API 36 and supports API 29+);
 - an emulator or physical device to run the app.
 
 ## Setup
@@ -43,7 +43,7 @@ App Kotlin costruita con Jetpack Compose.
 ### Requisiti
 
 - JDK 21;
-- Android Studio e l'Android SDK richiesto dal progetto;
+- Android Studio e Android SDK Platform 37 (l'app punta a API 36 e supporta API 29+);
 - un emulatore o dispositivo fisico per eseguire l'app.
 
 ### Avvio

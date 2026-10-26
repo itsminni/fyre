@@ -110,8 +110,8 @@ fun MessagesScreen(
                 unreadTotal
             ),
             body = latestUnreadThread?.let {
-                context.getString(R.string.messages_notification_body, it.displayName, it.lastMessage)
-            } ?: context.getString(R.string.messages_notification_fallback),
+                resources.getString(R.string.messages_notification_body, it.displayName, it.lastMessage)
+            } ?: resources.getString(R.string.messages_notification_fallback),
             channelId = NotificationChannels.MESSAGES
         )
         lastNotifiedUnreadCount = unreadTotal

@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +59,7 @@ fun EventsScreen(
     notificationGateway: NotificationGateway? = null
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val appGraph = remember(context.applicationContext) {
         AppGraphProvider.get(context.applicationContext)
     }
@@ -157,8 +159,8 @@ fun EventsScreen(
 
                     if (reminderScheduled) {
                         notificationGateway?.showLocalNotification(
-                            title = context.getString(R.string.events_reminder_set_title),
-                            body = context.getString(
+                            title = resources.getString(R.string.events_reminder_set_title),
+                            body = resources.getString(
                                 R.string.events_reminder_set_body,
                                 updatedSelected?.title.orEmpty()
                             ),

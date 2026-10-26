@@ -59,12 +59,22 @@ updates:
     directory: "/android/Fyre"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 2
     allow:
       - dependency-name: "*"
         update-types: ["version-update:semver-minor", "version-update:semver-patch"]
     groups:
-      android:
+      # Keep AGP, the Gradle wrapper and Kotlin plugins together. Library
+      # updates can then pass independently of a toolchain migration.
+      android-toolchain:
+        patterns:
+          - "gradle-wrapper"
+          - "com.android.*"
+          - "com.android.tools.build:*"
+          - "org.jetbrains.kotlin:*"
+          - "org.jetbrains.kotlin.*"
+          - "org.gradle.toolchains.*"
+      android-libraries:
         patterns: ["*"]
       android-security:
         applies-to: security-updates
