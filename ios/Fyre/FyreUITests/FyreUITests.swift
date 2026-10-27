@@ -28,22 +28,28 @@ final class FyreUITests: XCTestCase {
 
     func testChatHistoryPreservesReadingPositionAndReachesOldestMessage() {
         let app = XCUIApplication()
-        app.launchArguments += ["-uitest-reset", "-uitest-chat-history"]
+        app.launchArguments += ["-uitest-reset", "-uitest-chat-history", "-uitest-history-delayed"]
         app.launch()
         XCTAssertTrue(app.staticTexts["History message 100"].waitForExistence(timeout: 5))
         let scroll = app.scrollViews.firstMatch
         let previousPage = app.staticTexts["History message 50"]
         let pageBoundary = app.staticTexts["History message 51"]
-        // Stop when pagination completes; inertial swipes can skip the restored boundary.
+        // Stop at the original page boundary, before the delayed page arrives.
+        // A newly loaded row can already have left LazyVStack's accessibility tree.
         for _ in 0..<20 {
-            if previousPage.exists { break }
+            if pageBoundary.exists && pageBoundary.isHittable { break }
             let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
             let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
             start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         }
         // Automatic pagination should leave the old page boundary near the viewport.
-        XCTAssertTrue(previousPage.waitForExistence(timeout: 5))
-        XCTAssertTrue(pageBoundary.isHittable)
+        XCTAssertTrue(previousPage.waitForExistence(timeout: 5), "Older messages were not loaded.\n\(app.debugDescription)")
+        let restoredBoundary = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND hittable == true"),
+            object: pageBoundary
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [restoredBoundary], timeout: 5), .completed,
+                       "The previous page boundary was not restored.\n\(app.debugDescription)")
         for _ in 0..<20 {
             if app.staticTexts["History message 1"].exists && app.staticTexts["History message 1"].isHittable { break }
             scroll.swipeDown()

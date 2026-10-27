@@ -23,7 +23,11 @@ enum ChatHistoryPreview {
     actor PreviewBackend: BackendAPI {
         private var hasFailed = false
         func fetchMessagePage(threadId: String, before cursor: String) async throws -> MessagePageDTO {
-            try await Task.sleep(for: .milliseconds(400))
+            // Keep the old page visible long enough for the UI test to stop
+            // scrolling before verifying restoration after automatic pagination.
+            let delay: Duration = ProcessInfo.processInfo.arguments.contains("-uitest-history-delayed")
+                ? .seconds(3) : .milliseconds(400)
+            try await Task.sleep(for: delay)
             if !hasFailed, ProcessInfo.processInfo.arguments.contains("-uitest-history-error") {
                 hasFailed = true
                 throw URLError(.notConnectedToInternet)

@@ -2,7 +2,7 @@ name: Merge Dependabot updates
 
 on:
   workflow_run:
-    workflows: [CI]
+    workflows: [CI, Dependabot integration]
     types: [completed]
 
 permissions: {}
@@ -14,13 +14,14 @@ concurrency:
 jobs:
   merge:
     if: >-
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success' &&
+      ((github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.conclusion == 'success') ||
+       github.event.workflow_run.event == 'workflow_dispatch') &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      actions: read
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -32,7 +33,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      - name: Merge verified patch and minor updates after CI
+      - name: Merge verified updates or test integration with current main
         run: ruby scripts/merge-dependabot.rb
         env:
           GH_TOKEN: ${{ github.token }}

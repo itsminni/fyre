@@ -1,0 +1,56 @@
+name: Dependabot integration
+run-name: 'Dependabot integration PR #${{ inputs.pr_number }} head=${{ inputs.head_sha }} base=${{ inputs.base_sha }} merge=${{ inputs.merge_sha }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        type: string
+        required: true
+      head_sha:
+        type: string
+        required: true
+      base_sha:
+        type: string
+        required: true
+      merge_sha:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-integration-${{ inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      merge_sha: ${{ steps.validate.outputs.merge_sha }}
+    steps:
+      - name: Check out trusted automation
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate the PR and exact merge parents
+        id: validate
+        run: ruby scripts/merge-dependabot.rb --prepare-integration
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  ci:
+    name: CI
+    needs: validate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: ${{ needs.validate.outputs.merge_sha }}
