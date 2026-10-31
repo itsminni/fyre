@@ -178,6 +178,10 @@ module DependabotMerge
         if existing
           raise "Integration CI for PR ##{pr['number']} failed; review its results before retrying." if %w[failure timed_out action_required].include?(existing["conclusion"])
 
+          if existing["status"] == "completed" && existing["conclusion"] == "success"
+            merge(api, { "workflow_run" => { "id" => existing.fetch("id") } }, repository)
+            return
+          end
           puts "PR ##{pr['number']}: integration already requested for these commits; waiting for its result."
           return
         end
