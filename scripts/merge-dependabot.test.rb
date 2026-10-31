@@ -54,9 +54,16 @@ class DependabotMergeTest < Minitest::Test
     end
 
     def call(method, path, body = nil)
-      if %w[put post].include?(method)
+      if %w[put post delete].include?(method)
         @writes << [path, body]
+        if @responses.key?("#{method} #{path}")
+          response = @responses.fetch("#{method} #{path}")
+          return response.respond_to?(:call) ? response.call(body) : response
+        end
         return method == "put" ? { "merged" => true } : {}
+      end
+      if path.start_with?("/git/ref/heads/fyre-integration/") && !@responses.key?(path)
+        raise DependabotMerge::API::Error.new(404, "Not found")
       end
       response = @responses.fetch(path)
       response.respond_to?(:call) ? response.call : response
@@ -393,13 +400,18 @@ class DependabotMergeTest < Minitest::Test
     assert_equal [2], pauses
   end
 
-  def test_a_stale_merge_ref_is_not_dispatched
+  def use_isolated_candidate
+    @responses["/git/ref/heads/#{DependabotMerge.integration_branch(integration_inputs)}"] = { "object" => { "sha" => NEW_MERGE_SHA } }
+    @responses["/git/commits/#{NEW_MERGE_SHA}"] = {
+      "sha" => NEW_MERGE_SHA, "parents" => [{ "sha" => BASE_SHA }, { "sha" => HEAD_SHA }]
+    }
+  end
+
+  def test_a_stale_pr_merge_ref_uses_an_isolated_candidate_with_current_parents
     stale_base
     @responses["/git/commits/#{MERGE_SHA}"]["parents"].first["sha"] = NEW_BASE_SHA
-    DependabotMerge.stub(:sleep, nil) do
-      assert_empty run_merge
-      assert_includes @merge_output, "deferred to the next automatic check"
-    end
+    use_isolated_candidate
+    assert_equal [dispatch_write(integration_inputs.merge("merge_sha" => NEW_MERGE_SHA))], run_merge
   end
 
   def prepare_reconciliation
@@ -451,10 +463,70 @@ class DependabotMergeTest < Minitest::Test
   def test_reconciliation_recovers_after_merge_ref_becomes_available
     prepare_reconciliation
     stale_base
-    @responses["/git/commits/#{MERGE_SHA}"]["parents"].first["sha"] = NEW_BASE_SHA
+    @responses["/pulls/12"]["mergeable"] = nil
     DependabotMerge.stub(:sleep, nil) { assert_empty reconcile }
-    @responses["/git/commits/#{MERGE_SHA}"]["parents"].first["sha"] = BASE_SHA
+    @responses["/pulls/12"]["mergeable"] = true
     assert_equal [dispatch_write], reconcile
+  end
+
+  def test_isolated_candidate_is_created_by_github_without_modifying_the_bot_head
+    use_isolated_candidate
+    path = "/git/ref/heads/#{DependabotMerge.integration_branch(integration_inputs)}"
+    @responses.delete(path)
+    @responses["post /git/refs"] = lambda do |body|
+      @responses[path] = { "object" => { "sha" => body.fetch("sha") } }
+    end
+    @responses["post /merges"] = lambda do |_body|
+      @responses[path] = { "object" => { "sha" => NEW_MERGE_SHA } }
+      { "sha" => NEW_MERGE_SHA }
+    end
+    api = FakeAPI.new(@responses)
+    assert_equal NEW_MERGE_SHA, DependabotMerge.isolated_merge(api, integration_inputs)
+    assert_equal ["/git/refs", "/merges"], api.writes.map(&:first)
+    assert_equal HEAD_SHA, api.writes.last.last.fetch("head")
+    assert_equal BASE_SHA, api.writes.first.last.fetch("sha")
+    refute_includes api.writes.first.last.fetch("ref"), "dependabot/"
+  end
+
+  def test_isolated_candidates_are_validated_and_cleaned_after_a_successful_merge
+    use_integration
+    use_isolated_candidate
+    inputs = integration_inputs.merge("merge_sha" => NEW_MERGE_SHA)
+    @responses["/actions/runs/42"]["display_title"] = DependabotMerge.integration_title(inputs)
+    assert_equal NEW_MERGE_SHA, DependabotMerge.prepare_integration(FakeAPI.new(@responses), inputs, "itsminni/fyre")
+    writes = run_merge
+    assert_equal ["/pulls/12/merge", "/git/refs/heads/#{DependabotMerge.integration_branch(inputs)}"], writes.map(&:first)
+    assert_equal({ "sha" => HEAD_SHA, "merge_method" => "squash" }, writes.first.last)
+  end
+
+  def test_isolated_candidates_cannot_replace_required_parents_or_branch_identity
+    use_isolated_candidate
+    inputs = integration_inputs.merge("merge_sha" => NEW_MERGE_SHA)
+    @responses["/git/commits/#{NEW_MERGE_SHA}"]["parents"].first["sha"] = NEW_BASE_SHA
+    refute DependabotMerge.valid_candidate?(FakeAPI.new(@responses), {}, inputs)
+    @responses["/git/commits/#{NEW_MERGE_SHA}"]["parents"].first["sha"] = BASE_SHA
+    @responses["/git/ref/heads/#{DependabotMerge.integration_branch(inputs)}"]["object"]["sha"] = MERGE_SHA
+    refute DependabotMerge.valid_candidate?(FakeAPI.new(@responses), {}, inputs)
+  end
+
+  def test_isolated_merge_conflicts_never_dispatch_or_merge
+    path = "/git/ref/heads/#{DependabotMerge.integration_branch(integration_inputs)}"
+    @responses[path] = { "object" => { "sha" => BASE_SHA } }
+    @responses["post /merges"] = ->(_body) { raise DependabotMerge::API::Error.new(409, "Conflict") }
+    api = FakeAPI.new(@responses)
+    capture_io { assert_nil DependabotMerge.isolated_merge(api, integration_inputs) }
+    assert_equal ["/merges"], api.writes.map(&:first)
+  end
+
+  def test_isolated_candidates_still_require_signed_dependency_only_commits
+    use_integration
+    use_isolated_candidate
+    @responses["/actions/runs/42"]["display_title"] = DependabotMerge.integration_title(integration_inputs.merge("merge_sha" => NEW_MERGE_SHA))
+    @responses["/pulls/12/commits"].first["commit"]["verification"]["verified"] = false
+    assert_empty run_merge
+    @responses["/pulls/12/commits"].first["commit"]["verification"]["verified"] = true
+    @responses["/pulls/12/files"].last["filename"] = "web/src/App.tsx"
+    assert_empty run_merge
   end
 
   def test_a_failed_integration_does_not_block_another_pending_pr

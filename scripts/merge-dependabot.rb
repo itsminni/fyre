@@ -52,6 +52,15 @@ module DependabotMerge
   end
 
   class API
+    class Error < RuntimeError
+      attr_reader :status
+
+      def initialize(status, message)
+        @status = status.to_i
+        super(message)
+      end
+    end
+
     def initialize(repository, token)
       @root = "#{ENV.fetch('GITHUB_API_URL', 'https://api.github.com')}/repos/#{repository}"
       @token = token
@@ -71,7 +80,7 @@ module DependabotMerge
       response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: 15, read_timeout: 30) do |http|
         http.request(request)
       end
-      raise "GitHub API #{method} #{path}: HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+      raise Error.new(response.code, "GitHub API #{method} #{path}: HTTP #{response.code}") unless response.is_a?(Net::HTTPSuccess)
 
       response.body.to_s.empty? ? {} : JSON.parse(response.body)
     end
@@ -145,11 +154,61 @@ module DependabotMerge
       commit.fetch("parents").map { |parent| parent.fetch("sha") } == inputs.values_at("base_sha", "head_sha")
   end
 
+  def self.integration_branch(inputs)
+    "fyre-integration/pr-#{inputs.fetch('pr_number')}-#{inputs.fetch('base_sha')}-#{inputs.fetch('head_sha')}"
+  end
+
+  def self.valid_candidate?(api, pr, inputs)
+    return false unless valid_merge?(api, inputs)
+    return true if pr["merge_commit_sha"] == inputs["merge_sha"]
+
+    api.call("get", "/git/ref/heads/#{integration_branch(inputs)}").dig("object", "sha") == inputs["merge_sha"]
+  rescue API::Error => error
+    raise unless error.status == 404
+
+    false
+  end
+
+  def self.isolated_merge(api, inputs)
+    # GitHub can leave refs/pull/N/merge on an old base indefinitely. Ask its
+    # merge engine for an isolated candidate; never update the Dependabot head.
+    branch = integration_branch(inputs)
+    path = "/git/ref/heads/#{branch}"
+    begin
+      sha = api.call("get", path).dig("object", "sha")
+    rescue API::Error => error
+      raise unless error.status == 404
+
+      begin
+        api.call("post", "/git/refs", { "ref" => "refs/heads/#{branch}", "sha" => inputs.fetch("base_sha") })
+        sha = inputs.fetch("base_sha")
+      rescue API::Error => error
+        raise unless error.status == 422
+
+        sha = api.call("get", path).dig("object", "sha")
+      end
+    end
+    if sha == inputs["base_sha"]
+      result = api.call("post", "/merges", { "base" => branch, "head" => inputs.fetch("head_sha"),
+                      "commit_message" => "Test Dependabot PR ##{inputs.fetch('pr_number')} against #{inputs.fetch('base_sha')}" })
+      sha = result["sha"]
+    end
+    candidate = inputs.merge("merge_sha" => sha)
+    raise "Invalid isolated merge for PR ##{inputs['pr_number']}" unless SHA.match?(sha.to_s) && valid_candidate?(api, {}, candidate)
+
+    sha
+  rescue API::Error => error
+    raise unless error.status == 409
+
+    puts "PR ##{inputs['pr_number']}: isolated merge has conflicts; human review is required."
+    nil
+  end
+
   def self.prepare_integration(api, inputs, repository)
     integration_title(inputs) # Validate every input before using it in an API path or workflow output.
     pr = api.call("get", "/pulls/#{inputs.fetch('pr_number')}")
     unless eligible_pr?(pr, repository, inputs["head_sha"]) && verified_update?(api, pr) &&
-           pr["mergeable"] != false && pr["merge_commit_sha"] == inputs["merge_sha"] && valid_merge?(api, inputs)
+           pr["mergeable"] != false && valid_candidate?(api, pr, inputs)
       raise "The integration no longer matches a verified Dependabot PR and its exact merge parents."
     end
     inputs.fetch("merge_sha")
@@ -171,6 +230,10 @@ module DependabotMerge
       end
       inputs = { "pr_number" => pr.fetch("number").to_s, "head_sha" => pr.dig("head", "sha"),
                  "base_sha" => base, "merge_sha" => current["merge_commit_sha"] }
+      if current["mergeable"] == true && (!SHA.match?(inputs["merge_sha"].to_s) || !valid_merge?(api, inputs))
+        inputs["merge_sha"] = isolated_merge(api, inputs)
+        return unless inputs["merge_sha"]
+      end
       if current["mergeable"] == true && SHA.match?(inputs["merge_sha"].to_s) && valid_merge?(api, inputs)
         title = integration_title(inputs)
         runs = api.list("/actions/workflows/#{INTEGRATION_WORKFLOW}/runs?event=workflow_dispatch&branch=main&head_sha=#{base}", "workflow_runs")
@@ -262,7 +325,7 @@ module DependabotMerge
           puts "Skipping PR ##{pr['number']}: integration CI did not pass for this main commit."
           next
         end
-        unless pr["mergeable"] != false && pr["merge_commit_sha"] == integration["merge_sha"] && valid_merge?(api, integration)
+        unless pr["mergeable"] != false && valid_candidate?(api, pr, integration)
           puts "Skipping PR ##{pr['number']}: the tested merge does not match the current PR."
           next
         end
@@ -286,11 +349,14 @@ module DependabotMerge
         request_integration(api, current, repository)
         next
       end
-      next if integration && current["merge_commit_sha"] != integration["merge_sha"]
+      next if integration && !valid_candidate?(api, current, integration)
       result = api.call("put", "/pulls/#{pr.fetch('number')}/merge", { "sha" => tested_head, "merge_method" => "squash" })
       raise "GitHub did not merge PR ##{pr['number']}" unless result["merged"]
 
       puts "Merged Dependabot PR ##{pr['number']} after all CI jobs passed."
+      if integration && current["merge_commit_sha"] != integration["merge_sha"]
+        api.call("delete", "/git/refs/heads/#{integration_branch(integration)}")
+      end
     end
   end
 end
