@@ -10,6 +10,12 @@ on:
     workflows: [CI, 'Dependabot integration*']
     types: [completed]
   workflow_dispatch:
+    inputs:
+      integration_run_id:
+        description: Completed integration run to verify
+        type: string
+        required: false
+        default: ''
   schedule:
     - cron: '17,47 * * * *'
 

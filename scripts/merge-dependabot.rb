@@ -266,6 +266,30 @@ module DependabotMerge
     false
   end
 
+  def self.notify_integration(api, run_id)
+    raise "Invalid integration run ID" unless /\A[1-9]\d*\z/.match?(run_id.to_s)
+
+    api.call("post", "/actions/workflows/dependabot-automerge.yml/dispatches", {
+      "ref" => "main", "inputs" => { "integration_run_id" => run_id.to_s }
+    })
+  end
+
+  def self.wait_for_integration(api, run_id, repository)
+    raise "Invalid integration run ID" unless /\A[1-9]\d*\z/.match?(run_id.to_s)
+
+    10.times do |attempt|
+      run = api.call("get", "/actions/runs/#{run_id}")
+      unless run["path"] == ".github/workflows/#{INTEGRATION_WORKFLOW}" && run["event"] == "workflow_dispatch" &&
+             run["head_branch"] == "main" && run.dig("head_repository", "full_name") == repository && integration_inputs(run["display_title"])
+        raise "Expected a trusted integration run."
+      end
+      return if run["status"] == "completed"
+
+      sleep 2 if attempt < 9
+    end
+    raise "Integration notification has not finished; the periodic check will recover it."
+  end
+
   def self.reconcile(api, repository)
     # Recover missed events and delayed merge refs without changing bot branches.
     # Always select the latest CI run for the current head, including failures.
@@ -368,7 +392,14 @@ if $PROGRAM_NAME == __FILE__
   if ARGV == ["--prepare-integration"]
     sha = DependabotMerge.prepare_integration(api, event.fetch("inputs"), repository)
     File.open(ENV.fetch("GITHUB_OUTPUT"), "a") { |file| file.puts("merge_sha=#{sha}") }
+  elsif ARGV == ["--notify-integration"]
+    DependabotMerge.notify_integration(api, ENV.fetch("GITHUB_RUN_ID"))
   elsif ARGV.empty?
+    unless event.dig("inputs", "integration_run_id").to_s.empty?
+      run_id = event.fetch("inputs").fetch("integration_run_id")
+      DependabotMerge.wait_for_integration(api, run_id, repository)
+      event = { "workflow_run" => { "id" => Integer(run_id) } }
+    end
     if event.dig("workflow_run", "event") == "push"
       run = api.call("get", "/actions/runs/#{Integer(event.fetch('workflow_run').fetch('id'))}")
       unless run["path"] == ".github/workflows/ci.yml" && run["head_branch"] == "main" &&

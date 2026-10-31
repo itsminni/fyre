@@ -668,6 +668,45 @@ class DependabotMergeTest < Minitest::Test
     assert_equal({ "ref" => "main" }, JSON.parse(requests.first.body))
   end
 
+  def test_notification_dispatches_only_the_integration_id_to_trusted_main
+    api = FakeAPI.new({})
+    DependabotMerge.notify_integration(api, "42")
+    assert_equal [["/actions/workflows/dependabot-automerge.yml/dispatches", {
+      "ref" => "main", "inputs" => { "integration_run_id" => "42" }
+    }]], api.writes
+    %w[0 -1 ../unsafe 42xyz].each do |value|
+      assert_raises(RuntimeError) { DependabotMerge.notify_integration(api, value) }
+    end
+    assert_equal 1, api.writes.length
+  end
+
+  def test_notification_waits_for_its_own_job_to_finish
+    use_integration
+    run = @responses["/actions/runs/42"]
+    reads = 0
+    @responses["/actions/runs/42"] = lambda do
+      reads += 1
+      run.merge("status" => reads == 1 ? "in_progress" : "completed")
+    end
+    pauses = []
+    DependabotMerge.stub(:sleep, ->(seconds) { pauses << seconds }) do
+      DependabotMerge.wait_for_integration(FakeAPI.new(@responses), "42", "itsminni/fyre")
+    end
+    assert_equal [2], pauses
+  end
+
+  def test_notification_cannot_reference_another_workflow_repository_or_branch
+    use_integration
+    run = @responses["/actions/runs/42"]
+    { "path" => ".github/workflows/ci.yml", "head_repository" => { "full_name" => "attacker/fork" },
+      "head_branch" => "untrusted", "display_title" => "forged" }.each do |key, value|
+      original = run[key]
+      run[key] = value
+      assert_raises(RuntimeError) { DependabotMerge.wait_for_integration(FakeAPI.new(@responses), "42", "itsminni/fyre") }
+      run[key] = original
+    end
+  end
+
   def test_reusable_ci_checks_the_same_sha_on_every_platform_with_read_only_permissions
     ci = YAML.load_file(File.expand_path("../.github/workflows/ci.yml", __dir__))
     integration = YAML.load_file(File.expand_path("../.github/workflows/dependabot-integration.yml", __dir__))
@@ -692,5 +731,17 @@ class DependabotMergeTest < Minitest::Test
     triggers = workflow["on"] || workflow[true]
     assert_includes triggers.fetch("workflow_run").fetch("workflows"), "Dependabot integration*"
     assert_equal ["main"], triggers.fetch("push").fetch("branches")
+  end
+
+  def test_integration_notifies_only_after_read_only_ci_and_executes_trusted_code
+    workflow = YAML.load_file(File.expand_path("../.github/workflows/dependabot-integration.yml", __dir__))
+    notify = workflow.fetch("jobs").fetch("notify")
+    assert_equal %w[validate ci], notify.fetch("needs")
+    assert_equal({ "contents" => "read", "actions" => "write" }, notify.fetch("permissions"))
+    checkout = notify.fetch("steps").first
+    assert_equal "${{ github.event.repository.default_branch }}", checkout.fetch("with").fetch("ref")
+    assert_equal false, checkout.fetch("with").fetch("persist-credentials")
+    assert_includes notify.fetch("steps").last.fetch("run"), "--notify-integration"
+    assert_equal({ "contents" => "read" }, workflow.fetch("jobs").fetch("ci").fetch("permissions"))
   end
 end
