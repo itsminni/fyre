@@ -28,6 +28,8 @@ Fyre is a high-school final project built by a small team. It is a multi-platfor
 
 ## Quick start
 
+An offline demo for all three clients is available on the [`demo` branch](https://github.com/itsminni/fyre/tree/demo).
+
 Fyre requires your own Appwrite backend. First [configure your own Appwrite project](appwrite/README.md#one-time-appwrite-setup), deploy the schema and functions, and fill the ignored client configuration files with its endpoint and resource IDs. The example files contain placeholders.
 
 ### Web
@@ -96,6 +98,8 @@ Fyre è un progetto finale di quinta superiore realizzato da un piccolo gruppo. 
 | [`.github/workflows/`](.github/workflows/ci.yml) | CI per web, backend, Android e iOS |
 
 ### Avvio rapido
+
+Una demo offline dei tre client è disponibile nel [branch `demo`](https://github.com/itsminni/fyre/tree/demo).
 
 Fyre richiede un backend Appwrite proprio. Prima [configurare un proprio progetto Appwrite](appwrite/README.md#configurazione-iniziale-su-appwrite), distribuire schema e funzioni e compilare i file client ignorati con endpoint e ID delle risorse. I file di esempio contengono placeholder.
 
