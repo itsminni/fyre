@@ -31,7 +31,8 @@ data class AppwriteConfiguration(
     val sendMessageFunctionDomain: String?,
     val recordSwipeFunctionDomain: String?,
     val discoverProfilesFunctionDomain: String?,
-    val eventAdminFunctionDomain: String?
+    val eventAdminFunctionDomain: String?,
+    val apiFunctionId: String? = null
 ) {
     companion object {
         internal fun loadOrNull(
@@ -51,7 +52,7 @@ data class AppwriteConfiguration(
             val projectId = normalize(BuildConfig.APPWRITE_PROJECT_ID)
             val databaseId = normalize(BuildConfig.APPWRITE_DATABASE_ID)
             val profilesTableId = normalize(BuildConfig.APPWRITE_PROFILES_TABLE_ID)
-            val avatarsBucketId = normalize(BuildConfig.APPWRITE_AVATARS_BUCKET_ID)
+            val avatarsBucketId = normalize(BuildConfig.APPWRITE_STORAGE_BUCKET_ID) ?: normalize(BuildConfig.APPWRITE_AVATARS_BUCKET_ID)
             val eventsTableId = normalize(BuildConfig.APPWRITE_EVENTS_TABLE_ID)
             val eventRegistrationsTableId = normalize(BuildConfig.APPWRITE_EVENT_REGISTRATIONS_TABLE_ID)
             val threadsTableId = normalize(BuildConfig.APPWRITE_THREADS_TABLE_ID)
@@ -113,7 +114,8 @@ data class AppwriteConfiguration(
                 databaseId = databaseId.orEmpty(),
                 profilesTableId = profilesTableId.orEmpty(),
                 avatarsBucketId = avatarsBucketId.orEmpty(),
-                chatAttachmentsBucketId = normalize(BuildConfig.APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID),
+                chatAttachmentsBucketId = normalize(BuildConfig.APPWRITE_STORAGE_BUCKET_ID) ?: normalize(BuildConfig.APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID),
+                apiFunctionId = normalize(BuildConfig.APPWRITE_API_FUNCTION_ID),
                 eventsTableId = eventsTableId.orEmpty(),
                 eventRegistrationsTableId = eventRegistrationsTableId.orEmpty(),
                 threadsTableId = threadsTableId.orEmpty(),

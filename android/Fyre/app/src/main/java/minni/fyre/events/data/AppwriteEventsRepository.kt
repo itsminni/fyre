@@ -370,9 +370,9 @@ class AppwriteEventsRepository(
             deadlineText = formatDate(eventRow.stringOrNull("registrationClosesAt")),
             cancellationDeadlineText = formatDate(eventRow.stringOrNull("cancellationClosesAt")),
             liveMetrics = LiveMetrics(
-                viewersOnline = eventRow.intOrNull("viewersOnline") ?: (registeredCount * 2),
-                checkIns = eventRow.intOrNull("checkIns") ?: registeredCount,
-                chatPerMinute = eventRow.intOrNull("chatPerMinute") ?: (registeredCount / 2)
+                viewersOnline = eventRow.intOrNull("viewersOnline"),
+                checkIns = eventRow.intOrNull("checkIns"),
+                chatPerMinute = eventRow.intOrNull("chatPerMinute")
             ),
             backendEventId = eventId,
             syncStatus = EventSyncStatus.Synced,
@@ -380,7 +380,8 @@ class AppwriteEventsRepository(
                 runCatching { Instant.parse(rawValue) }.getOrNull()
             },
             registrationClosesAt = serverProjection.registrationClosesAt,
-            cancellationClosesAt = serverProjection.cancellationClosesAt
+            cancellationClosesAt = serverProjection.cancellationClosesAt,
+            ownRegistrationStatus = registrations.maxByOrNull { it.stringOrNull("\$updatedAt").orEmpty() }?.stringOrNull("status")
         )
     }
 
@@ -485,15 +486,13 @@ class AppwriteEventsRepository(
     private fun formatDate(raw: String?): String {
         if (raw.isNullOrBlank()) return ""
         val instant = runCatching { Instant.parse(raw) }.getOrNull() ?: return raw
-        return EventDisplayFormatter.format(instant)
+        return java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM, java.time.format.FormatStyle.SHORT)
+            .withLocale(Locale.getDefault()).withZone(ZoneId.systemDefault()).format(instant)
     }
 
 }
 
 private val EventTimeZone: ZoneId = ZoneId.of("Europe/Rome")
-private val EventDisplayFormatter: DateTimeFormatter = DateTimeFormatter
-    .ofPattern("dd/MM/uuuu HH:mm", Locale.ITALY)
-    .withZone(EventTimeZone)
 private val EventLocalDateTimeFormatters: List<DateTimeFormatter> = listOf(
     DateTimeFormatter.ofPattern("dd/MM/uuuu HH:mm", Locale.ITALY),
     DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm", Locale.ROOT),

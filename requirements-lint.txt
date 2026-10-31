@@ -1,0 +1,2 @@
+# Python 3.11+; pin the Ruff version used locally and in CI.
+ruff==0.17.3

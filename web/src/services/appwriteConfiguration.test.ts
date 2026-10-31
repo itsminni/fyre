@@ -27,6 +27,8 @@ const requiredEnvironment: Record<string, string> = {
 };
 
 const optionalEnvironmentNames = [
+  'VITE_APPWRITE_API_FUNCTION_ID',
+  'VITE_APPWRITE_STORAGE_BUCKET_ID',
   'VITE_APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID',
   'VITE_APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_DOMAIN',
   'VITE_APPWRITE_SEND_MESSAGE_FUNCTION_DOMAIN',
@@ -49,6 +51,15 @@ afterEach(() => {
 });
 
 describe('Appwrite configuration', () => {
+  it('selects one bucket for both media kinds and retains logical operation IDs', () => {
+    stubRequiredEnvironment();
+    vi.stubEnv('VITE_APPWRITE_API_FUNCTION_ID', 'fyre-api');
+    vi.stubEnv('VITE_APPWRITE_STORAGE_BUCKET_ID', 'shared-media');
+    expect(loadAppwriteConfiguration()).toMatchObject({
+      apiFunctionId: 'fyre-api', avatarsBucketId: 'shared-media', chatAttachmentsBucketId: 'shared-media',
+      sendMessageFunctionId: 'send-message', manageProfileFunctionId: 'manage-profile'
+    });
+  });
   it('fails fast and lists every missing required variable', () => {
     for (const name of Object.keys(requiredEnvironment)) {
       vi.stubEnv(name, '');

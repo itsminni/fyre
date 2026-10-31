@@ -8,15 +8,15 @@ This directory is the reproducible source for Fyre's Appwrite backend. Tracked f
 | --- | --- |
 | [`tables-db.json`](tables-db.json) | TablesDB database |
 | [`tables.json`](tables.json) | Eleven row-secured tables, columns, and indexes |
-| [`buckets.json`](buckets.json) | Two file-secured Storage buckets |
-| [`functions.json`](functions.json) | Nine authenticated functions and one scheduled cleanup (Node.js 22) |
+| [`buckets.json`](buckets.json) | One file-secured media bucket |
+| [`functions.json`](functions.json) | One authenticated API router and one scheduled cleanup (Node.js 22) |
 | [`../appwrite.config.example.json`](../appwrite.config.example.json) | Neutral multi-file CLI configuration |
 
 ## Requirements
 
 - Node.js 22 for function tests;
 - Ruby for configuration generation and validation;
-- Appwrite CLI 25 or 28, authenticated to a project that can host ten functions and two buckets.
+- Appwrite CLI 28.3+, authenticated to a project with two functions and one bucket.
 
 On macOS, install the CLI with:
 
@@ -58,8 +58,6 @@ cp ios/Fyre/Fyre/Config.example.plist ios/Fyre/Fyre/Config.plist
 
 Set `APPWRITE_BACKEND_ENABLED=true` on Android. Direct function domains are optional because clients can use the Appwrite execution API.
 
-## Deployment
-
 ```sh
 appwrite push tables
 appwrite push buckets
@@ -70,7 +68,7 @@ scripts/deploy-appwrite-functions.sh --confirm-project 'EXACT-PROJECT-ID'
 
 ## Italiano
 
-Questa cartella è la fonte riproducibile del backend Appwrite di Fyre. I file tracciati contengono ID logici neutri; endpoint live, project ID e ID delle risorse associate vanno nel file `.env` alla root, ignorato da Git.
+Questa cartella è la fonte riproducibile del backend Appwrite di Fyre. I file tracciati contengono ID logici neutri; endpoint live, project ID e ID delle risorse associate vanno nel file `.env` alla root.
 
 ### Risorse tracciate
 
@@ -78,15 +76,15 @@ Questa cartella è la fonte riproducibile del backend Appwrite di Fyre. I file t
 | --- | --- |
 | [`tables-db.json`](tables-db.json) | Database TablesDB |
 | [`tables.json`](tables.json) | Undici tabelle con sicurezza per riga, colonne e indici |
-| [`buckets.json`](buckets.json) | Due bucket Storage con sicurezza per file |
-| [`functions.json`](functions.json) | Nove funzioni autenticate e una pulizia pianificata (Node.js 22) |
+| [`buckets.json`](buckets.json) | Un bucket Storage condiviso con sicurezza per file |
+| [`functions.json`](functions.json) | Un router API autenticato e una pulizia pianificata (Node.js 22) |
 | [`../appwrite.config.example.json`](../appwrite.config.example.json) | Configurazione CLI neutra su più file |
 
 ### Requisiti
 
 - Node.js 22 per i test delle funzioni;
 - Ruby per generare e validare la configurazione;
-- Appwrite CLI 25 o 28, autenticata su un progetto che possa ospitare dieci funzioni e due bucket.
+- Appwrite CLI 28.3+, autenticata su un progetto con due funzioni e un bucket.
 
 Su macOS si installa la CLI con:
 
@@ -127,8 +125,6 @@ cp ios/Fyre/Fyre/Config.example.plist ios/Fyre/Fyre/Config.plist
 ```
 
 Su Android impostare `APPWRITE_BACKEND_ENABLED=true`. I domini diretti delle funzioni sono opzionali perché i client possono usare l'API di esecuzione Appwrite.
-
-### Distribuzione
 
 ```sh
 appwrite push tables

@@ -12,7 +12,12 @@ import minni.fyre.messages.model.MessageSyncStatus
 import minni.fyre.messages.model.MessageThread
 import minni.fyre.messages.model.RelationshipAction
 import minni.fyre.messages.model.VoiceNote
-import kotlin.math.abs
+import minni.fyre.messages.data.MessageSendRequest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,11 +48,30 @@ class MessagesViewModel(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    val uploadProgress = repository.uploadProgress
+
+    private val pendingSends = mutableMapOf<String, MessageSendRequest>()
+    private val sendJobs = mutableMapOf<String, Job>()
+    private var selectionVersion = 0
+    private var openingJob: Job? = null
+    private var oldestCursor: String? = null
+    private val _hasOlderMessages = MutableStateFlow(false)
+    val hasOlderMessages = _hasOlderMessages.asStateFlow()
+    private val _isLoadingOlder = MutableStateFlow(false)
+    val isLoadingOlder = _isLoadingOlder.asStateFlow()
+    private var refreshInProgress = false
+    private var inboxRefreshInProgress = false
+
     init {
         refreshThreads()
     }
 
     fun showInbox() {
+        selectionVersion++
+        openingJob?.cancel()
+        _hasOlderMessages.value = false
+        _isLoadingOlder.value = false
+        oldestCursor = null
         _selectedThreadId.value = null
         _messages.value = emptyList()
         _replyToMessageId.value = null
@@ -56,6 +80,11 @@ class MessagesViewModel(
     }
 
     fun openThread(threadId: String) {
+        val version = ++selectionVersion
+        openingJob?.cancel()
+        _hasOlderMessages.value = false
+        _isLoadingOlder.value = false
+        oldestCursor = null
         val immediateThread = _threads.value.firstOrNull {
             it.id == threadId || it.backendThreadId == threadId
         }
@@ -81,9 +110,10 @@ class MessagesViewModel(
 
         _isLoading.value = true
         _errorMessage.value = null
-        viewModelScope.launch {
+        openingJob = viewModelScope.launch {
             var openedThread: MessageThread? = null
             val ensuredThreadResult = repository.ensureThread(threadId)
+            if (selectionVersion != version) return@launch
             ensuredThreadResult.fold(
                 onSuccess = { thread ->
                     openedThread = thread
@@ -98,12 +128,15 @@ class MessagesViewModel(
             )
 
             repository.markAsRead(threadId)
-            val messagesResult = repository.getMessages(threadId)
+            val messagesResult = repository.getMessagePage(threadId)
+            if (selectionVersion != version) return@launch
             messagesResult.fold(
-                onSuccess = { loadedMessages ->
+                onSuccess = { page ->
                     _selectedThreadId.value = openedThread?.id ?: threadId
-                    _messages.value = loadedMessages
-                    loadedMessages.lastOrNull()?.let(::upsertThreadPreviewFromMessage)
+                    _messages.value = page.messages
+                    oldestCursor = page.nextCursor
+                    _hasOlderMessages.value = page.nextCursor != null
+                    page.messages.lastOrNull()?.let(::upsertThreadPreviewFromMessage)
                     _errorMessage.value = null
                 },
                 onFailure = { throwable ->
@@ -149,25 +182,8 @@ class MessagesViewModel(
         _isLoading.value = true
         _errorMessage.value = null
 
-        viewModelScope.launch {
-            val result = repository.sendTextMessage(
-                threadId = threadId,
-                text = message,
-                replyToMessageId = temporaryMessage.replyToMessageId
-            )
-            result.fold(
-                onSuccess = { syncedMessage ->
-                    replaceMessage(temporaryMessage.id, syncedMessage)
-                    upsertThreadPreviewFromMessage(syncedMessage)
-                },
-                onFailure = { throwable ->
-                    markMessageAsFailed(temporaryMessage.id)
-                    _errorMessage.value = throwable.message ?: "Invio messaggio non riuscito"
-                }
-            )
-            refreshThreadsInternal()
-            _isLoading.value = false
-        }
+        launchSend(temporaryMessage.id, MessageSendRequest(threadId, operationId = temporaryMessage.id, text = message, replyToMessageId = temporaryMessage.replyToMessageId))
+
     }
 
     fun sendAttachment(
@@ -198,28 +214,8 @@ class MessagesViewModel(
         _isLoading.value = true
         _errorMessage.value = null
 
-        viewModelScope.launch {
-            val result = repository.sendAttachmentMessage(
-                threadId = threadId,
-                type = type,
-                displayName = displayName,
-                localUri = localUri,
-                mimeType = mimeType,
-                replyToMessageId = optimistic.replyToMessageId
-            )
-            result.fold(
-                onSuccess = { syncedMessage ->
-                    replaceMessage(optimistic.id, syncedMessage)
-                    upsertThreadPreviewFromMessage(syncedMessage)
-                },
-                onFailure = { throwable ->
-                    markMessageAsFailed(optimistic.id)
-                    _errorMessage.value = throwable.message ?: "Invio allegato non riuscito"
-                }
-            )
-            refreshThreadsInternal()
-            _isLoading.value = false
-        }
+        launchSend(optimistic.id, MessageSendRequest(threadId, operationId = optimistic.id, replyToMessageId = optimistic.replyToMessageId, attachmentType = type, displayName = displayName, localUri = localUri, mimeType = mimeType))
+
     }
 
     fun sendVoiceMessage(localPath: String, durationSec: Int) {
@@ -240,26 +236,8 @@ class MessagesViewModel(
         _isLoading.value = true
         _errorMessage.value = null
 
-        viewModelScope.launch {
-            val result = repository.sendVoiceMessage(
-                threadId = threadId,
-                localPath = localPath,
-                durationSec = durationSec,
-                replyToMessageId = optimistic.replyToMessageId
-            )
-            result.fold(
-                onSuccess = { syncedMessage ->
-                    replaceMessage(optimistic.id, syncedMessage)
-                    upsertThreadPreviewFromMessage(syncedMessage)
-                },
-                onFailure = { throwable ->
-                    markMessageAsFailed(optimistic.id)
-                    _errorMessage.value = throwable.message ?: "Invio vocale non riuscito"
-                }
-            )
-            refreshThreadsInternal()
-            _isLoading.value = false
-        }
+        launchSend(optimistic.id, MessageSendRequest(threadId, operationId = optimistic.id, replyToMessageId = optimistic.replyToMessageId, localUri = localPath, voiceDurationSec = durationSec))
+
     }
 
     fun updateRelationship(action: RelationshipAction) {
@@ -324,9 +302,32 @@ class MessagesViewModel(
 
     fun refreshSelectedThread() {
         val threadId = _selectedThreadId.value ?: return
+        if (refreshInProgress || _isLoading.value) return
+        val version = selectionVersion
+        refreshInProgress = true
         viewModelScope.launch {
-            refreshMessagesInternal(threadId, showErrors = false)
-            refreshThreadsInternal(showErrors = false)
+            try {
+                if (version == selectionVersion) refreshMessagesInternal(threadId, showErrors = false)
+            } finally { refreshInProgress = false }
+        }
+    }
+
+    fun loadOlderMessages() {
+        val threadId = _selectedThreadId.value ?: return
+        val cursor = oldestCursor ?: return
+        if (_isLoadingOlder.value) return
+        val version = selectionVersion
+        _isLoadingOlder.value = true
+        viewModelScope.launch {
+            try {
+                val result = repository.getMessagePage(threadId, cursor)
+                if (version != selectionVersion) return@launch
+                result.fold(onSuccess = { page ->
+                    _messages.value = (page.messages + _messages.value).distinctBy { it.backendMessageId ?: it.id }.sortedBy { it.timestamp }
+                    oldestCursor = page.nextCursor
+                    _hasOlderMessages.value = page.nextCursor != null
+                }, onFailure = { _errorMessage.value = "Impossibile caricare i messaggi precedenti" })
+            } finally { if (version == selectionVersion) _isLoadingOlder.value = false }
         }
     }
 
@@ -342,9 +343,10 @@ class MessagesViewModel(
         threadId: String,
         showErrors: Boolean
     ) {
-        val messagesResult = repository.getMessages(threadId)
+        val messagesResult = repository.getMessagePage(threadId)
         messagesResult.fold(
-            onSuccess = { loadedMessages ->
+            onSuccess = { page ->
+                val loadedMessages = page.messages
                 if (_selectedThreadId.value != threadId) return
                 val mergedMessages = mergeMessagesKeepingLocalPending(loadedMessages)
                 _messages.value = mergedMessages
@@ -355,15 +357,22 @@ class MessagesViewModel(
                 }
             },
             onFailure = { throwable ->
-                if (showErrors) {
-                    _errorMessage.value = throwable.message ?: "Impossibile aggiornare la chat"
+                if (throwable is minni.fyre.data.appwrite.AppwriteApiException && throwable.statusCode in setOf(401, 403, 404)) {
+                    if (_selectedThreadId.value == threadId) {
+                        _messages.value = emptyList()
+                        _threads.value = _threads.value.filterNot { it.id == threadId }
+                        showInbox()
+                    }
                 }
+                if (showErrors) _errorMessage.value = throwable.message ?: "Impossibile aggiornare la chat"
             }
         )
     }
 
     private suspend fun refreshThreadsInternal(showErrors: Boolean = true) {
-        val result = repository.getThreads()
+        if (inboxRefreshInProgress) return
+        inboxRefreshInProgress = true
+        val result = try { repository.getThreads() } finally { inboxRefreshInProgress = false }
         result.fold(
             onSuccess = { loadedThreads ->
                 val selectedThread = _selectedThreadId.value
@@ -392,7 +401,7 @@ class MessagesViewModel(
     ): ChatMessage {
         val now = System.currentTimeMillis()
         return ChatMessage(
-            id = "local_$now",
+            id = java.util.UUID.randomUUID().toString().replace("-", ""),
             threadId = threadId,
             author = MessageAuthor.Me,
             text = text,
@@ -420,26 +429,51 @@ class MessagesViewModel(
 
     private fun mergeMessagesKeepingLocalPending(remoteMessages: List<ChatMessage>): List<ChatMessage> {
         val remoteKeys = remoteMessages.map { it.backendMessageId ?: it.id }.toSet()
-        val merged = remoteMessages.toMutableList()
+        val local = _messages.value.filterNot { message ->
+            val request = pendingSends[message.id]
+            request != null && repository.pendingMessageId(request.threadId, request.operationId) in remoteKeys
+        }
+        return (local + remoteMessages).associateBy { it.backendMessageId ?: it.id }.values.sortedBy { it.timestamp }
+    }
 
-        _messages.value.forEach { localMessage ->
-            if (localMessage.syncStatus == MessageSyncStatus.Synced) return@forEach
-            val localKey = localMessage.backendMessageId ?: localMessage.id
-            if (localKey in remoteKeys) return@forEach
+    fun retryMessage(messageId: String) {
+        val request = pendingSends[messageId] ?: return
+        _messages.value = _messages.value.map { if (it.id == messageId) it.copy(syncStatus = MessageSyncStatus.LocalOnly) else it }
+        launchSend(messageId, request)
+    }
 
-            val hasMatchingRemote = remoteMessages.any { remoteMessage ->
-                    remoteMessage.author == localMessage.author &&
-                    remoteMessage.text == localMessage.text &&
-                    remoteMessage.replyToMessageId == localMessage.replyToMessageId &&
-                    remoteMessage.replyPreviewText == localMessage.replyPreviewText &&
-                    abs(remoteMessage.timestamp - localMessage.timestamp) < PendingMessageMatchWindowMs
-            }
-            if (!hasMatchingRemote) {
-                merged += localMessage
+    private fun launchSend(messageId: String, request: MessageSendRequest) {
+        if (sendJobs[messageId]?.isActive == true) return
+        pendingSends[messageId] = request
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                repository.sendMessage(request).fold(onSuccess = { synced ->
+                    replaceMessage(messageId, synced)
+                    upsertThreadPreviewFromMessage(synced)
+                    pendingSends.remove(messageId)
+                }, onFailure = { error ->
+                    if (error is CancellationException) throw error
+                    markMessageAsFailed(messageId)
+                    if (_selectedThreadId.value == request.threadId) _errorMessage.value = "Invio non riuscito. Riprova."
+                })
+            } catch (cancelled: CancellationException) {
+                // Reconciliation preserves files if the server already committed the message.
+                withContext(NonCancellable) { runCatching { repository.cancelSend(request) } }
+                _messages.value = _messages.value.filterNot { it.id == messageId }
+                pendingSends.remove(messageId)
+                throw cancelled
+            } finally {
+                sendJobs.remove(messageId)
+                _isLoading.value = sendJobs.isNotEmpty()
             }
         }
+        sendJobs[messageId] = job
+        job.start()
+    }
 
-        return merged.sortedBy { it.timestamp }
+    fun cancelAttachmentUpload(messageId: String) {
+        sendJobs.filterKeys { id -> id == messageId && pendingSends[id]?.let { it.attachmentType != null || it.voiceDurationSec != null } == true }
+            .values.toList().forEach(Job::cancel)
     }
 
     private fun upsertThread(thread: MessageThread) {
@@ -493,9 +527,6 @@ class MessagesViewModel(
         }
     }
 
-    private companion object {
-        private const val PendingMessageMatchWindowMs = 30_000L
-    }
 }
 
 class MessagesViewModelFactory(

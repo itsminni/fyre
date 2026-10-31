@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>APPWRITE_API_FUNCTION_ID</key>
+    <string>fyre-api</string>
+    <key>APPWRITE_STORAGE_BUCKET_ID</key>
+    <string>avatars</string>
 	<key>APPWRITE_PROJECT_ID</key>
 	<string>&lt;APPWRITE_PROJECT_ID&gt;</string>
 	<key>APPWRITE_PUBLIC_ENDPOINT</key>

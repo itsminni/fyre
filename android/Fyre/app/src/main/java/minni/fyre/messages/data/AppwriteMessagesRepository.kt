@@ -26,6 +26,30 @@ class AppwriteMessagesRepository(
     private val configuration: AppwriteConfiguration,
     private val localRecentChatStore: LocalRecentChatStore
 ) : MessagesRepository {
+    private val progress = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Float>>(emptyMap())
+    override val uploadProgress: kotlinx.coroutines.flow.StateFlow<Map<String, Float>> = progress
+    private fun updateProgress(id: String, value: Float) {
+        synchronized(progress) { progress.value = progress.value + (id to value) }
+    }
+    private val uploadedFiles = java.util.concurrent.ConcurrentHashMap<String, minni.fyre.data.appwrite.UploadedFile>()
+
+    override fun pendingMessageId(threadId: String, operationId: String): String? =
+        gateway.lastKnownAccountId?.let { messageOperationRowId(it, threadId, operationId) }
+
+    override suspend fun sendMessage(request: MessageSendRequest): Result<ChatMessage> = when {
+        request.voiceDurationSec != null -> sendVoiceOnce(request.threadId, request.localUri, request.voiceDurationSec, request.replyToMessageId, request.operationId)
+        request.attachmentType != null -> sendAttachmentOnce(request.threadId, request.attachmentType, request.displayName, request.localUri, request.mimeType, request.replyToMessageId, request.operationId)
+        else -> sendTextOnce(request.threadId, request.text, request.replyToMessageId, request.operationId)
+    }
+
+    override suspend fun cancelSend(request: MessageSendRequest) {
+        val file = uploadedFiles[request.operationId] ?: return
+        val result = gateway.executeFunction(configuration.sendMessageFunctionId, mapOf(
+            "action" to "reconcileAttachment", "threadId" to request.threadId, "attachmentFileId" to file.fileId
+        ))
+        if (result.stringOrNull("status") == "discarded") uploadedFiles.remove(request.operationId)
+    }
+
 
     override suspend fun getThreads(): Result<List<MessageThread>> {
         return runCatching {
@@ -66,62 +90,40 @@ class AppwriteMessagesRepository(
         }
     }
 
-    override suspend fun getMessages(threadId: String): Result<List<ChatMessage>> {
-        return runCatching {
-            val currentUserId = gateway.fetchCurrentAccountId(required = false)
-                ?: return@runCatching emptyList<ChatMessage>().also {
-                    localRecentChatStore.clearAll()
-                }
+    override suspend fun getMessages(threadId: String): Result<List<ChatMessage>> =
+        getMessagePage(threadId).map { it.messages }
 
-            try {
-                val participantRows = gateway.listRows(
-                    tableId = configuration.threadParticipantsTableId,
-                    queries = listOf(gateway.queryEqual("threadId", listOf(threadId)))
-                )
-                val otherReadAt = participantRows
-                    .filter { row -> row.stringOrNull("userId") != currentUserId }
-                    .mapNotNull { row -> parseTimestamp(row.stringOrNull("lastReadAt")) }
-                    .maxOrNull()
-
-                val rows = gateway.listRows(
-                    tableId = configuration.messagesTableId,
-                    queries = listOf(
-                        gateway.queryEqual("threadId", listOf(threadId)),
-                        gateway.queryOrderAsc("createdAt")
-                    )
-                )
-
-                val replyLookup = rows.mapNotNull { row ->
-                    val id = row.stringOrNull("\$id") ?: return@mapNotNull null
-                    id to previewTextForRow(row)
-                }.toMap()
-
-                val mapped = rows.mapNotNull { row ->
-                    mapRowToMessage(
-                        row = row,
-                        currentUserId = currentUserId,
-                        threadId = threadId,
-                        otherReadAt = otherReadAt,
-                        replyPreviewText = row.stringOrNull("replyPreviewText")
-                            ?: row.stringOrNull("replyToPreviewText")
-                            ?: row.stringOrNull("replyToMessageId")?.let(replyLookup::get)
-                    )
-                }
-
-                markAsRead(threadId)
-                localRecentChatStore.mergeMessages(currentUserId, threadId, mapped)
-            } catch (api: AppwriteApiException) {
-                if (api.statusCode == 401 || api.statusCode == 403 || api.statusCode == 404) {
-                    localRecentChatStore.removeThread(currentUserId, threadId)
-                    emptyList()
-                } else {
-                    localRecentChatStore.messages(currentUserId, threadId)
-                        .takeIf { it.isNotEmpty() }
-                        ?: throw api
-                }
-            } catch (throwable: Throwable) {
-                localRecentChatStore.messages(currentUserId, threadId).takeIf { it.isNotEmpty() } ?: throw throwable
+    override suspend fun getMessagePage(threadId: String, beforeCursor: String?): Result<MessagePage> = runCatching {
+        val currentUserId = gateway.fetchCurrentAccountId(required = true)
+            ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
+        try {
+            val participants = gateway.listRows(configuration.threadParticipantsTableId,
+                listOf(gateway.queryEqual("threadId", listOf(threadId))), maximumRows = 3)
+            val otherReadAt = participants.filter { it.stringOrNull("userId") != currentUserId }
+                .mapNotNull { parseTimestamp(it.stringOrNull("lastReadAt")) }.maxOrNull()
+            val window = gateway.listRows(configuration.messagesTableId, buildList {
+                add(gateway.queryEqual("threadId", listOf(threadId)))
+                add(gateway.queryOrderDesc("createdAt"))
+                beforeCursor?.let { add(gateway.queryCursorAfter(it)) }
+            }, maximumRows = 51)
+            val rows = window.take(50).asReversed()
+            val replyLookup = rows.mapNotNull { row -> row.stringOrNull("\$id")?.let { it to previewTextForRow(row) } }.toMap()
+            val messages = rows.mapNotNull { row -> mapRowToMessage(row, currentUserId, threadId, otherReadAt,
+                row.stringOrNull("replyPreviewText") ?: row.stringOrNull("replyToPreviewText")
+                    ?: row.stringOrNull("replyToMessageId")?.let(replyLookup::get)) }
+            localRecentChatStore.mergeMessages(currentUserId, threadId, messages)
+            MessagePage(messages, rows.firstOrNull()?.stringOrNull("\$id")?.takeIf { window.size > 50 })
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            if (error is AppwriteApiException && error.statusCode in setOf(401, 403, 404)) {
+                localRecentChatStore.removeThread(currentUserId, threadId)
+                throw error
             }
+            val cached = localRecentChatStore.messages(currentUserId, threadId)
+            if (beforeCursor != null || cached.isEmpty()) throw error
+            // Network errors do not replace a loaded conversation with an empty page.
+            MessagePage(cached.takeLast(50), null)
         }
     }
 
@@ -143,10 +145,14 @@ class AppwriteMessagesRepository(
         }
     }
 
-    override suspend fun sendTextMessage(
+    override suspend fun sendTextMessage(threadId: String, text: String, replyToMessageId: String?): Result<ChatMessage> =
+        sendTextOnce(threadId, text, replyToMessageId, gateway.randomIdentifier())
+
+    private suspend fun sendTextOnce(
         threadId: String,
         text: String,
-        replyToMessageId: String?
+        replyToMessageId: String?,
+        operationId: String
     ): Result<ChatMessage> {
         return runCatching {
             val trimmed = text.trim()
@@ -159,7 +165,8 @@ class AppwriteMessagesRepository(
             val payload = mutableMapOf<String, Any?>(
                 "currentUserId" to currentUserId,
                 "threadId" to threadId,
-                "text" to trimmed
+                "text" to trimmed,
+                "operationId" to operationId
             )
             if (!replyToMessageId.isNullOrBlank()) {
                 payload["replyToMessageId"] = replyToMessageId
@@ -172,28 +179,35 @@ class AppwriteMessagesRepository(
                 replyToMessageId = replyToMessageId
             )
             localRecentChatStore.upsertMessage(currentUserId, message)
+            uploadedFiles.remove(operationId)
             message
         }
     }
 
-    override suspend fun sendAttachmentMessage(
+    override suspend fun sendAttachmentMessage(threadId: String, type: AttachmentType, displayName: String, localUri: String, mimeType: String, replyToMessageId: String?): Result<ChatMessage> =
+        sendAttachmentOnce(threadId, type, displayName, localUri, mimeType, replyToMessageId, gateway.randomIdentifier())
+
+    private suspend fun sendAttachmentOnce(
         threadId: String,
         type: AttachmentType,
         displayName: String,
         localUri: String,
         mimeType: String,
-        replyToMessageId: String?
+        replyToMessageId: String?,
+        operationId: String
     ): Result<ChatMessage> {
         return runCatching {
             requiredSendMessageFunctionId()
             val currentUserId = gateway.fetchCurrentAccountId(required = true)
                 ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
-            val uploaded = gateway.uploadChatAttachment(
+            val uploaded = uploadedFiles[operationId] ?: gateway.uploadChatAttachment(
                 threadId = threadId,
                 displayName = displayName,
                 localUri = localUri,
-                mimeType = mimeType
-            )
+                mimeType = mimeType,
+                operationId = operationId,
+                onProgress = { updateProgress(operationId, it) }
+            ).also { uploadedFiles[operationId] = it }
 
             val messageType = when (type) {
                 AttachmentType.Image -> "image"
@@ -207,6 +221,7 @@ class AppwriteMessagesRepository(
                 "text" to "",
                 "messageType" to messageType,
                 "attachmentFileId" to uploaded.fileId,
+                "operationId" to uploaded.operationId,
                 "attachmentName" to uploaded.fileName,
                 "attachmentMimeType" to uploaded.mimeType,
                 "attachmentSize" to uploaded.sizeBytes
@@ -230,26 +245,33 @@ class AppwriteMessagesRepository(
                 )
             )
             localRecentChatStore.upsertMessage(currentUserId, message)
+            uploadedFiles.remove(operationId)
             message
         }
     }
 
-    override suspend fun sendVoiceMessage(
+    override suspend fun sendVoiceMessage(threadId: String, localPath: String, durationSec: Int, replyToMessageId: String?): Result<ChatMessage> =
+        sendVoiceOnce(threadId, localPath, durationSec, replyToMessageId, gateway.randomIdentifier())
+
+    private suspend fun sendVoiceOnce(
         threadId: String,
         localPath: String,
         durationSec: Int,
-        replyToMessageId: String?
+        replyToMessageId: String?,
+        operationId: String
     ): Result<ChatMessage> {
         return runCatching {
             requiredSendMessageFunctionId()
             val currentUserId = gateway.fetchCurrentAccountId(required = true)
                 ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
-            val uploaded = gateway.uploadChatAttachment(
+            val uploaded = uploadedFiles[operationId] ?: gateway.uploadChatAttachment(
                 threadId = threadId,
-                displayName = "voice_${System.currentTimeMillis()}.m4a",
+                displayName = "voice_${operationId}.m4a",
                 localUri = localPath,
-                mimeType = "audio/mp4"
-            )
+                mimeType = "audio/mp4",
+                operationId = operationId,
+                onProgress = { updateProgress(operationId, it) }
+            ).also { uploadedFiles[operationId] = it }
 
             val payload = mutableMapOf<String, Any?>(
                 "currentUserId" to currentUserId,
@@ -257,6 +279,7 @@ class AppwriteMessagesRepository(
                 "text" to "",
                 "messageType" to "audio",
                 "attachmentFileId" to uploaded.fileId,
+                "operationId" to uploaded.operationId,
                 "attachmentName" to uploaded.fileName,
                 "attachmentMimeType" to uploaded.mimeType,
                 "attachmentSize" to uploaded.sizeBytes,
@@ -282,6 +305,7 @@ class AppwriteMessagesRepository(
                 forceVoice = true
             )
             localRecentChatStore.upsertMessage(currentUserId, message)
+            uploadedFiles.remove(operationId)
             message
         }
     }
@@ -401,14 +425,6 @@ class AppwriteMessagesRepository(
         val otherUserId = participantUserIds.firstOrNull { it != currentUserId } ?: return null
         val peer = fetchPeerProjection(threadId, otherUserId)
 
-        val messageRows = gateway.listRows(
-            tableId = configuration.messagesTableId,
-            queries = listOf(
-                gateway.queryEqual("threadId", listOf(threadId)),
-                gateway.queryOrderAsc("createdAt")
-            )
-        )
-
         val currentParticipantRow = participantRows.firstOrNull { it.stringOrNull("userId") == currentUserId }
         val readAt = currentParticipantRow
             ?.stringOrNull("lastReadAt")
@@ -419,22 +435,12 @@ class AppwriteMessagesRepository(
             .mapNotNull { row -> parseTimestamp(row.stringOrNull("lastReadAt")) }
             .maxOrNull()
 
-        val unreadCount = messageRows.count { row ->
-            val senderId = row.stringOrNull("senderUserId")
-            val createdAt = parseTimestamp(row.stringOrNull("createdAt")) ?: 0L
-            senderId != currentUserId && createdAt > readAt
-        }
-
-        val lastMessage = threadRow.stringOrNull("lastMessageText")
-            ?: messageRows.lastOrNull()?.let { row ->
-                when (row.stringOrNull("messageType")) {
-                    "image" -> "Ha inviato un'immagine"
-                    "video" -> "Ha inviato un video"
-                    "audio" -> "Messaggio vocale"
-                    else -> row.stringOrNull("text") ?: row.stringOrNull("attachmentName") ?: "Nuovo messaggio"
-                }
-            }
-            ?: "Inizia la conversazione"
+        val unreadCount = gateway.countRows(configuration.messagesTableId, buildList {
+            add(gateway.queryEqual("threadId", listOf(threadId)))
+            add("{\"method\":\"notEqual\",\"attribute\":\"senderUserId\",\"values\":[\"$currentUserId\"]}")
+            if (readAt > 0) add(gateway.queryGreaterThan("createdAt", java.time.Instant.ofEpochMilli(readAt).toString()))
+        })
+        val lastMessage = threadRow.stringOrNull("lastMessageText") ?: "Inizia la conversazione"
 
         val lastTimestamp = parseTimestamp(threadRow.stringOrNull("lastMessageAt"))
             ?: parseTimestamp(threadRow.stringOrNull("\$updatedAt"))

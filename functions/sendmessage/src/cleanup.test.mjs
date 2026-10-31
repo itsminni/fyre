@@ -122,11 +122,12 @@ test("cleanup entrypoint refuses HTTP, user executions and missing injected cred
   assert.equal(result.status, 503);
 });
 
-test("scheduled function has no client permission and shares the exact send environment", () => {
+test("scheduled function has no client permission and shares storage configuration with the API", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../../appwrite/functions.json", import.meta.url)));
-  const send = manifest.find(f => f.$id === "sendmessage"), cleanup = manifest.find(f => f.$id === "cleanupattachments");
-  assert.deepEqual(cleanup.execute, []); assert.equal(cleanup.schedule, "0 * * * *");
-  assert.deepEqual(cleanup.vars, send.vars); assert.equal(cleanup.path, send.path);
+  const send = manifest.find(f => f.$id === "fyre-api"), cleanup = manifest.find(f => f.$id === "cleanupattachments");
+  assert.deepEqual(cleanup.execute, []); assert.equal(cleanup.interval, 60); assert.ok(!cleanup.schedule);
+  for (const [key, value] of Object.entries(cleanup.vars)) assert.equal(send.vars[key], value, key); assert.equal(send.path, "../functions");
+  assert.equal(cleanup.path, "../functions/sendmessage");
   assert.equal(cleanup.entrypoint, "src/cleanup.js");
 });
 

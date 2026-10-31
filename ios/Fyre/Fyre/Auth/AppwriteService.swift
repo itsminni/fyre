@@ -1073,6 +1073,24 @@ actor AppwriteService {
             payload["currentUserId"] = currentUserId
         }
 
+        if let apiFunctionId = configuration.apiFunctionId {
+            let operations: [(String?, String)] = [
+                (configuration.registerForEventFunctionId, "registerforevent"),
+                (configuration.cancelEventRegistrationFunctionId, "canceleventregistration"),
+                (configuration.eventAdminFunctionId, "manageeventadmin"),
+                (configuration.createOrGetThreadFunctionId, "createorgetthread"),
+                (configuration.sendMessageFunctionId, "sendmessage"),
+                (configuration.recordSwipeFunctionId, "recordswipe"),
+                (configuration.discoverProfilesFunctionId, "discoverprofiles"),
+                (configuration.manageProfileFunctionId, "manageprofile"),
+                (configuration.manageRelationshipFunctionId, "managerelationship")
+            ]
+            guard let operation = operations.first(where: { $0.0 == functionId })?.1 else {
+                throw AppwriteServiceError.missingConfiguration("APPWRITE_FUNCTION_OPERATION")
+            }
+            return try await executeFunction(functionId: apiFunctionId, body: ["operation": operation, "payload": payload])
+        }
+
         if shouldBypassDirectFunctionInvoke(functionId: functionId) {
             return try await executeFunction(functionId: functionId, body: payload)
         }

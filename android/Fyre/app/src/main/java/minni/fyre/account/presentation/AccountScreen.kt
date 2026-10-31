@@ -1,5 +1,6 @@
 package minni.fyre.account.presentation
 
+import minni.fyre.ui.components.localizedUiMessage
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -180,8 +181,8 @@ fun AccountScreen(
     val appGraph = remember(context.applicationContext) {
         AppGraphProvider.get(context.applicationContext)
     }
-    val userSettingsDataStore = remember(context.applicationContext) {
-        UserSettingsDataStore(context.applicationContext)
+    val userSettingsDataStore = remember(context.applicationContext, currentUser?.appwriteUserId) {
+        UserSettingsDataStore(context.applicationContext, currentUser?.appwriteUserId)
     }
 
     val vm: AccountViewModel = viewModel(
@@ -196,12 +197,19 @@ fun AccountScreen(
     )
     val state by vm.uiState.collectAsState()
 
+    var pendingAvatarCrop by remember(currentUser?.appwriteUserId) { mutableStateOf<android.net.Uri?>(null) }
+    pendingAvatarCrop?.let { uri ->
+        minni.fyre.ui.profile.AvatarCropDialog(uri, onConfirm = { cropped ->
+            vm.updateProfileDraft(vm.uiState.value.profileDraft.copy(avatarUri = cropped))
+            pendingAvatarCrop = null
+        }, onDismiss = { pendingAvatarCrop = null })
+    }
+
     val avatarPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        val draft = vm.uiState.value.profileDraft
-        vm.updateProfileDraft(draft.copy(avatarUri = uri.toString()))
+        pendingAvatarCrop = uri
     }
 
     val galleryPickerLauncher = rememberLauncherForActivityResult(
@@ -680,7 +688,7 @@ private fun EditProfileSection(
 
         state.statusMessage?.let { message ->
             Text(
-                text = message,
+                text = localizedUiMessage(message),
                 style = MaterialTheme.typography.bodySmall,
                 color = if (message.contains("non", ignoreCase = true)) {
                     MaterialTheme.colorScheme.error
@@ -1251,7 +1259,7 @@ private fun DiscoveryPreferencesSection(
             )
         }
         state.statusMessage?.let {
-            Text(text = it, style = MaterialTheme.typography.labelMedium)
+            Text(text = localizedUiMessage(it), style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -1306,7 +1314,7 @@ private fun NotificationsSection(
             }
         }
         state.statusMessage?.let {
-            Text(text = it, style = MaterialTheme.typography.labelMedium)
+            Text(text = localizedUiMessage(it), style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -1436,7 +1444,7 @@ private fun AppearanceSection(
             )
         }
         state.statusMessage?.let {
-            Text(text = it, style = MaterialTheme.typography.labelMedium)
+            Text(text = localizedUiMessage(it), style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -1695,7 +1703,13 @@ private fun EventHistorySection(
                     Text(item.dateText, style = MaterialTheme.typography.bodyMedium)
                     Text(item.place, style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        text = stringResource(R.string.account_event_status, item.status.name),
+                        text = stringResource(R.string.account_event_status, stringResource(when (item.status) {
+                            minni.fyre.account.model.EventHistoryStatus.Registered -> R.string.history_registered
+                            minni.fyre.account.model.EventHistoryStatus.Promoted -> R.string.history_promoted
+                            minni.fyre.account.model.EventHistoryStatus.Waitlisted -> R.string.history_waitlisted
+                            minni.fyre.account.model.EventHistoryStatus.Cancelled -> R.string.history_cancelled
+                            minni.fyre.account.model.EventHistoryStatus.Attended -> R.string.history_attended
+                        })),
                         style = MaterialTheme.typography.labelMedium
                     )
                 }

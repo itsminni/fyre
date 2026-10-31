@@ -36,36 +36,36 @@ data class PersistedUserSettings(
     val notificationSettings: NotificationSettings = NotificationSettings()
 )
 
-class UserSettingsDataStore(private val context: Context) {
+class UserSettingsDataStore(private val context: Context, private val accountId: String? = null) {
 
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val APP_LANGUAGE = stringPreferencesKey("app_language")
         val APP_ICON_VARIANT = stringPreferencesKey("app_icon_variant")
-
-        val DISCOVERY_SHOW_AGE = booleanPreferencesKey("discovery_show_age")
-        val DISCOVERY_SHOW_DISTANCE = booleanPreferencesKey("discovery_show_distance")
-        val DISCOVERY_SHOW_INTENT = booleanPreferencesKey("discovery_show_intent")
-        val DISCOVERY_SHOW_INTERESTS = booleanPreferencesKey("discovery_show_interests")
-        val DISCOVERY_SHOW_INSTAGRAM = booleanPreferencesKey("discovery_show_instagram")
-        val DISCOVERY_SHOW_SPOTIFY = booleanPreferencesKey("discovery_show_spotify")
-
-        val CHAT_BACKGROUND_STYLE = stringPreferencesKey("chat_background_style")
-        val CHAT_BACKGROUND_BRIGHTNESS = intPreferencesKey("chat_background_brightness")
-        val CHAT_BACKGROUND_COLOR_1 = stringPreferencesKey("chat_background_color_1")
-        val CHAT_BACKGROUND_COLOR_2 = stringPreferencesKey("chat_background_color_2")
-        val CHAT_BACKGROUND_COLOR_3 = stringPreferencesKey("chat_background_color_3")
-        val CHAT_OUTGOING_BUBBLE = stringPreferencesKey("chat_outgoing_bubble")
-        val CHAT_INCOMING_BUBBLE = stringPreferencesKey("chat_incoming_bubble")
-        val CHAT_SEND_COLOR_1 = stringPreferencesKey("chat_send_color_1")
-        val CHAT_SEND_COLOR_2 = stringPreferencesKey("chat_send_color_2")
-        val CHAT_SEND_COLOR_3 = stringPreferencesKey("chat_send_color_3")
-
-        val NOTIF_PUSH_ENABLED = booleanPreferencesKey("notif_push_enabled")
-        val NOTIF_MATCH_ENABLED = booleanPreferencesKey("notif_match_enabled")
-        val NOTIF_MESSAGES_ENABLED = booleanPreferencesKey("notif_messages_enabled")
-        val NOTIF_EVENTS_ENABLED = booleanPreferencesKey("notif_events_enabled")
     }
+
+    private val DISCOVERY_SHOW_AGE = booleanPreferencesKey(accountPreferenceKey(accountId, "discovery_show_age"))
+    private val DISCOVERY_SHOW_DISTANCE = booleanPreferencesKey(accountPreferenceKey(accountId, "discovery_show_distance"))
+    private val DISCOVERY_SHOW_INTENT = booleanPreferencesKey(accountPreferenceKey(accountId, "discovery_show_intent"))
+    private val DISCOVERY_SHOW_INTERESTS = booleanPreferencesKey(accountPreferenceKey(accountId, "discovery_show_interests"))
+    private val DISCOVERY_SHOW_INSTAGRAM = booleanPreferencesKey(accountPreferenceKey(accountId, "discovery_show_instagram"))
+    private val DISCOVERY_SHOW_SPOTIFY = booleanPreferencesKey(accountPreferenceKey(accountId, "discovery_show_spotify"))
+
+    private val CHAT_BACKGROUND_STYLE = stringPreferencesKey(accountPreferenceKey(accountId, "chat_background_style"))
+    private val CHAT_BACKGROUND_BRIGHTNESS = intPreferencesKey(accountPreferenceKey(accountId, "chat_background_brightness"))
+    private val CHAT_BACKGROUND_COLOR_1 = stringPreferencesKey(accountPreferenceKey(accountId, "chat_background_color_1"))
+    private val CHAT_BACKGROUND_COLOR_2 = stringPreferencesKey(accountPreferenceKey(accountId, "chat_background_color_2"))
+    private val CHAT_BACKGROUND_COLOR_3 = stringPreferencesKey(accountPreferenceKey(accountId, "chat_background_color_3"))
+    private val CHAT_OUTGOING_BUBBLE = stringPreferencesKey(accountPreferenceKey(accountId, "chat_outgoing_bubble"))
+    private val CHAT_INCOMING_BUBBLE = stringPreferencesKey(accountPreferenceKey(accountId, "chat_incoming_bubble"))
+    private val CHAT_SEND_COLOR_1 = stringPreferencesKey(accountPreferenceKey(accountId, "chat_send_color_1"))
+    private val CHAT_SEND_COLOR_2 = stringPreferencesKey(accountPreferenceKey(accountId, "chat_send_color_2"))
+    private val CHAT_SEND_COLOR_3 = stringPreferencesKey(accountPreferenceKey(accountId, "chat_send_color_3"))
+
+    private val NOTIF_PUSH_ENABLED = booleanPreferencesKey(accountPreferenceKey(accountId, "notif_push_enabled"))
+    private val NOTIF_MATCH_ENABLED = booleanPreferencesKey(accountPreferenceKey(accountId, "notif_match_enabled"))
+    private val NOTIF_MESSAGES_ENABLED = booleanPreferencesKey(accountPreferenceKey(accountId, "notif_messages_enabled"))
+    private val NOTIF_EVENTS_ENABLED = booleanPreferencesKey(accountPreferenceKey(accountId, "notif_events_enabled"))
 
     val settings: Flow<PersistedUserSettings> = context.userSettingsDataStore.data
         .catch { exception ->
@@ -189,4 +189,11 @@ class UserSettingsDataStore(private val context: Context) {
             )
         }.getOrNull()
     }
+}
+
+internal fun accountPreferenceKey(accountId: String?, key: String): String {
+    val account = accountId?.trim()?.takeIf { it.isNotEmpty() } ?: "signed-out"
+    val hash = java.security.MessageDigest.getInstance("SHA-256").digest(account.toByteArray())
+        .joinToString("") { "%02x".format(it) }.take(24)
+    return "account_${hash}_$key"
 }

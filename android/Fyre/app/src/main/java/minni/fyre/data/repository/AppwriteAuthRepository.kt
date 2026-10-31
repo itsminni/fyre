@@ -137,8 +137,8 @@ class AppwriteAuthRepository(
                 null
             }
 
-            val avatarFileId = uploadedAvatarFileId
-                ?: profile.avatarUri?.takeIf(::isRemoteUri)?.let(gateway::storageFileIdFromUrl)
+            val avatarFileId = if (profile.avatarUri.isNullOrBlank()) null else uploadedAvatarFileId
+                ?: profile.avatarUri.takeIf(::isRemoteUri)?.let(gateway::storageFileIdFromUrl)
                 ?: existingAvatarFileId
             val profilePhotoFileIds = resolveProfilePhotoFileIds(profile, existingPhotoFileIds)
             val payload = ManageProfilePayload.upsert(
@@ -290,20 +290,12 @@ class AppwriteAuthRepository(
         profile: UserProfile,
         existingPhotoFileIds: List<String>
     ): List<String> {
-        if (profile.profilePhotoUris.isEmpty()) {
-            return existingPhotoFileIds.take(MaxProfilePhotoCount)
-        }
-
-        return profile.profilePhotoUris
-            .take(MaxProfilePhotoCount)
-            .mapNotNull { uri ->
-                if (isRemoteUri(uri)) {
-                    gateway.storageFileIdFromUrl(uri)
-                        ?: existingPhotoFileIds.firstOrNull { existingFileId -> gateway.avatarUrl(existingFileId) == uri }
-                } else {
-                    gateway.uploadProfilePhotoFromUri(uri)
-                }
-            }
+        return resolveProfilePhotos(
+            desiredUris = profile.profilePhotoUris,
+            resolveRemote = { uri -> gateway.storageFileIdFromUrl(uri)
+                ?: existingPhotoFileIds.firstOrNull { gateway.avatarUrl(it) == uri } },
+            upload = gateway::uploadProfilePhotoFromUri
+        )
     }
 
     private fun isRemoteUri(value: String): Boolean {

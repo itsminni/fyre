@@ -25,6 +25,8 @@ object MainRoute {
     const val ThreadIdArg = "threadId"
     const val MessagesThread = "main_messages/{threadId}"
     const val Events = "main_events"
+    const val EventTarget = "main_events/{eventId}"
+    fun event(eventId: String): String = "main_events/${Uri.encode(eventId)}"
     const val Account = "main_account"
 
     fun messagesThread(threadId: String): String = "main_messages/${Uri.encode(threadId)}"

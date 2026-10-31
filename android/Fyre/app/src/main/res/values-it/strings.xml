@@ -49,7 +49,7 @@
     <string name="auth_register_cta">Registrati</string>
     <string name="auth_register_login_prompt">Hai già un account? Accedi</string>
 
-    <!-- Nota sulla demo e sui dati -->
+    <!-- Demo and data notice -->
     <string name="demo_notice_title">Dimostrazione di un progetto scolastico</string>
     <string name="demo_notice_body_1">Fyre è un progetto scolastico in pre-release. Negli ambienti dimostrativi usa soltanto dati sintetici.</string>
     <string name="demo_notice_body_2">Il client comunica con i servizi Appwrite configurati dal gestore. Prima di offrire un servizio reale, il gestore deve fornire termini e informativa privacy completi.</string>
@@ -295,7 +295,7 @@
     <string name="events_detail_back_to_events_cd">Torna agli eventi</string>
     <string name="events_detail_section_admin">Admin evento</string>
     <string name="events_detail_input_title">Titolo</string>
-    <string name="events_detail_input_date">Data</string>
+    <string name="events_detail_input_date">Data (GG/MM/AAAA HH:mm, Europe/Rome)</string>
     <string name="events_detail_input_place">Luogo</string>
     <string name="events_detail_input_description">Descrizione</string>
     <string name="events_detail_input_deadline">Deadline</string>
@@ -313,4 +313,49 @@
     <string name="events_detail_status_none_short">N</string>
 
     <!-- Home -->
+    <string name="session_verification_failed">Impossibile verificare la sessione. Controllare la connessione e riprovare.</string>
+    <string name="action_retry">Riprova</string>
+    <string name="messages_load_older">Carica messaggi precedenti</string>
+    <string name="messages_retry_send">Riprova invio</string>
+    <string name="avatar_crop_title">Ritaglia la foto profilo</string>
+    <string name="avatar_crop_zoom">Zoom</string>
+    <string name="avatar_crop_horizontal">Posizione orizzontale</string>
+    <string name="avatar_crop_vertical">Posizione verticale</string>
+    <string name="avatar_crop_failed">Impossibile leggere questa immagine. Scegliere una foto valida fino a 10 MiB.</string>
+    <string name="avatar_crop_apply">Usa foto</string>
+    <string name="notification_channel_general">Generali</string>
+    <string name="ui_unknown_error">Errore sconosciuto</string>
+    <string name="ui_display_name_required">Inserisci il tuo nome</string>
+    <string name="ui_display_name_min_length">Il nome deve avere almeno 2 caratteri</string>
+    <string name="ui_email_required">Inserisci l\'email</string>
+    <string name="ui_email_invalid">Formato email non valido</string>
+    <string name="ui_login_password_required">Inserisci la password</string>
+    <string name="ui_register_password_min_length">La password deve avere almeno 8 caratteri</string>
+    <string name="ui_register_password_uppercase">La password deve contenere almeno una lettera maiuscola</string>
+    <string name="ui_register_password_digit">La password deve contenere almeno un numero</string>
+    <string name="ui_password_mismatch">Le password non corrispondono</string>
+    <string name="ui_demo_notice_required">Conferma di aver letto la nota sulla demo e sui dati per continuare</string>
+    <string name="ui_profile_first_name_required">Inserisci il nome</string>
+    <string name="ui_profile_city_required">Inserisci la citta</string>
+    <string name="ui_profile_birth_date_required">Inserisci la data di nascita</string>
+    <string name="ui_profile_invalid_age">Devi avere almeno 18 anni</string>
+    <string name="ui_profile_bio_required">Inserisci una bio</string>
+    <string name="ui_profile_preferred_genders_required">Seleziona almeno una preferenza di genere</string>
+    <string name="ui_profile_session_unavailable">Sessione utente non disponibile</string>
+    <string name="ui_profile_save_error">Errore salvataggio profilo</string>
+    <string name="ui_status_0">Modifiche salvate automaticamente</string>
+    <string name="ui_status_1">Profilo aggiornato su database</string>
+    <string name="ui_status_2">Preferenze salvate sul dispositivo</string>
+    <string name="ui_status_3">Notifiche aggiornate sul dispositivo</string>
+    <string name="ui_status_4">Personalizzazione chat salvata sul dispositivo</string>
+    <string name="ui_status_5">Aspetto aggiornato sul dispositivo</string>
+    <string name="ui_status_6">Invio non riuscito. Riprova.</string>
+    <string name="ui_status_7">Impossibile caricare i messaggi precedenti</string>
+    <string name="ui_status_8">Impossibile aggiornare i profili. Tocca per riprovare.</string>
+    <string name="history_registered">Iscritto</string>
+    <string name="history_promoted">Promosso</string>
+    <string name="history_waitlisted">In attesa</string>
+    <string name="history_cancelled">Annullato</string>
+    <string name="history_attended">Partecipazione confermata</string>
+    <string name="backend_configuration_unavailable">Fyre non è ancora configurato. Configura il backend per continuare.</string>
 </resources>

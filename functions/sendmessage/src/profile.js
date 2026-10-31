@@ -174,7 +174,7 @@ async function makeProfileData(config, body, account, existing) {
 
   data.avatarFileId = nullableIdentifier(body.avatarFileId, "avatarFileId");
   data.photoFileIds = identifierArray(body.photoFileIds, "photoFileIds", MAX_PROFILE_PHOTOS);
-  await secureOwnedFiles(config, account.$id, [data.avatarFileId, ...data.photoFileIds].filter(Boolean));
+  await secureOwnedFiles(config, account.$id, [data.avatarFileId, ...data.photoFileIds].filter(Boolean), existing);
 
   data.profileReady = isProfileReady(data);
   data.presenceUpdatedAt = asNullableISODate(existing?.presenceUpdatedAt);
@@ -194,8 +194,14 @@ function isProfileReady(data) {
   );
 }
 
-async function secureOwnedFiles(config, userId, fileIds) {
+async function secureOwnedFiles(config, userId, fileIds, existing) {
+  const sharedBucket = config.avatarsBucketId === process.env.APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID;
+  const retainedFiles = new Set([existing?.avatarFileId, ...(existing?.photoFileIds ?? [])]);
   for (const fileId of new Set(fileIds)) {
+    // Shared storage must never let a profile reclaim a chat file and change its ACL.
+    if (sharedBucket && (fileId.startsWith("u_") || (!isManagedProfileUpload(fileId) && !retainedFiles.has(fileId)))) {
+      throw httpError("A reserved profile upload is required", 400);
+    }
     if (isManagedProfileUpload(fileId)) {
       await uploads.validateReservation(config, userId, "profile", fileId, userId);
     }
@@ -204,6 +210,7 @@ async function secureOwnedFiles(config, userId, fileIds) {
       "GET",
       `/storage/buckets/${pathSegment(config.avatarsBucketId)}/files/${pathSegment(fileId)}`
     );
+    validateAvatarFile(file);
     const permissions = Array.isArray(file.$permissions) ? file.$permissions : [];
     const updatePermission = `update(\"user:${userId}\")`;
     const deletePermission = `delete(\"user:${userId}\")`;
@@ -227,6 +234,20 @@ async function secureOwnedFiles(config, userId, fileIds) {
         }
       );
     }
+  }
+}
+
+export function validateAvatarFile(file) {
+  const types = {
+    jpg: ["image/jpeg"], jpeg: ["image/jpeg"], png: ["image/png"],
+    webp: ["image/webp"], heic: ["image/heic", "image/heif"]
+  };
+  const extension = typeof file?.name === "string" ? file.name.split(".").at(-1).toLowerCase() : "";
+  const mime = typeof file?.mimeType === "string" ? file.mimeType.toLowerCase() : "";
+  if (!Object.hasOwn(types, extension) || !types[extension].includes(mime)
+      || !Number.isInteger(file?.sizeOriginal) || file.sizeOriginal < 1 || file.sizeOriginal > 10 * 1024 * 1024
+      || (file.chunksTotal != null && file.chunksUploaded !== file.chunksTotal)) {
+    throw httpError("Avatar must be a complete image of at most 10 MiB", 400);
   }
 }
 

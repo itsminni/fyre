@@ -151,6 +151,9 @@ export default async ({ req, res, error }) => {
       }
     }
 
+    if (attachmentFileId && config.avatarsBucketId === config.chatAttachmentsBucketId && !isManagedAttachment(attachmentFileId)) {
+      return res.json({ message: "A reserved chat upload is required" }, 400);
+    }
     if (isManagedAttachment(attachmentFileId)) {
       await attachments.validateReservation(config, currentUserId, threadId, attachmentFileId, messageId);
     }

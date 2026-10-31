@@ -1,5 +1,6 @@
 package minni.fyre.messages.presentation
 
+import minni.fyre.core.lifecycle.ForegroundEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -48,7 +49,10 @@ fun MessagesScreen(
     val threads by viewModel.threads.collectAsState()
     val selectedThreadId by viewModel.selectedThreadId.collectAsState()
     val messages by viewModel.messages.collectAsState()
+    val uploadProgress by viewModel.uploadProgress.collectAsState(initial = emptyMap())
     val draft by viewModel.draft.collectAsState()
+    val hasOlderMessages by viewModel.hasOlderMessages.collectAsState()
+    val isLoadingOlder by viewModel.isLoadingOlder.collectAsState()
     val replyToMessageId by viewModel.replyToMessageId.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
@@ -112,7 +116,11 @@ fun MessagesScreen(
             body = latestUnreadThread?.let {
                 resources.getString(R.string.messages_notification_body, it.displayName, it.lastMessage)
             } ?: resources.getString(R.string.messages_notification_fallback),
-            channelId = NotificationChannels.MESSAGES
+            channelId = NotificationChannels.MESSAGES,
+            destination = appGraph.appwriteConfiguration?.let { latestUnreadThread?.let { thread ->
+                minni.fyre.core.notifications.NotificationDestination(
+                    appGraph.authRepository.restoreSession().getOrNull()?.appwriteUserId.orEmpty(), "chat", thread.id)
+            } }
         )
         lastNotifiedUnreadCount = unreadTotal
     }
@@ -153,6 +161,12 @@ fun MessagesScreen(
         draft = draft,
         replyToMessageId = replyToMessageId,
         errorMessage = errorMessage,
+        hasOlderMessages = hasOlderMessages,
+        isLoadingOlder = isLoadingOlder,
+        onLoadOlder = viewModel::loadOlderMessages,
+        onRetryMessage = viewModel::retryMessage,
+        uploadProgress = uploadProgress,
+        onCancelUpload = viewModel::cancelAttachmentUpload,
         onDraftChange = viewModel::updateDraft,
         onSend = viewModel::sendCurrentMessage,
         onReply = { messageId -> viewModel.setReplyToMessage(messageId) },
@@ -177,11 +191,9 @@ fun MessagesScreen(
 
 @Composable
 private fun MessagesPresenceEffect(viewModel: MessagesViewModel) {
-    DisposableEffect(viewModel) {
+    ForegroundEffect(viewModel) {
         viewModel.markPresence(isOnline = true)
-        onDispose {
-            viewModel.markPresence(isOnline = false)
-        }
+        try { awaitCancellation() } finally { viewModel.markPresence(isOnline = false) }
     }
 }
 
@@ -193,17 +205,15 @@ private fun MessagesRealtimeEffect(
 ) {
     val context = LocalContext.current
 
-    LaunchedEffect(appGraph, selectedThreadId) {
-        val configuration = appGraph.appwriteConfiguration ?: return@LaunchedEffect
+    ForegroundEffect(appGraph, selectedThreadId) {
+        val configuration = appGraph.appwriteConfiguration ?: return@ForegroundEffect
         val effectScope = this
-        val subscription = AppwriteRealtimeService(
-            context = context.applicationContext,
-            configuration = configuration
-        ).makeInboxSubscription(
+        val subscription = appGraph.realtimeService!!.makeInboxSubscription(
             onEvent = { event ->
                 val activeThreadId = selectedThreadId
                 val eventThreadId = event.messageThreadId()
                 when {
+                    event.isReconnect -> effectScope.launch { if (activeThreadId == null) viewModel.refreshInboxThreads() else viewModel.refreshSelectedThread() }
                     activeThreadId != null && eventThreadId == activeThreadId -> {
                         effectScope.launch {
                             delay(RealtimeRefreshDebounceMs)
@@ -235,8 +245,8 @@ private fun ActiveThreadPollingEffect(
     selectedThreadId: String?,
     viewModel: MessagesViewModel
 ) {
-    LaunchedEffect(selectedThreadId) {
-        val threadId = selectedThreadId ?: return@LaunchedEffect
+    ForegroundEffect(selectedThreadId) {
+        val threadId = selectedThreadId ?: return@ForegroundEffect
         while (true) {
             delay(ActiveThreadPollingIntervalMs)
             viewModel.refreshSelectedThread()
@@ -249,8 +259,8 @@ private fun InboxPollingEffect(
     selectedThreadId: String?,
     viewModel: MessagesViewModel
 ) {
-    LaunchedEffect(selectedThreadId) {
-        if (selectedThreadId != null) return@LaunchedEffect
+    ForegroundEffect(selectedThreadId) {
+        if (selectedThreadId != null) return@ForegroundEffect
         while (true) {
             delay(InboxPollingIntervalMs)
             viewModel.refreshInboxThreads()
@@ -284,5 +294,5 @@ private fun appwriteImageHeaders(
 }
 
 private const val RealtimeRefreshDebounceMs = 180L
-private const val ActiveThreadPollingIntervalMs = 2_500L
-private const val InboxPollingIntervalMs = 6_000L
+private const val ActiveThreadPollingIntervalMs = 30_000L
+private const val InboxPollingIntervalMs = 60_000L

@@ -38,9 +38,9 @@ enum class EventSyncStatus {
 }
 
 data class LiveMetrics(
-    val viewersOnline: Int,
-    val checkIns: Int,
-    val chatPerMinute: Int
+    val viewersOnline: Int?,
+    val checkIns: Int?,
+    val chatPerMinute: Int?
 )
 
 data class EventItem(
@@ -68,5 +68,6 @@ data class EventItem(
     val syncStatus: EventSyncStatus = EventSyncStatus.LocalOnly,
     val startsAt: Instant? = null,
     val registrationClosesAt: Instant? = null,
-    val cancellationClosesAt: Instant? = null
+    val cancellationClosesAt: Instant? = null,
+    val ownRegistrationStatus: String? = null
 )

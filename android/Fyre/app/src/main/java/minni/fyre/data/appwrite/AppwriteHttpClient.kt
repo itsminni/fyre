@@ -5,6 +5,10 @@ import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -73,30 +77,34 @@ class AppwriteHttpClient(
         fileName: String,
         mimeType: String,
         bytes: ByteArray,
-        permissions: List<String> = emptyList()
+        permissions: List<String> = emptyList(),
+        onProgress: (Float) -> Unit = {},
+        resumeExisting: Boolean = false
     ): JsonObject {
-        return withContext(Dispatchers.IO) {
-            val multipartBuilder = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("fileId", fileId)
-                .addFormDataPart(
-                    "file",
-                    fileName,
-                    bytes.toRequestBody(mimeType.toMediaType())
-                )
-
-            for (permission in permissions) {
-                multipartBuilder.addFormDataPart("permissions[]", permission)
+        val existing = if (resumeExisting) {
+            try { get("/storage/buckets/$bucketId/files/$fileId") }
+            catch (api: AppwriteApiException) { if (api.statusCode == 404) null else throw api }
+        } else null
+        val initialOffset = existing?.let {
+            check(it.intOrNull("sizeOriginal") == bytes.size && it.stringOrNull("name") == fileName) {
+                "Il file prenotato non corrisponde a questo invio"
             }
-
+            minOf(bytes.size, (it.intOrNull("chunksUploaded") ?: 0) * APPWRITE_CHUNK_BYTES)
+        } ?: 0
+        return uploadInChunks(fileId, bytes.size, onProgress, initialOffset, existing ?: JsonObject()) { chunk, uploadId ->
+            val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("fileId", fileId)
+                .addFormDataPart("file", fileName, bytes.toRequestBody(mimeType.toMediaType(), chunk.offset, chunk.length))
+            permissions.forEach { multipart.addFormDataPart("permissions[]", it) }
             val request = Request.Builder()
                 .url("${normalizedEndpoint()}/storage/buckets/$bucketId/files")
                 .header("X-Appwrite-Project", configuration.projectId)
                 .header("X-Appwrite-Response-Format", RESPONSE_FORMAT)
-                .post(multipartBuilder.build())
-                .build()
-
-            executeRequest(request, expectedStatusCodes = setOf(201))
+                .apply {
+                    if (bytes.size > APPWRITE_CHUNK_BYTES) header("Content-Range", chunk.contentRange)
+                    uploadId?.let { header("X-Appwrite-ID", it) }
+                }.post(multipart.build()).build()
+            executeRequest(request, setOf(201))
         }
     }
 
@@ -110,7 +118,7 @@ class AppwriteHttpClient(
                 .build()
 
             try {
-                client.newCall(request).execute().use { response ->
+                awaitResponse(client.newCall(request)).use { response ->
                     if (!response.isSuccessful) {
                         val payload = parseJsonPayload(response.body?.string().orEmpty())
                         throw AppwriteApiException(
@@ -144,11 +152,9 @@ class AppwriteHttpClient(
             )
 
         var lastExecution = execution
-        repeat(MAX_EXECUTION_POLLS) { pollIndex ->
+        for (pollIndex in 0 until MAX_EXECUTION_POLLS) {
             val status = lastExecution.stringOrNull("status")?.lowercase()
-            if (status != "processing") {
-                return@repeat
-            }
+            if (status !in setOf("processing", "waiting")) break
             if (pollIndex < MAX_EXECUTION_POLLS - 1) {
                 delay(EXECUTION_POLL_DELAY_MS)
                 lastExecution = get("/functions/$functionId/executions/$executionId")
@@ -248,12 +254,12 @@ class AppwriteHttpClient(
         }
     }
 
-    private fun executeRequest(
+    private suspend fun executeRequest(
         request: Request,
         expectedStatusCodes: Set<Int>
-    ): JsonObject {
+    ): JsonObject = withContext(Dispatchers.IO) {
         try {
-            client.newCall(request).execute().use { response ->
+            awaitResponse(client.newCall(request)).use { response ->
                 val payload = parseJsonPayload(response.body?.string().orEmpty())
                 val ok = if (expectedStatusCodes.isEmpty()) {
                     response.code in 200..299
@@ -271,11 +277,24 @@ class AppwriteHttpClient(
                     )
                 }
 
-                return payload
+                return@withContext payload
             }
         } catch (io: IOException) {
             throw AppwriteNetworkException(io)
         }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private suspend fun awaitResponse(call: Call): Response = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWith(Result.failure(e))
+            }
+            override fun onResponse(call: Call, response: Response) {
+                continuation.resume(response) { response.close() }
+            }
+        })
     }
 
     private fun decodeExecutionResponse(execution: JsonObject): JsonObject {

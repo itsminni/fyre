@@ -133,9 +133,9 @@ object MockEventsRepository {
             if (eventId != null && record.id != eventId) continue
 
             record.liveMetrics = record.liveMetrics.copy(
-                viewersOnline = (record.liveMetrics.viewersOnline + 2).coerceAtMost(9999),
-                checkIns = (record.liveMetrics.checkIns + 1).coerceAtMost(record.capacity),
-                chatPerMinute = (record.liveMetrics.chatPerMinute + 1).coerceAtMost(999)
+                viewersOnline = ((record.liveMetrics.viewersOnline ?: 0) + 2).coerceAtMost(9999),
+                checkIns = ((record.liveMetrics.checkIns ?: 0) + 1).coerceAtMost(record.capacity),
+                chatPerMinute = ((record.liveMetrics.chatPerMinute ?: 0) + 1).coerceAtMost(999)
             )
         }
     }

@@ -1,5 +1,6 @@
 package minni.fyre.ui.navigation
 
+import minni.fyre.core.lifecycle.ForegroundEffect
 import android.Manifest
 import android.content.Context
 import android.os.Build
@@ -91,13 +92,15 @@ private data class MainTab(
 @Composable
 fun AuthenticatedShell(
     authViewModel: AuthViewModel,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    notificationDestination: minni.fyre.core.notifications.NotificationDestination? = null,
+    onNotificationConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     val currentUser by authViewModel.currentUser.collectAsState()
     val context = LocalContext.current
-    val settingsDataStore = remember(context.applicationContext) {
-        UserSettingsDataStore(context.applicationContext)
+    val settingsDataStore = remember(context.applicationContext, currentUser?.appwriteUserId) {
+        UserSettingsDataStore(context.applicationContext, currentUser?.appwriteUserId)
     }
     val appGraph = remember(context.applicationContext) {
         AppGraphProvider.get(context.applicationContext)
@@ -130,6 +133,21 @@ fun AuthenticatedShell(
         navController.navigate(MainRoute.messagesThread(threadId)) {
             launchSingleTop = true
         }
+    }
+
+    LaunchedEffect(notificationDestination, currentUser?.appwriteUserId) {
+        val target = notificationDestination ?: return@LaunchedEffect
+        val accountId = currentUser?.appwriteUserId ?: return@LaunchedEffect
+        if (target.isFor(accountId)) {
+            when (target.kind) {
+                "chat" -> appGraph.messagesRepository.ensureThread(target.resourceId).onSuccess { openThread(it.id) }
+                "event" -> appGraph.eventsRepository.getEventsForUser(accountId, currentUser?.displayName.orEmpty())
+                    .onSuccess { events -> if (events.any { it.id == target.resourceId }) {
+                        navController.navigate(MainRoute.event(target.resourceId)) { launchSingleTop = true }
+                    } }
+            }
+        }
+        onNotificationConsumed()
     }
 
     MatchRealtimeEffect(
@@ -264,6 +282,14 @@ fun AuthenticatedShell(
                         notificationGateway = notificationGateway
                     )
                 }
+                composable(MainRoute.EventTarget, arguments = listOf(navArgument("eventId") { type = NavType.StringType })) { entry ->
+                    EventsScreen(currentUserId = currentUser?.appwriteUserId,
+                        currentUserDisplayName = currentUser?.displayName,
+                        notificationSettings = persistedSettings.notificationSettings,
+                        notificationGateway = notificationGateway,
+                        openEventId = entry.arguments?.getString("eventId"))
+                }
+
                 composable(MainRoute.Account) {
                     AccountScreen(
                         onLogout = onLogout,
@@ -319,21 +345,21 @@ private fun MatchRealtimeEffect(
     val context = LocalContext.current
     val notificationSeenStore = remember { RealtimeNotificationSeenStore() }
 
-    LaunchedEffect(
+    ForegroundEffect(
         currentUserId,
         appGraph,
         notificationSettings.pushEnabled,
         notificationSettings.matchNotifications
     ) {
         val userId = currentUserId?.trim().takeUnless { it.isNullOrBlank() }
-            ?: return@LaunchedEffect
-        val configuration = appGraph.appwriteConfiguration ?: return@LaunchedEffect
+            ?: return@ForegroundEffect
+        val configuration = appGraph.appwriteConfiguration ?: return@ForegroundEffect
         val knownThreadIds = mutableSetOf<String>()
         appGraph.messagesRepository.getThreads()
             .onSuccess { threads -> knownThreadIds += threads.map { it.id } }
 
         val effectScope = this
-        val realtimeService = AppwriteRealtimeService(context.applicationContext, configuration)
+        val realtimeService = appGraph.realtimeService ?: return@ForegroundEffect
         val subscription = realtimeService.makeNotificationSubscription(
             onEvent = onEvent@{ event ->
                 val threadId = realtimeMatchThreadId(event, userId)
@@ -414,7 +440,8 @@ private suspend fun handleRealtimeMatchedThread(
             body = thread?.matchDisplayNameOrNull()?.let { name ->
                 context.getString(R.string.discover_match_notification_body, name)
             } ?: context.getString(R.string.discover_match_notification_fallback),
-            channelId = NotificationChannels.MATCHES
+            channelId = NotificationChannels.MATCHES,
+            destination = minni.fyre.core.notifications.NotificationDestination(currentUserId, "chat", threadId)
         )
     }
 

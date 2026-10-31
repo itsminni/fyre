@@ -59,7 +59,7 @@ def api(*args: str) -> Record:
     if executable is None:
         message = "Appwrite CLI non disponibile nel PATH."
         raise RuntimeError(message)
-    # Commands and flags are constructed here; no shell or user command is accepted.
+    # Commands and flags are constructed here.
     result = subprocess.run(  # noqa: S603
         [executable, *args, "--raw"],
         cwd=ROOT,
@@ -223,11 +223,16 @@ def inventory(env: Mapping[str, str]) -> InventoryReport:
         "chat": env["APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID"],
         "profile": env["APPWRITE_AVATARS_BUCKET_ID"],
     }
+    if buckets["chat"] == buckets["profile"]:
+        buckets = {"shared": buckets["chat"]}
     files = {
         kind: list(pages(["storage", "list-files", "--bucket-id", bucket], "files"))
         for kind, bucket in buckets.items()
     }
     second = referenced_files(env)
+    if "shared" in buckets:
+        references["shared"] = references["chat"] | references["profile"]
+        second["shared"] = second["chat"] | second["profile"]
     report: InventoryReport = {
         "createdAt": datetime.now(UTC).isoformat(),
         "deletionAuthorized": False,

@@ -90,11 +90,11 @@ fun EventDetailScreen(
     onAdminSetParticipantStatus: (participant: EventParticipant, status: RegistrationStatus) -> Boolean
 ) {
     var editTitle by remember(event.id) { mutableStateOf(event.title) }
-    var editDate by remember(event.id) { mutableStateOf(event.dateText) }
+    var editDate by remember(event.id) { mutableStateOf(event.startsAt?.let { java.time.format.DateTimeFormatter.ofPattern("dd/MM/uuuu HH:mm").withZone(java.time.ZoneId.of("Europe/Rome")).format(it) } ?: event.dateText) }
     var editPlace by remember(event.id) { mutableStateOf(event.place) }
     var editDescription by remember(event.id) { mutableStateOf(event.description) }
-    var editDeadline by remember(event.id) { mutableStateOf(event.deadlineText) }
-    var editCancellationDeadline by remember(event.id) { mutableStateOf(event.cancellationDeadlineText) }
+    var editDeadline by remember(event.id) { mutableStateOf(event.registrationClosesAt?.let { java.time.format.DateTimeFormatter.ofPattern("dd/MM/uuuu HH:mm").withZone(java.time.ZoneId.of("Europe/Rome")).format(it) } ?: event.deadlineText) }
+    var editCancellationDeadline by remember(event.id) { mutableStateOf(event.cancellationClosesAt?.let { java.time.format.DateTimeFormatter.ofPattern("dd/MM/uuuu HH:mm").withZone(java.time.ZoneId.of("Europe/Rome")).format(it) } ?: event.cancellationDeadlineText) }
     var editCapacity by remember(event.id) { mutableStateOf(event.capacity.toString()) }
     var editMaleLimit by remember(event.id) { mutableStateOf(event.maleLimit.toString()) }
     var editFemaleLimit by remember(event.id) { mutableStateOf(event.femaleLimit.toString()) }

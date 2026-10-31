@@ -11,6 +11,7 @@ const resources = {
 };
 const environment: Record<string, string> = {
   VITE_APPWRITE_ENDPOINT: 'https://appwrite.test/v1', VITE_APPWRITE_PROJECT_ID: 'e2e',
+  VITE_APPWRITE_API_FUNCTION_ID: 'fyre-api', VITE_APPWRITE_STORAGE_BUCKET_ID: 'attachments',
   VITE_PHOTON_BASE_URL: 'https://geocoder.test',
   ...Object.fromEntries(Object.entries(resources).map(([name, value]) => [`VITE_APPWRITE_${name}_ID`, value])),
   ...Object.fromEntries(['CREATE_OR_GET_THREAD', 'SEND_MESSAGE', 'RECORD_SWIPE', 'DISCOVER_PROFILES', 'EVENT_ADMIN']

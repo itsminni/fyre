@@ -1,5 +1,6 @@
 package minni.fyre.events.presentation
 
+import minni.fyre.ui.components.localizedUiMessage
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -56,7 +57,8 @@ fun EventsScreen(
     currentUserEmail: String? = null,
     currentUserDisplayName: String? = null,
     notificationSettings: NotificationSettings = NotificationSettings(),
-    notificationGateway: NotificationGateway? = null
+    notificationGateway: NotificationGateway? = null,
+    openEventId: String? = null
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -116,6 +118,10 @@ fun EventsScreen(
         }
     }
 
+    LaunchedEffect(openEventId, events) {
+        if (openEventId != null && events.any { it.id == openEventId }) viewModel.openEvent(openEventId)
+    }
+
     LaunchedEffect(selectedEventId) {
         if (selectedEventId != null) {
             viewModel.refreshSelectedEvent()
@@ -164,7 +170,8 @@ fun EventsScreen(
                                 R.string.events_reminder_set_body,
                                 updatedSelected?.title.orEmpty()
                             ),
-                            channelId = NotificationChannels.EVENTS
+                            channelId = NotificationChannels.EVENTS,
+                            destination = minni.fyre.core.notifications.NotificationDestination(userId, "event", updatedSelected?.id.orEmpty())
                         )
                     }
                 }
@@ -247,7 +254,7 @@ private fun EventsListScreen(
                 contentColor = MaterialTheme.colorScheme.onErrorContainer
             ) {
                 Text(
-                    text = errorMessage,
+                    text = localizedUiMessage(errorMessage),
                     modifier = Modifier.padding(14.dp),
                     style = MaterialTheme.typography.bodyMedium
                 )

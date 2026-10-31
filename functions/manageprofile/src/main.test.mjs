@@ -9,8 +9,24 @@ const ENV = {
   APPWRITE_DATABASE_ID: "database",
   APPWRITE_PROFILES_TABLE_ID: "profiles",
   APPWRITE_AVATARS_BUCKET_ID: "avatars",
+  APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID: "chat",
   APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID: "uploads"
 };
+
+test("shared storage rejects chat uploads and unreserved new profile files before changing any ACL", async () => {
+  await withEnvironment(async () => {
+    process.env.APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID = "avatars";
+    globalThis.fetch = async input => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/account") return jsonResponse(200, { $id: "user-a", email: "owner@example.com" });
+      if (path.endsWith("/profiles/rows/user-a")) return jsonResponse(200, { $id: "user-a", userId: "user-a" });
+      throw new Error("Unexpected file access or mutation");
+    };
+    for (const fileId of ["u_" + "a".repeat(32), "unreserved-avatar"]) {
+      assert.equal((await invoke({ avatarFileId: fileId })).status, 400);
+    }
+  });
+});
 
 test("upsert binds profile identity to the verified account and grants read-only owner access", async () => {
   await withEnvironment(async () => {
@@ -170,7 +186,7 @@ test("upsert refuses avatar files not owned by the authenticated user", async ()
         return jsonResponse(200, { $id: "user-a", userId: "user-a" });
       }
       if (method === "GET" && url.pathname.endsWith("/storage/buckets/avatars/files/avatar-1")) {
-        return jsonResponse(200, { $id: "avatar-1", $permissions: ['read("users")'] });
+        return jsonResponse(200, { $id: "avatar-1", name: "avatar.jpg", mimeType: "image/jpeg", sizeOriginal: 1024, $permissions: ['read("users")'] });
       }
       throw new Error(`Unexpected request: ${method} ${url.pathname}`);
     };
@@ -196,6 +212,7 @@ test("upsert replaces unsafe avatar permissions with an owner-only ACL", async (
         return jsonResponse(200, {
           $id: "avatar-1",
           name: "avatar.jpg",
+          mimeType: "image/jpeg", sizeOriginal: 1024,
           $permissions: [
             'read("any")',
             'update("user:user-a")',

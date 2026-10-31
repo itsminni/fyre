@@ -1,5 +1,6 @@
 package minni.fyre.ui.profile
 
+import minni.fyre.ui.components.localizedUiMessage
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -157,10 +158,15 @@ fun ProfileCompletionScreen(
         }
     }
 
+    var pendingAvatarCrop by remember { mutableStateOf<android.net.Uri?>(null) }
+    pendingAvatarCrop?.let { uri ->
+        AvatarCropDialog(uri, onConfirm = { cropped -> viewModel.updateProfileAvatarUri(cropped); pendingAvatarCrop = null },
+            onDismiss = { pendingAvatarCrop = null })
+    }
     val avatarPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
-        viewModel.updateProfileAvatarUri(uri?.toString())
+        if (uri != null) pendingAvatarCrop = uri
     }
 
     val galleryPickerLauncher = rememberLauncherForActivityResult(
@@ -404,7 +410,7 @@ fun ProfileCompletionScreen(
         if (profileError != null) {
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = profileError.orEmpty(),
+                text = localizedUiMessage(profileError.orEmpty()),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium
             )

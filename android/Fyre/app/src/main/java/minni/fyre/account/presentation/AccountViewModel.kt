@@ -313,13 +313,7 @@ class AccountViewModel(
             )
             result.onSuccess { loadedEvents ->
                 val history = loadedEvents.mapNotNull { event ->
-                    val status = when (event.userState) {
-                        EventUserState.Registered -> EventHistoryStatus.Registered
-                        EventUserState.Promoted -> EventHistoryStatus.Promoted
-                        EventUserState.Waitlist -> EventHistoryStatus.Waitlisted
-                        EventUserState.NotRegistered,
-                        EventUserState.Closed -> return@mapNotNull null
-                    }
+                    val status = eventHistoryStatus(event) ?: return@mapNotNull null
                     EventHistoryItem(
                         id = event.id,
                         title = event.title,
@@ -331,7 +325,6 @@ class AccountViewModel(
                 _uiState.value = _uiState.value.copy(eventHistory = history)
             }.onFailure { throwable ->
                 _uiState.value = _uiState.value.copy(
-                    eventHistory = emptyList(),
                     statusMessage = throwable.message ?: "Impossibile caricare gli eventi dal database"
                 )
             }
@@ -365,3 +358,18 @@ class AccountViewModelFactory(
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
     }
 }
+
+internal fun eventHistoryStatus(event: minni.fyre.events.model.EventItem): EventHistoryStatus? =
+    when (event.ownRegistrationStatus?.lowercase()) {
+        "cancelled", "canceled" -> EventHistoryStatus.Cancelled
+        "attended", "checkedin", "checked_in" -> EventHistoryStatus.Attended
+        "confirmed", "registered" -> EventHistoryStatus.Registered
+        "promoted" -> EventHistoryStatus.Promoted
+        "waitlisted", "waitlist" -> EventHistoryStatus.Waitlisted
+        else -> when (event.userState) {
+            EventUserState.Registered -> EventHistoryStatus.Registered
+            EventUserState.Promoted -> EventHistoryStatus.Promoted
+            EventUserState.Waitlist -> EventHistoryStatus.Waitlisted
+            else -> null
+        }
+    }

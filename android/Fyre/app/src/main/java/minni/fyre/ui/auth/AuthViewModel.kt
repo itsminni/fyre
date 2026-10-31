@@ -512,6 +512,7 @@ fun clearFields() {
     }
 
 suspend fun restoreSession(): Boolean {
+        _globalError.value = null
         val result = repository.restoreSession()
         val user = result.getOrElse { throwable ->
             _globalError.value = throwable.message ?: ValidationMessages.UnknownError

@@ -10,4 +10,5 @@ ignore = ["D203", "D213", "CPY001", "COM812"]
 "scripts/*.py" = ["INP001"]
 # CLI output is intentional; tests use the standard-library unittest framework.
 "scripts/upload-maintenance.py" = ["T201"]
+"scripts/consolidate-appwrite-storage.py" = ["T201"]
 "scripts/*_test.py" = ["PT009", "PT027"]

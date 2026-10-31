@@ -27,11 +27,15 @@ class AppwriteGateway(
     private val contentResolver: ContentResolver = appContext.contentResolver
     private val client = AppwriteHttpClient(appContext, configuration)
 
+    @Volatile var lastKnownAccountId: String? = null
+        private set
+
     suspend fun fetchCurrentAccount(required: Boolean): JsonObject? {
         return try {
-            client.get("/account")
+            client.get("/account").also { lastKnownAccountId = it.stringOrNull("\$id") }
         } catch (api: AppwriteApiException) {
             if (api.isUnauthorized && !required) {
+                lastKnownAccountId = null
                 null
             } else {
                 throw api
@@ -73,7 +77,7 @@ class AppwriteGateway(
                 throw api
             }
         } finally {
-            client.clearSession()
+            clearSession()
         }
     }
 
@@ -81,6 +85,20 @@ class AppwriteGateway(
         val configuredFunctionId = functionId.trim()
         if (configuredFunctionId.isBlank()) {
             throw AppwriteConfigurationException("ID funzione Appwrite non configurato")
+        }
+        configuration.apiFunctionId?.let { apiId ->
+            val operation = mapOf(
+                configuration.registerForEventFunctionId to "registerforevent",
+                configuration.cancelEventRegistrationFunctionId to "canceleventregistration",
+                configuration.eventAdminFunctionId to "manageeventadmin",
+                configuration.createOrGetThreadFunctionId to "createorgetthread",
+                configuration.sendMessageFunctionId to "sendmessage",
+                configuration.recordSwipeFunctionId to "recordswipe",
+                configuration.discoverProfilesFunctionId to "discoverprofiles",
+                configuration.manageProfileFunctionId to "manageprofile",
+                configuration.manageRelationshipFunctionId to "managerelationship"
+            )[configuredFunctionId] ?: throw AppwriteConfigurationException("Operazione Appwrite sconosciuta")
+            return client.executeFunction(apiId, mapOf("operation" to operation, "payload" to payload))
         }
         return client.executeFunction(configuredFunctionId, payload)
     }
@@ -186,7 +204,10 @@ class AppwriteGateway(
 
         val mimeType = resolveMimeType(source, fallback = "image/jpeg")
         val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "jpg"
-        val fileId = randomIdentifier()
+        val fileId = if (configuration.apiFunctionId != null) {
+            executeFunction(configuration.manageProfileFunctionId, mapOf("action" to "reserveUpload"))
+                .stringOrNull("fileId") ?: throw AppwriteConfigurationException("Prenotazione foto non disponibile")
+        } else randomIdentifier()
 
         client.uploadFile(
             bucketId = configuration.avatarsBucketId,
@@ -204,7 +225,9 @@ class AppwriteGateway(
         threadId: String,
         displayName: String,
         localUri: String,
-        mimeType: String
+        mimeType: String,
+        operationId: String = randomIdentifier(),
+        onProgress: (Float) -> Unit = {}
     ): UploadedFile {
         val bucketId = configuration.chatAttachmentsBucketId
             ?: throw AppwriteConfigurationException("Bucket allegati chat non configurato")
@@ -215,23 +238,35 @@ class AppwriteGateway(
         val permissions = ownerOnlyFilePermissions(currentUserId)
 
         val bytes = readBinaryPayload(localUri, MAX_CHAT_UPLOAD_BYTES)
-        val fileId = randomIdentifier()
+        val fileId = if (configuration.apiFunctionId != null) {
+            executeFunction(configuration.sendMessageFunctionId, mapOf(
+                "action" to "reserveAttachment", "threadId" to threadId, "operationId" to operationId
+            )).stringOrNull("fileId") ?: throw AppwriteConfigurationException("Prenotazione allegato non disponibile")
+        } else randomIdentifier()
         val safeName = displayName.ifBlank { "attachment_${System.currentTimeMillis()}" }
 
-        client.uploadFile(
-            bucketId = bucketId,
-            fileId = fileId,
-            fileName = safeName,
-            mimeType = mimeType,
-            bytes = bytes,
-            permissions = permissions
-        )
+        try {
+            client.uploadFile(
+                bucketId = bucketId, fileId = fileId, fileName = safeName,
+                mimeType = mimeType, bytes = bytes, permissions = permissions,
+                onProgress = onProgress, resumeExisting = true
+            )
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            // The server decides whether a reserved file is already attached to a message.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                runCatching { executeFunction(configuration.sendMessageFunctionId, mapOf(
+                    "action" to "reconcileAttachment", "threadId" to threadId, "attachmentFileId" to fileId
+                )) }
+            }
+            throw cancelled
+        }
 
         return UploadedFile(
             fileId = fileId,
             fileName = safeName,
             mimeType = mimeType,
-            sizeBytes = bytes.size
+            sizeBytes = bytes.size,
+            operationId = operationId
         )
     }
 
@@ -311,6 +346,14 @@ class AppwriteGateway(
             "}"
     }
 
+    fun queryOrderDesc(field: String): String = "{\"method\":\"orderDesc\",\"attribute\":\"$field\"}"
+
+    fun queryGreaterThan(field: String, value: String): String =
+        "{\"method\":\"greaterThan\",\"attribute\":\"$field\",\"values\":${toJsonArray(listOf(value))}}"
+
+    suspend fun countRows(tableId: String, queries: List<String>): Int =
+        client.get(tableRowsPath(tableId), queries + queryLimit(1)).intOrNull("total") ?: 0
+
     fun queryOrderAsc(field: String): String {
         return "{" +
             "\"method\":\"orderAsc\"," +
@@ -361,6 +404,7 @@ class AppwriteGateway(
     fun randomIdentifier(): String = UUID.randomUUID().toString().replace("-", "")
 
     fun clearSession() {
+        lastKnownAccountId = null
         client.clearSession()
     }
 
@@ -458,7 +502,8 @@ data class UploadedFile(
     val fileId: String,
     val fileName: String,
     val mimeType: String,
-    val sizeBytes: Int
+    val sizeBytes: Int,
+    val operationId: String? = null
 )
 
 internal fun JsonObject.arrayOrEmpty(key: String): JsonArray {

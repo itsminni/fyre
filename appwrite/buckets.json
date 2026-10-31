@@ -5,27 +5,7 @@
       "create(\"users\")"
     ],
     "fileSecurity": true,
-    "name": "Profile photos",
-    "enabled": true,
-    "maximumFileSize": 10485760,
-    "allowedFileExtensions": [
-      "jpg",
-      "jpeg",
-      "png",
-      "webp",
-      "heic"
-    ],
-    "compression": "none",
-    "encryption": true,
-    "antivirus": true
-  },
-  {
-    "$id": "chat-attachments",
-    "$permissions": [
-      "create(\"users\")"
-    ],
-    "fileSecurity": true,
-    "name": "Chat attachments",
+    "name": "Fyre media",
     "enabled": true,
     "maximumFileSize": 20971520,
     "allowedFileExtensions": [

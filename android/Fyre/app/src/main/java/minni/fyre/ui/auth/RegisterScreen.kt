@@ -1,5 +1,6 @@
 package minni.fyre.ui.auth
 
+import minni.fyre.ui.components.localizedUiMessage
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -233,7 +234,7 @@ Card(
                     ) {
                         if (globalError != null) {
                             Text(
-                                text = globalError ?: "",
+                                text = localizedUiMessage(globalError.orEmpty()),
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodyMedium,
                                 textAlign = TextAlign.Center,

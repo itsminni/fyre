@@ -2,6 +2,8 @@
 
 The functions centralize rules that must not be trusted to the three clients.
 
+**Two Appwrite Functions** are deployed: `fyre-api` dispatches the nine authenticated operations below; `cleanupattachments` runs hourly without client execution permission. Handler directories remain separate source modules. The API accepts `{ "operation": "manageprofile", "payload": { "action": "reserveUpload" } }`; cleanup is excluded from routing.
+
 ## Inventory
 
 | Function | Responsibility |
@@ -39,6 +41,8 @@ npm --prefix functions test
 ## Italiano
 
 Le funzioni centralizzano le regole che non possono essere affidate ai tre client.
+
+Sono presenti **due Functions Appwrite**: `fyre-api` smista le nove operazioni autenticate elencate sotto; `cleanupattachments` esegue la pulizia ogni ora senza permessi di esecuzione per i client. Le cartelle degli handler rimangono moduli separati. Il router accetta `{ "operation": "manageprofile", "payload": { "action": "reserveUpload" } }`; la pulizia è esclusa dalle rotte.
 
 ### Inventario
 

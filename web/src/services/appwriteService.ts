@@ -1408,6 +1408,23 @@ export class AppwriteService {
       payload.currentUserId = currentUserId;
     }
 
+    if (this.configuration.apiFunctionId) {
+      const operations = new Map<string, string>([
+        [this.configuration.registerForEventFunctionId, 'registerforevent'],
+        [this.configuration.cancelEventRegistrationFunctionId, 'canceleventregistration'],
+        [this.configuration.eventAdminFunctionId, 'manageeventadmin'],
+        [this.configuration.createOrGetThreadFunctionId, 'createorgetthread'],
+        [this.configuration.sendMessageFunctionId, 'sendmessage'],
+        [this.configuration.recordSwipeFunctionId, 'recordswipe'],
+        [this.configuration.discoverProfilesFunctionId, 'discoverprofiles'],
+        [this.configuration.manageProfileFunctionId, 'manageprofile'],
+        [this.configuration.manageRelationshipFunctionId, 'managerelationship'],
+      ]);
+      const operation = operations.get(functionId);
+      if (!operation) throw new Error('Unknown Appwrite operation');
+      return this.executeFunction(this.configuration.apiFunctionId, { operation, payload });
+    }
+
     if (this.shouldBypassDirectFunctionInvoke(functionId)) {
       return this.executeFunction(functionId, payload);
     }

@@ -28,7 +28,7 @@ Fyre is a high-school final project built by a small team. It is a multi-platfor
 
 ## Quick start
 
-Fyre requires an Appwrite backend; the repository does not provide access to the team's instance or an offline demo. First [configure your own Appwrite project](appwrite/README.md#one-time-appwrite-setup), deploy the schema and functions, and fill the ignored client configuration files with its endpoint and resource IDs. The example files contain placeholders.
+Fyre requires your own Appwrite backend. First [configure your own Appwrite project](appwrite/README.md#one-time-appwrite-setup), deploy the schema and functions, and fill the ignored client configuration files with its endpoint and resource IDs. The example files contain placeholders.
 
 ### Web
 
@@ -59,6 +59,16 @@ open Fyre.xcodeproj
 
 Select the shared `Fyre` scheme and a simulator or device.
 
+## Python tooling
+
+Python 3.11+ is required for the maintenance scripts. Install the pinned Ruff version with `python -m pip install -r requirements-lint.txt`, then run:
+
+```sh
+ruff check scripts
+ruff format --check scripts
+python -m unittest discover -s scripts -p '*_test.py'
+```
+
 ---
 
 ## Italiano
@@ -87,7 +97,7 @@ Fyre è un progetto finale di quinta superiore realizzato da un piccolo gruppo. 
 
 ### Avvio rapido
 
-Fyre richiede un backend Appwrite. Prima [configurare un proprio progetto Appwrite](appwrite/README.md#configurazione-iniziale-su-appwrite), distribuire schema e funzioni e compilare i file client ignorati con endpoint e ID delle risorse. I file di esempio contengono placeholder.
+Fyre richiede un backend Appwrite proprio. Prima [configurare un proprio progetto Appwrite](appwrite/README.md#configurazione-iniziale-su-appwrite), distribuire schema e funzioni e compilare i file client ignorati con endpoint e ID delle risorse. I file di esempio contengono placeholder.
 
 
 #### Web
@@ -118,3 +128,13 @@ open Fyre.xcodeproj
 ```
 
 Selezionare lo schema condiviso `Fyre` e un simulatore o dispositivo.
+
+### Strumenti Python
+
+Gli script di manutenzione richiedono Python 3.11+. Installare la versione fissata di Ruff con `python -m pip install -r requirements-lint.txt` ed eseguire:
+
+```sh
+ruff check scripts
+ruff format --check scripts
+python -m unittest discover -s scripts -p '*_test.py'
+```

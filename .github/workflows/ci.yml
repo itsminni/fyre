@@ -66,6 +66,16 @@ jobs:
       - name: Test dependency automation
         run: ruby scripts/merge-dependabot.test.rb
 
+      - name: Set up Python lint tools
+        run: |
+          python3 -m venv /tmp/fyre-python-checks
+          /tmp/fyre-python-checks/bin/python -m pip install -r requirements-lint.txt
+
+      - name: Check Python style
+        run: |
+          /tmp/fyre-python-checks/bin/ruff check scripts
+          /tmp/fyre-python-checks/bin/ruff format --check scripts
+
       - name: Test upload maintenance tools
         run: python3 -m unittest discover -s scripts -p "*_test.py"
 

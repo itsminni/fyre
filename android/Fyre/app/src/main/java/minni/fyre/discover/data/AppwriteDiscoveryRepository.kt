@@ -20,7 +20,9 @@ class AppwriteDiscoveryRepository(
     private val localRecentChatStore: LocalRecentChatStore
 ) : DiscoveryRepository {
 
-    override suspend fun loadProfiles(): Result<List<DiscoveryProfile>> {
+    override suspend fun loadProfiles(): Result<List<DiscoveryProfile>> = loadPage().map { it.profiles }
+
+    override suspend fun loadPage(cursor: String?): Result<DiscoveryPage> {
         return runCatching {
             val currentUserId = gateway.fetchCurrentAccountId(required = true)
                 ?: throw AppwriteConfigurationException("Sessione backend non disponibile")
@@ -30,20 +32,23 @@ class AppwriteDiscoveryRepository(
                     "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID non configurato"
                 )
 
-            loadProfilesFromFunction(functionId, currentUserId)
+            loadProfilesFromFunction(functionId, currentUserId, cursor)
         }
     }
 
     private suspend fun loadProfilesFromFunction(
         functionId: String,
-        currentUserId: String
-    ): List<DiscoveryProfile> {
-        return firstNonEmptyDiscoveryWindow { profileCursor ->
+        currentUserId: String,
+        initialCursor: String?
+    ): DiscoveryPage {
+        var nextCursor: String? = null
+        val items = firstNonEmptyDiscoveryWindow(initialCursor = initialCursor) { profileCursor ->
             val requestPayload = buildMap<String, Any?> {
                 put("currentUserId", currentUserId)
                 profileCursor?.let { put("profileCursor", it) }
             }
             val directPayload = configuration.discoverProfilesFunctionDomain
+                ?.takeIf { configuration.apiFunctionId == null }
                 ?.let { functionUrl ->
                     runCatching {
                         gateway.executeFunctionDirectly(
@@ -68,8 +73,9 @@ class AppwriteDiscoveryRepository(
                     if (element.isJsonObject) projectDiscoveryProfile(element.asJsonObject) else null
                 },
                 nextCursor = discoveryNextCursor(payload)
-            )
+            ).also { nextCursor = it.nextCursor }
         }
+        return DiscoveryPage(items, nextCursor)
     }
 
     private fun discoveryNextCursor(payload: JsonObject): String? {
@@ -139,9 +145,10 @@ internal data class DiscoveryFunctionPage<T>(
 
 internal suspend fun <T> firstNonEmptyDiscoveryWindow(
     maximumWindows: Int = 4,
+    initialCursor: String? = null,
     fetchPage: suspend (profileCursor: String?) -> DiscoveryFunctionPage<T>
 ): List<T> {
-    var profileCursor: String? = null
+    var profileCursor: String? = initialCursor
     val usedCursors = mutableSetOf<String>()
 
     repeat(maximumWindows.coerceAtLeast(0)) {

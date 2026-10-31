@@ -24,6 +24,7 @@ GoogleService-Info.plist
 # Appwrite live deployment configuration generated from .env
 appwrite.config.json
 appwrite/*.local.json
+functions/.env
 functions/*/.env
 
 # Logs and temporary files

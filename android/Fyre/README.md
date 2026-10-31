@@ -20,7 +20,7 @@ cp local.properties.example local.properties
 
 Android Studio may add `sdk.dir`. Fill in the public Appwrite resource values and set `APPWRITE_BACKEND_ENABLED=true`, optional direct-function domains may stay empty. The same values can be supplied through Gradle properties or environment variables.
 
-`local.properties` is ignored by Git, but its Appwrite values are embedded in the app. Missing or invalid backend configuration leaves the app in its backend-unavailable state. Photo uploads are limited to 10 MiB and chat attachments to 20 MiB, matching the tracked Storage buckets.
+`local.properties` is ignored by Git, but its Appwrite values are embedded in the app. Missing or invalid backend configuration leaves the app in its backend-unavailable state. Photo uploads are limited to 10 MiB and chat attachments to 20 MiB, with server-side avatar validation in the shared media bucket.
 
 Profile, discovery, swipe, and relationship operations use authenticated functions, there is no client-side fallback.
 
@@ -58,7 +58,7 @@ cp local.properties.example local.properties
 
 Android Studio può aggiungere `sdk.dir`. Compilare i valori pubblici delle risorse Appwrite e impostare `APPWRITE_BACKEND_ENABLED=true`; i domini diretti opzionali delle funzioni possono restare vuoti. Gli stessi valori possono provenire da proprietà Gradle o variabili d'ambiente.
 
-`local.properties` è ignorato da Git, ma i valori Appwrite vengono inclusi nell'app. Se la configurazione del backend è mancante o non valida, l'app segnala il backend come non disponibile. Gli upload delle foto sono limitati a 10 MiB e gli allegati chat a 20 MiB, in linea con i bucket Storage tracciati.
+`local.properties` è ignorato da Git, ma i valori Appwrite vengono inclusi nell'app. Se la configurazione del backend è mancante o non valida, l'app segnala il backend come non disponibile. Gli upload delle foto sono limitati a 10 MiB e gli allegati chat a 20 MiB, con validazione server degli avatar nel bucket media unico.
 
 Profilo, discovery, swipe e relazioni usano funzioni autenticate, non esiste un fallback client.
 

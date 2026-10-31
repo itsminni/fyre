@@ -32,5 +32,14 @@ class AppSessionViewModelTest {
         viewModel.logout()
         assertEquals(AppSessionState.Unauthenticated, viewModel.sessionState.value)
     }
+    @Test fun unavailable_session_can_retry_without_becoming_logged_out() {
+        val vm = AppSessionViewModel()
+        vm.verificationFailed()
+        assertEquals(AppSessionState.Unavailable, vm.sessionState.value)
+        vm.verifyAgain()
+        assertEquals(AppSessionState.Loading, vm.sessionState.value)
+        vm.bootstrap(true, true)
+        assertEquals(AppSessionState.AuthenticatedProfileComplete, vm.sessionState.value)
+    }
 }
 

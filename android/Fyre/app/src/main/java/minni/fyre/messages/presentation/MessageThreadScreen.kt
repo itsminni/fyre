@@ -1,5 +1,6 @@
 package minni.fyre.messages.presentation
 
+import minni.fyre.ui.components.localizedUiMessage
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -162,6 +163,12 @@ fun MessageThreadScreen(
     draft: String,
     replyToMessageId: String?,
     errorMessage: String? = null,
+    hasOlderMessages: Boolean = false,
+    isLoadingOlder: Boolean = false,
+    onLoadOlder: () -> Unit = {},
+    onRetryMessage: (String) -> Unit = {},
+    uploadProgress: Map<String, Float> = emptyMap(),
+    onCancelUpload: (String) -> Unit = {},
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onReply: (String) -> Unit,
@@ -261,9 +268,15 @@ fun MessageThreadScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
+    var initialScrollDone by remember(thread.id) { mutableStateOf(false) }
+    LaunchedEffect(thread.id, messages.lastOrNull()?.id) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
+            val nearBottom = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+                ?.let { it >= listState.layoutInfo.totalItemsCount - 3 } ?: true
+            if (!initialScrollDone || nearBottom || messages.last().author == MessageAuthor.Me) {
+                listState.scrollToItem(messages.lastIndex)
+            }
+            initialScrollDone = true
         }
     }
 
@@ -449,13 +462,18 @@ fun MessageThreadScreen(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    text = visibleErrorMessage,
+                    text = if (errorMessage != null) localizedUiMessage(visibleErrorMessage) else visibleErrorMessage,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(10.dp)
                 )
             }
         }
 
+        if (hasOlderMessages) {
+            TextButton(onClick = onLoadOlder, enabled = !isLoadingOlder) {
+                Text(stringResource(if (isLoadingOlder) R.string.nav_loading_session else R.string.messages_load_older))
+            }
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -465,6 +483,17 @@ fun MessageThreadScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             itemsIndexed(messages, key = { _, message -> message.id }) { _, message ->
+                if (message.syncStatus == MessageSyncStatus.LocalOnly &&
+                    (message.attachments.isNotEmpty() || message.voiceNote != null)) {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { uploadProgress[message.id] ?: 0f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(onClick = { onCancelUpload(message.id) }) { Text(stringResource(R.string.common_cancel)) }
+                }
+                if (message.syncStatus == MessageSyncStatus.Failed) {
+                    TextButton(onClick = { onRetryMessage(message.id) }) { Text(stringResource(R.string.messages_retry_send)) }
+                }
                 MessageBubble(
                     message = message,
                     repliedMessage = message.replyToMessageId?.let { replyId ->
@@ -1405,15 +1434,15 @@ private fun MessageAttachment.mediaUri(): Uri {
 }
 
 private fun formatMessageTimestamp(timestamp: Long): String {
-    return SimpleDateFormat("HH:mm", Locale.ITALY).format(Date(timestamp))
+    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
 }
 
 private fun formatMessageFullTimestamp(timestamp: Long): String {
-    return SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(Date(timestamp))
+    return SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(timestamp))
 }
 
 private fun formatLastSeenTimestamp(timestamp: Long): String {
-    return SimpleDateFormat("dd/MM HH:mm", Locale.ITALY).format(Date(timestamp))
+    return SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(timestamp))
 }
 
 private fun Context.openAttachmentExternally(uri: Uri, attachment: MessageAttachment) {

@@ -1,4 +1,5 @@
 export interface AppwriteConfiguration {
+  apiFunctionId?: string | null;
   endpoint: string;
   projectId: string;
   databaseId: string;
@@ -58,6 +59,8 @@ const REQUIRED_VARIABLES = [
 
 function readAppwriteEnvironment(): AppwriteEnvironment {
   return {
+    VITE_APPWRITE_API_FUNCTION_ID: import.meta.env.VITE_APPWRITE_API_FUNCTION_ID,
+    VITE_APPWRITE_STORAGE_BUCKET_ID: import.meta.env.VITE_APPWRITE_STORAGE_BUCKET_ID,
     VITE_APPWRITE_ENDPOINT: import.meta.env.VITE_APPWRITE_ENDPOINT,
     VITE_APPWRITE_PROJECT_ID: import.meta.env.VITE_APPWRITE_PROJECT_ID,
     VITE_APPWRITE_DATABASE_ID: import.meta.env.VITE_APPWRITE_DATABASE_ID,
@@ -170,6 +173,7 @@ export function loadAppwriteConfiguration(): AppwriteConfiguration {
   }
 
   return {
+    apiFunctionId: optionalEnvironmentValue(environment, 'VITE_APPWRITE_API_FUNCTION_ID'),
     endpoint: validateSecureUrl(
       requireEnvironmentValue(environment, 'VITE_APPWRITE_ENDPOINT'),
       'VITE_APPWRITE_ENDPOINT'
@@ -177,8 +181,8 @@ export function loadAppwriteConfiguration(): AppwriteConfiguration {
     projectId: requireEnvironmentValue(environment, 'VITE_APPWRITE_PROJECT_ID'),
     databaseId: requireEnvironmentValue(environment, 'VITE_APPWRITE_DATABASE_ID'),
     profilesTableId: requireEnvironmentValue(environment, 'VITE_APPWRITE_PROFILES_TABLE_ID'),
-    avatarsBucketId: requireEnvironmentValue(environment, 'VITE_APPWRITE_AVATARS_BUCKET_ID'),
-    chatAttachmentsBucketId: optionalEnvironmentValue(environment, 'VITE_APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID'),
+    avatarsBucketId: optionalEnvironmentValue(environment, 'VITE_APPWRITE_STORAGE_BUCKET_ID') ?? requireEnvironmentValue(environment, 'VITE_APPWRITE_AVATARS_BUCKET_ID'),
+    chatAttachmentsBucketId: optionalEnvironmentValue(environment, 'VITE_APPWRITE_STORAGE_BUCKET_ID') ?? optionalEnvironmentValue(environment, 'VITE_APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID'),
     eventsTableId: requireEnvironmentValue(environment, 'VITE_APPWRITE_EVENTS_TABLE_ID'),
     eventRegistrationsTableId: requireEnvironmentValue(environment, 'VITE_APPWRITE_EVENT_REGISTRATIONS_TABLE_ID'),
     threadsTableId: requireEnvironmentValue(environment, 'VITE_APPWRITE_THREADS_TABLE_ID'),

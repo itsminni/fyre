@@ -35,6 +35,7 @@ class AppGraph(
     val appwriteConfiguration: AppwriteConfiguration? = AppwriteConfiguration.loadOrNull()
     private val appwriteGateway: AppwriteGateway? = appwriteConfiguration
         ?.let { configuration -> AppwriteGateway(appContext, configuration) }
+    val realtimeService = appwriteConfiguration?.let { minni.fyre.data.appwrite.AppwriteRealtimeService(appContext, it) }
     private val localRecentChatStore = LocalRecentChatStore()
     val privateMediaStore: AppwritePrivateMediaStore? = appwriteGateway
         ?.let { gateway -> AppwritePrivateMediaStore(appContext, gateway) }
@@ -103,7 +104,7 @@ private class BackendUnavailableAuthRepository(
 
     override suspend fun updateUserProfile(email: String, profile: UserProfile): Result<User> = unavailable()
 
-    override suspend fun restoreSession(): Result<User?> = Result.success(null)
+    override suspend fun restoreSession(): Result<User?> = unavailable()
 
     override suspend fun logout(): Result<Unit> = Result.success(Unit)
 

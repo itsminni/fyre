@@ -165,4 +165,84 @@ class MessagesViewModelTest {
         assertTrue(viewModel.messages.value.isEmpty())
         assertTrue(viewModel.threads.value.none { it.id == "thread_p4" })
     }
+
+    @Test
+    fun failed_retry_reuses_operation_id_and_does_not_duplicate_optimistic_message() = runTest {
+        val delegate = MockMessagesDataRepository()
+        val requests = mutableListOf<minni.fyre.messages.data.MessageSendRequest>()
+        val repository = object : minni.fyre.messages.data.MessagesRepository by delegate {
+            override suspend fun sendMessage(request: minni.fyre.messages.data.MessageSendRequest): Result<minni.fyre.messages.model.ChatMessage> {
+                requests += request
+                return if (requests.size == 1) Result.failure(java.io.IOException("Response lost"))
+                    else delegate.sendMessage(request)
+            }
+        }
+        val vm = MessagesViewModel(repository)
+        vm.openThread("thread_p4")
+        advanceUntilIdle()
+        val before = vm.messages.value.size
+        vm.updateDraft("Retry me")
+        vm.sendCurrentMessage()
+        advanceUntilIdle()
+        val failed = vm.messages.value.last()
+        assertEquals(minni.fyre.messages.model.MessageSyncStatus.Failed, failed.syncStatus)
+        vm.retryMessage(failed.id)
+        advanceUntilIdle()
+        assertEquals(2, requests.size)
+        assertEquals(requests[0], requests[1])
+        assertEquals(before + 1, vm.messages.value.size)
+    }
+
+    @Test
+    fun loading_older_history_keeps_newest_messages_and_refresh_keeps_older_pages() = runTest {
+        val delegate = MockMessagesDataRepository()
+        val all = (1..120).map { index -> minni.fyre.messages.model.ChatMessage(
+            id = "message-$index", threadId = "thread_p4", author = MessageAuthor.Other,
+            text = "History $index", timestamp = index.toLong(), isRead = true,
+            backendMessageId = "message-$index", syncStatus = minni.fyre.messages.model.MessageSyncStatus.Synced)
+        }
+        val repository = object : minni.fyre.messages.data.MessagesRepository by delegate {
+            override suspend fun getMessagePage(threadId: String, beforeCursor: String?): Result<minni.fyre.messages.data.MessagePage> {
+                val end = beforeCursor?.let { cursor -> all.indexOfFirst { it.id == cursor } } ?: all.size
+                val start = (end - 50).coerceAtLeast(0)
+                return Result.success(minni.fyre.messages.data.MessagePage(all.subList(start, end),
+                    all[start].id.takeIf { start > 0 }))
+            }
+        }
+        val vm = MessagesViewModel(repository)
+        vm.openThread("thread_p4")
+        advanceUntilIdle()
+        assertEquals(50, vm.messages.value.size)
+        vm.loadOlderMessages(); advanceUntilIdle()
+        vm.loadOlderMessages(); advanceUntilIdle()
+        assertEquals(120, vm.messages.value.size)
+        assertEquals("message-1", vm.messages.value.first().id)
+        vm.refreshSelectedThread(); advanceUntilIdle()
+        assertEquals(120, vm.messages.value.size)
+        assertEquals("message-120", vm.messages.value.last().id)
+        assertEquals(false, vm.hasOlderMessages.value)
+    }
+
+    @Test
+    fun cancelling_one_upload_preserves_other_concurrent_uploads() = runTest {
+        val delegate = MockMessagesDataRepository()
+        val cancelled = mutableListOf<String>()
+        val repository = object : minni.fyre.messages.data.MessagesRepository by delegate {
+            override suspend fun sendMessage(request: minni.fyre.messages.data.MessageSendRequest): Result<minni.fyre.messages.model.ChatMessage> = kotlinx.coroutines.awaitCancellation()
+            override suspend fun cancelSend(request: minni.fyre.messages.data.MessageSendRequest) { cancelled += request.operationId }
+        }
+        val vm = MessagesViewModel(repository)
+        vm.openThread("thread_p4"); advanceUntilIdle()
+        val existingIds = vm.messages.value.map { it.id }.toSet()
+        vm.sendAttachment(AttachmentType.File, "first.pdf", "content://first", "application/pdf")
+        vm.sendAttachment(AttachmentType.File, "second.pdf", "content://second", "application/pdf")
+        advanceUntilIdle()
+        val pending = vm.messages.value.filter { it.id !in existingIds }
+        assertEquals(2, pending.size)
+        vm.cancelAttachmentUpload(pending.first().id); advanceUntilIdle()
+        assertEquals(listOf(pending.first().id), cancelled)
+        assertTrue(vm.messages.value.any { it.id == pending.last().id })
+        assertTrue(vm.messages.value.none { it.id == pending.first().id })
+        vm.cancelAttachmentUpload(pending.last().id); advanceUntilIdle()
+    }
 }

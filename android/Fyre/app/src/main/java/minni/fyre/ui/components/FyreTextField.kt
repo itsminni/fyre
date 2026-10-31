@@ -37,7 +37,7 @@ fun FyreTextField(
         supportingText = if (supportingText != null) {
             {
                 Text(
-                    text = supportingText,
+                    text = localizedUiMessage(supportingText),
                     color = if (isError) {
                         MaterialTheme.colorScheme.error
                     } else {

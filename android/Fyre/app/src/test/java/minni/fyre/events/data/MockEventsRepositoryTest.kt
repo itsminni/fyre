@@ -51,9 +51,9 @@ class MockEventsRepositoryTest {
         MockEventsRepository.simulateMetricsTick("ev1")
 
         val after = MockEventsRepository.getEventById("ev1") ?: return
-        assertTrue(after.liveMetrics.viewersOnline > before.liveMetrics.viewersOnline)
-        assertTrue(after.liveMetrics.checkIns >= before.liveMetrics.checkIns)
-        assertTrue(after.liveMetrics.chatPerMinute > before.liveMetrics.chatPerMinute)
+        assertTrue(requireNotNull(after.liveMetrics.viewersOnline) > requireNotNull(before.liveMetrics.viewersOnline))
+        assertTrue(requireNotNull(after.liveMetrics.checkIns) >= requireNotNull(before.liveMetrics.checkIns))
+        assertTrue(requireNotNull(after.liveMetrics.chatPerMinute) > requireNotNull(before.liveMetrics.chatPerMinute))
     }
 
     @Test

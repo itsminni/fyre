@@ -39,8 +39,16 @@ export class Backend {
       if (path === '/account/jwts') return reply({ jwt: 'e2e-jwt' }, 201);
       if (path.startsWith('/account/sessions')) return reply({}, request.method() === 'DELETE' ? 204 : 201);
       if (path.startsWith('/functions/')) {
-        const body = JSON.parse(request.postDataJSON().body) as Row;
-        const functionId = path.split('/')[2];
+        const envelope = JSON.parse(request.postDataJSON().body) as Row;
+        if (path.split('/')[2] !== 'fyre-api') return reply({ message: 'Expected consolidated API' }, 400);
+        const operations: Record<string, string> = {
+          createorgetthread: 'create-thread', recordswipe: 'swipe', discoverprofiles: 'discover',
+          manageprofile: 'profile', sendmessage: 'send-message', managerelationship: 'relationship',
+          registerforevent: 'register', canceleventregistration: 'cancel', manageeventadmin: 'admin'
+        };
+        const functionId = operations[String(envelope.operation)];
+        if (!functionId || !envelope.payload) return reply({ message: 'Invalid operation envelope' }, 400);
+        const body = envelope.payload as Row;
         let payload: Row = {}; let status = 200;
         if (functionId === 'create-thread') payload = { threadId: 'chat', peer: { userId: 'peer', displayName: 'Bea', avatarUrl: null, lastSeenAt: null, presenceUpdatedAt: null } };
         if (functionId === 'swipe') payload = { matched: false };

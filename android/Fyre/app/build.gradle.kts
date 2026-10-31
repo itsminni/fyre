@@ -62,6 +62,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        buildConfigField("String", "APPWRITE_API_FUNCTION_ID", asBuildConfigString(appwriteConfigValue("APPWRITE_API_FUNCTION_ID")))
+        buildConfigField("String", "APPWRITE_STORAGE_BUCKET_ID", asBuildConfigString(appwriteConfigValue("APPWRITE_STORAGE_BUCKET_ID")))
         buildConfigField(
             "boolean",
             "APPWRITE_BACKEND_ENABLED",
@@ -235,6 +237,7 @@ android {
         }
     }
 }
+
 
 dependencies {
     implementation(libs.androidx.core.ktx)

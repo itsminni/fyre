@@ -25,6 +25,8 @@ data class AppwriteRealtimeEvent(
     val payload: JsonObject,
     val raw: JsonObject
 ) {
+    val isReconnect: Boolean get() = events.contains("fyre.reconnected")
+
     val isMutation: Boolean
         get() = events.any { event ->
             event.contains(".create") || event.contains(".update") || event.contains(".delete")
@@ -92,7 +94,7 @@ class AppwriteRealtimeService(
         return makeSubscription(
             channels = channels,
             onEvent = { event ->
-                if (event.isMutation) {
+                if (event.isMutation || event.isReconnect) {
                     onEvent(event)
                 }
             },
@@ -100,23 +102,48 @@ class AppwriteRealtimeService(
         )
     }
 
+    private data class Listener(val channels: Set<String>, val onEvent: (AppwriteRealtimeEvent) -> Unit, val onError: (Throwable) -> Unit)
+    private val listeners = linkedMapOf<String, Listener>()
+    private var connection: AppwriteRealtimeConnection? = null
+
     fun makeSubscription(
         channels: List<String>,
         onEvent: (AppwriteRealtimeEvent) -> Unit,
         onError: (Throwable) -> Unit = {}
     ): AppwriteRealtimeSubscription {
-        return AppwriteRealtimeSubscription(
-            client = client,
-            cookieJar = cookieJar,
-            configuration = configuration,
-            channels = channels,
-            onEvent = onEvent,
-            onError = onError
-        )
+        val id = java.util.UUID.randomUUID().toString()
+        return AppwriteRealtimeSubscription(onStart = {
+            synchronized(listeners) {
+                listeners[id] = Listener(channels.toSet(), onEvent, onError)
+                if (connection == null) {
+                    val sharedChannels = listOfNotNull(configuration.messagesRealtimeChannel,
+                        configuration.threadsRealtimeChannel, configuration.threadParticipantsRealtimeChannel,
+                        configuration.matchesRealtimeChannel)
+                    connection = AppwriteRealtimeConnection(client, cookieJar, configuration, sharedChannels,
+                        onEvent = { event ->
+                            val snapshot = synchronized(listeners) { listeners.values.toList() }
+                            snapshot.filter { event.isReconnect || event.channels.isEmpty() || event.channels.any(it.channels::contains) }
+                                .forEach { it.onEvent(event) }
+                        }, onError = { error -> synchronized(listeners) { listeners.values.toList() }.forEach { it.onError(error) } }
+                    ).also { it.start() }
+                }
+            }
+        }, onCancel = {
+            synchronized(listeners) {
+                listeners.remove(id)
+                if (listeners.isEmpty()) { connection?.cancel(); connection = null }
+            }
+        })
     }
 }
 
-class AppwriteRealtimeSubscription internal constructor(
+class AppwriteRealtimeSubscription internal constructor(private val onStart: () -> Unit, private val onCancel: () -> Unit) {
+    private var started = false
+    @Synchronized fun start() { if (!started) { started = true; onStart() } }
+    @Synchronized fun cancel() { if (started) { started = false; onCancel() } }
+}
+
+private class AppwriteRealtimeConnection(
     private val client: OkHttpClient,
     private val cookieJar: PersistentCookieJar,
     private val configuration: AppwriteConfiguration,
@@ -163,7 +190,7 @@ class AppwriteRealtimeSubscription internal constructor(
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    this@AppwriteRealtimeSubscription.webSocket = null
+                    this@AppwriteRealtimeConnection.webSocket = null
                     if (!isCancelled) {
                         onError(t)
                         scheduleReconnect()
@@ -171,7 +198,7 @@ class AppwriteRealtimeSubscription internal constructor(
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    this@AppwriteRealtimeSubscription.webSocket = null
+                    this@AppwriteRealtimeConnection.webSocket = null
                     if (!isCancelled) {
                         scheduleReconnect()
                     }
@@ -188,35 +215,7 @@ class AppwriteRealtimeSubscription internal constructor(
         }
     }
 
-    private fun parseEvent(rawText: String): AppwriteRealtimeEvent? {
-        return runCatching {
-            val raw = JsonParser.parseString(rawText).asJsonObject
-            val payload = when {
-                raw["payload"]?.isJsonObject == true -> raw["payload"].asJsonObject
-                raw["data"]?.isJsonObject == true -> raw["data"].asJsonObject
-                else -> JsonObject()
-            }
-
-            AppwriteRealtimeEvent(
-                events = raw.arrayOrEmpty("events").mapNotNull { element ->
-                    if (element.isJsonPrimitive && element.asJsonPrimitive.isString) {
-                        element.asString
-                    } else {
-                        null
-                    }
-                },
-                channels = raw.arrayOrEmpty("channels").mapNotNull { element ->
-                    if (element.isJsonPrimitive && element.asJsonPrimitive.isString) {
-                        element.asString
-                    } else {
-                        null
-                    }
-                },
-                payload = payload,
-                raw = raw
-            )
-        }.getOrNull()
-    }
+    private fun parseEvent(rawText: String): AppwriteRealtimeEvent? = parseRealtimeEvent(rawText)
 
     private fun realtimeUrl(): String {
         val endpoint = configuration.endpoint.trimEnd('/')
@@ -270,3 +269,14 @@ val AppwriteConfiguration.matchesRealtimeChannel: String?
     get() = matchesTableId
         ?.takeIf { it.isNotBlank() }
         ?.let { "tablesdb.$databaseId.tables.$it.rows" }
+
+internal fun parseRealtimeEvent(rawText: String): AppwriteRealtimeEvent? = runCatching {
+    val raw = JsonParser.parseString(rawText).asJsonObject
+    if (raw.stringOrNull("type") == "connected") {
+        return@runCatching AppwriteRealtimeEvent(listOf("fyre.reconnected"), emptyList(), JsonObject(), raw)
+    }
+    val envelope = if (raw.stringOrNull("type") == "event" && raw["data"]?.isJsonObject == true) raw["data"].asJsonObject else raw
+    val payload = envelope["payload"]?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
+    fun strings(key: String) = envelope.arrayOrEmpty(key).mapNotNull { if (it.isJsonPrimitive && it.asJsonPrimitive.isString) it.asString else null }
+    AppwriteRealtimeEvent(strings("events"), strings("channels"), payload, raw)
+}.getOrNull()

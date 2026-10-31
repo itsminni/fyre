@@ -34,6 +34,21 @@ const configuration: AppwriteConfiguration = {
   eventAdminFunctionDomain: null
 };
 
+it('routes configured operation IDs through the API while preserving nested actions and identity', async () => {
+  const service = new AppwriteService({ ...configuration, apiFunctionId: 'fyre-api' }) as unknown as {
+    executeUserFunction(id: string, body: Record<string, unknown>): Promise<Record<string, unknown>>;
+    executeFunction(id: string, body: Record<string, unknown>): Promise<Record<string, unknown>>;
+    executeFunctionDirectly: ReturnType<typeof vi.fn>;
+  };
+  service.executeFunction = vi.fn(async () => ({ ok: true }));
+  service.executeFunctionDirectly = vi.fn();
+  await service.executeUserFunction('manage-profile', { action: 'reserveUpload', currentUserId: 'owner' });
+  expect(service.executeFunction).toHaveBeenCalledWith('fyre-api', {
+    operation: 'manageprofile', payload: { action: 'reserveUpload', currentUserId: 'owner' }
+  });
+  expect(service.executeFunctionDirectly).not.toHaveBeenCalled();
+});
+
 interface ListRowsAccess {
   listRows(
     tableId: string,

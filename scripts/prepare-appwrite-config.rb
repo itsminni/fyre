@@ -21,22 +21,11 @@ TABLE_IDS = {
   "relationships" => "APPWRITE_RELATIONSHIPS_TABLE_ID"
 }.freeze
 
-BUCKET_IDS = {
-  "avatars" => "APPWRITE_AVATARS_BUCKET_ID",
-  "chat-attachments" => "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID"
-}.freeze
+BUCKET_IDS = { "avatars" => "APPWRITE_STORAGE_BUCKET_ID" }.freeze
 
 FUNCTION_IDS = {
-  "registerforevent" => "APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID",
-  "canceleventregistration" => "APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID",
-  "manageeventadmin" => "APPWRITE_EVENT_ADMIN_FUNCTION_ID",
-  "createorgetthread" => "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID",
-  "sendmessage" => "APPWRITE_SEND_MESSAGE_FUNCTION_ID",
-  "cleanupattachments" => "APPWRITE_CLEANUP_ATTACHMENTS_FUNCTION_ID",
-  "recordswipe" => "APPWRITE_RECORD_SWIPE_FUNCTION_ID",
-  "discoverprofiles" => "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID",
-  "manageprofile" => "APPWRITE_MANAGE_PROFILE_FUNCTION_ID",
-  "managerelationship" => "APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID"
+  "fyre-api" => "APPWRITE_API_FUNCTION_ID",
+  "cleanupattachments" => "APPWRITE_CLEANUP_ATTACHMENTS_FUNCTION_ID"
 }.freeze
 
 def read_dotenv(path)
@@ -206,7 +195,7 @@ def validate_functions!(functions)
     abort("Function #{function_id} must use the node-22 runtime") unless function["runtime"] == "node-22"
     if function_id == "cleanupattachments"
       abort("Cleanup must not allow client executions") unless function["execute"] == []
-      abort("Cleanup must run hourly") unless function["schedule"] == "0 * * * *"
+      abort("Cleanup must use the Free-plan hourly interval") unless function["interval"] == 60 && function.fetch("schedule", "").empty?
     else
       abort("Function #{function_id} must be executable only by authenticated users") unless function["execute"] == ["users"]
     end
@@ -229,7 +218,7 @@ def validate_functions!(functions)
     missing_env = required_env - runtime_env - variables.keys
     abort("Function #{function_id} is missing manifest vars: #{missing_env.join(', ')}") unless missing_env.empty?
 
-    if %w[createorgetthread discoverprofiles].include?(function_id)
+    if %w[fyre-api].include?(function_id)
       ttl = variables.fetch("APPWRITE_AVATAR_TOKEN_TTL_SECONDS", "")
       abort("Function #{function_id} requires APPWRITE_AVATAR_TOKEN_TTL_SECONDS between 300 and 900") unless ttl.match?(/\A\d+\z/) && ttl.to_i.between?(300, 900)
       abort("Function #{function_id} requires APPWRITE_AVATARS_BUCKET_ID") if variables.fetch("APPWRITE_AVATARS_BUCKET_ID", "").strip.empty?
@@ -240,16 +229,8 @@ end
 
 def validate_function_scopes!(functions)
   expected_scopes = {
-    "registerforevent" => %w[rows.read rows.write],
-    "canceleventregistration" => %w[rows.read rows.write],
-    "manageeventadmin" => %w[rows.read rows.write users.read],
-    "createorgetthread" => %w[rows.read rows.write tokens.write],
-    "sendmessage" => %w[files.read files.write rows.read rows.write],
-    "cleanupattachments" => %w[files.read files.write rows.read rows.write],
-    "recordswipe" => %w[rows.read rows.write],
-    "discoverprofiles" => %w[rows.read tokens.write],
-    "manageprofile" => %w[files.read files.write rows.read rows.write],
-    "managerelationship" => %w[rows.read rows.write]
+    "fyre-api" => %w[files.read files.write rows.read rows.write tokens.write users.read],
+    "cleanupattachments" => %w[files.read files.write rows.read rows.write]
   }.freeze
 
   functions.each do |function|
@@ -268,6 +249,12 @@ env_path = File.expand_path(env_argument, ROOT)
 abort("Missing environment file: #{env_path}") unless File.file?(env_path)
 
 environment = read_dotenv(env_path)
+# One explicit target prevents accidental deployment against two storage buckets.
+if environment["APPWRITE_STORAGE_BUCKET_ID"].to_s.strip.empty?
+  abort("Set APPWRITE_STORAGE_BUCKET_ID after planning the storage migration")
+end
+environment["APPWRITE_AVATARS_BUCKET_ID"] = environment["APPWRITE_STORAGE_BUCKET_ID"]
+environment["APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID"] = environment["APPWRITE_STORAGE_BUCKET_ID"]
 required_keys = [
   "APPWRITE_ENDPOINT",
   "APPWRITE_PROJECT_ID",

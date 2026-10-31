@@ -7,7 +7,11 @@ data class SwipeOutcome(
     val threadId: String?
 )
 
+data class DiscoveryPage(val profiles: List<DiscoveryProfile>, val nextCursor: String?)
+
 interface DiscoveryRepository {
+    suspend fun loadPage(cursor: String? = null): Result<DiscoveryPage> = loadProfiles().map { DiscoveryPage(it, null) }
+
     suspend fun loadProfiles(): Result<List<DiscoveryProfile>>
 
     suspend fun submitDecision(

@@ -10,6 +10,9 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.rememberNavController
 import minni.fyre.account.model.AppLanguage
@@ -27,11 +30,27 @@ import minni.fyre.ui.theme.FyreTheme
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    private var notificationDestination by androidx.compose.runtime.mutableStateOf<minni.fyre.core.notifications.NotificationDestination?>(null)
+
+    private fun readNotification(intent: android.content.Intent?) {
+        notificationDestination = intent?.getStringExtra("notification_account")?.let { account ->
+            minni.fyre.core.notifications.NotificationDestination(account,
+                intent.getStringExtra("notification_kind").orEmpty(), intent.getStringExtra("notification_resource").orEmpty())
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        readNotification(intent)
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_Fyre)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        readNotification(intent)
 
         val activityContext = this
         val appGraph = AppGraphProvider.get(applicationContext)
@@ -67,7 +86,8 @@ class MainActivity : ComponentActivity() {
                 )
                 val sessionViewModel: AppSessionViewModel = viewModel()
 
-                LaunchedEffect(Unit) {
+                var verificationAttempt by remember { mutableIntStateOf(0) }
+                LaunchedEffect(verificationAttempt) {
                     val restored = authViewModel.restoreSession()
 
                     if (restored) {
@@ -75,6 +95,8 @@ class MainActivity : ComponentActivity() {
                             isAuthenticated = true,
                             isProfileComplete = authViewModel.hasCompletedProfile()
                         )
+                    } else if (authViewModel.globalError.value != null) {
+                        sessionViewModel.verificationFailed()
                     } else {
                         sessionViewModel.bootstrap(
                             isAuthenticated = false,
@@ -86,7 +108,19 @@ class MainActivity : ComponentActivity() {
                 NavGraph(
                     navController = navController,
                     authViewModel = authViewModel,
-                    sessionViewModel = sessionViewModel
+                    sessionViewModel = sessionViewModel,
+                    notificationDestination = notificationDestination,
+                    onNotificationConsumed = {
+                        notificationDestination = null
+                        intent.removeExtra("notification_account")
+                        intent.removeExtra("notification_kind")
+                        intent.removeExtra("notification_resource")
+                        intent.data = null
+                    },
+                    onRetrySession = {
+                        sessionViewModel.verifyAgain()
+                        verificationAttempt++
+                    }
                 )
             }
         }
@@ -96,7 +130,7 @@ class MainActivity : ComponentActivity() {
 private fun ComponentActivity.applyLanguageIfNeeded(language: AppLanguage) {
     val desiredLocale = language.languageTag
         ?.let(Locale::forLanguageTag)
-        ?: Locale.getDefault()
+        ?: android.content.res.Resources.getSystem().configuration.locales.get(0)
     val currentLocale = resources.configuration.locales.get(0)
     if (currentLocale == desiredLocale) return
 

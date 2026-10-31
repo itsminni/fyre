@@ -30,12 +30,30 @@ import minni.fyre.ui.welcome.WelcomeScreen
 fun NavGraph(
     navController: NavHostController,
     authViewModel: AuthViewModel,
-    sessionViewModel: AppSessionViewModel
+    sessionViewModel: AppSessionViewModel,
+    notificationDestination: minni.fyre.core.notifications.NotificationDestination? = null,
+    onNotificationConsumed: () -> Unit = {},
+    onRetrySession: () -> Unit = {}
 ) {
     val sessionState by sessionViewModel.sessionState.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val context = LocalContext.current
+
+    if (sessionState == AppSessionState.Unavailable) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+        ) {
+            val configured = minni.fyre.data.AppGraphProvider.get(context).isBackendEnabled
+            Text(stringResource(if (configured) R.string.session_verification_failed else R.string.backend_configuration_unavailable))
+            androidx.compose.material3.Button(onClick = onRetrySession) {
+                Text(stringResource(R.string.action_retry))
+            }
+        }
+        return
+    }
 
     if (sessionState == AppSessionState.Loading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -48,6 +66,7 @@ fun NavGraph(
     LaunchedEffect(sessionState, currentRoute) {
         when (sessionState) {
             AppSessionState.Loading -> Unit
+            AppSessionState.Unavailable -> Unit
             AppSessionState.Unauthenticated -> {
                 if (currentRoute != AuthRoute.Welcome &&
                     currentRoute != AuthRoute.Login &&
@@ -150,6 +169,8 @@ fun NavGraph(
 
         composable(route = RootRoute.AuthenticatedShell) {
             AuthenticatedShell(
+                notificationDestination = notificationDestination,
+                onNotificationConsumed = onNotificationConsumed,
                 authViewModel = authViewModel,
                 onLogout = {
                     EventReminderScheduler.cancelAllReminders(context.applicationContext)

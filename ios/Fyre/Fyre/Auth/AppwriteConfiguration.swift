@@ -29,6 +29,7 @@ struct AppwriteConfiguration: Sendable {
     let discoverProfilesFunctionDomain: URL?
     let eventAdminFunctionDomain: URL?
     let pushProviderId: String?
+    var apiFunctionId: String? = nil
     let endpointURL: URL
 
     static func load(bundle: Bundle = .main) throws -> AppwriteConfiguration {
@@ -51,8 +52,8 @@ struct AppwriteConfiguration: Sendable {
         let publicEndpoint = try stringValue(forKey: "APPWRITE_PUBLIC_ENDPOINT", in: dictionary)
         let databaseId = try stringValue(forKey: "APPWRITE_DATABASE_ID", in: dictionary)
         let profilesTableId = try stringValue(forKey: "APPWRITE_PROFILES_TABLE_ID", in: dictionary)
-        let avatarsBucketId = try stringValue(forKey: "APPWRITE_AVATARS_BUCKET_ID", in: dictionary)
-        let chatAttachmentsBucketId = optionalStringValue(forKey: "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID", in: dictionary)
+        let avatarsBucketId = try optionalStringValue(forKey: "APPWRITE_STORAGE_BUCKET_ID", in: dictionary) ?? stringValue(forKey: "APPWRITE_AVATARS_BUCKET_ID", in: dictionary)
+        let chatAttachmentsBucketId = optionalStringValue(forKey: "APPWRITE_STORAGE_BUCKET_ID", in: dictionary) ?? optionalStringValue(forKey: "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID", in: dictionary)
         let eventsTableId = try stringValue(forKey: "APPWRITE_EVENTS_TABLE_ID", in: dictionary)
         let eventRegistrationsTableId = try stringValue(forKey: "APPWRITE_EVENT_REGISTRATIONS_TABLE_ID", in: dictionary)
         let threadsTableId = try stringValue(forKey: "APPWRITE_THREADS_TABLE_ID", in: dictionary)
@@ -110,6 +111,7 @@ struct AppwriteConfiguration: Sendable {
             discoverProfilesFunctionDomain: discoverProfilesFunctionDomain,
             eventAdminFunctionDomain: eventAdminFunctionDomain,
             pushProviderId: pushProviderId,
+            apiFunctionId: optionalStringValue(forKey: "APPWRITE_API_FUNCTION_ID", in: dictionary),
             endpointURL: endpointURL
         )
     }

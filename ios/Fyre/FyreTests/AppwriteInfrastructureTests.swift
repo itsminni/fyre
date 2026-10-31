@@ -4,6 +4,17 @@ import XCTest
 
 @MainActor
 final class AppwriteInfrastructureTests: XCTestCase {
+    func testConsolidatedConfigurationKeepsDistinctOperationsAndOneBucket() throws {
+        var values = validConfigurationValues()
+        values["APPWRITE_API_FUNCTION_ID"] = "fyre-api"
+        values["APPWRITE_STORAGE_BUCKET_ID"] = "shared-media"
+        let configuration = try AppwriteConfiguration.load(dictionary: values)
+        XCTAssertEqual(configuration.apiFunctionId, "fyre-api")
+        XCTAssertEqual(configuration.avatarsBucketId, "shared-media")
+        XCTAssertEqual(configuration.chatAttachmentsBucketId, "shared-media")
+        XCTAssertNotEqual(configuration.manageProfileFunctionId, configuration.sendMessageFunctionId)
+    }
+
     func testConfigurationRejectsTemplatePlaceholders() {
         var values = validConfigurationValues()
         values["APPWRITE_PROJECT_ID"] = "<APPWRITE_PROJECT_ID>"

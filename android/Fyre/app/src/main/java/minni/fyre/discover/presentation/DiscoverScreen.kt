@@ -1,5 +1,6 @@
 package minni.fyre.discover.presentation
 
+import minni.fyre.ui.components.localizedUiMessage
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -44,6 +45,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import minni.fyre.core.lifecycle.ForegroundEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -106,9 +111,12 @@ fun DiscoverScreen(
     }
     val notificationSeenStore = remember { RealtimeNotificationSeenStore() }
 
-    var profiles by remember { mutableStateOf<List<DiscoveryProfile>>(emptyList()) }
+    val feed = remember(discoveryRepository) { DiscoveryFeed(discoveryRepository) }
+    val feedState by feed.state.collectAsState()
+    val profiles = feedState.profiles
+    val retryScope = rememberCoroutineScope()
     var optimisticDismissedProfileIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var isLoading by remember { mutableStateOf(true) }
+    val isLoading = feedState.initialLoading
     var isSubmittingDecision by remember { mutableStateOf(false) }
     var globalError by remember { mutableStateOf<String?>(null) }
 
@@ -121,51 +129,22 @@ fun DiscoverScreen(
     var selectedDetailsProfile by remember { mutableStateOf<DiscoveryProfile?>(null) }
     val activePhotoIndices = remember { mutableStateMapOf<String, Int>() }
 
-    LaunchedEffect(discoveryRepository) {
-        var isInitialLoad = true
+    ForegroundEffect(discoveryRepository) {
         while (isActive) {
-            if (isInitialLoad) {
-                isLoading = true
-                globalError = null
-            }
-
-            val result = discoveryRepository.loadProfiles()
-            result.fold(
-                onSuccess = { loadedProfiles ->
-                    val loadedIds = loadedProfiles.mapTo(mutableSetOf()) { profile -> profile.id }
-                    optimisticDismissedProfileIds = optimisticDismissedProfileIds
-                        .filterTo(mutableSetOf()) { profileId -> profileId in loadedIds }
-                    profiles = loadedProfiles
-                    currentIndex = 0
-                    selectedDetailsProfile = selectedDetailsProfile?.id?.let { selectedId ->
-                        loadedProfiles.firstOrNull { profile -> profile.id == selectedId }
-                    }
-                    globalError = null
-                },
-                onFailure = { throwable ->
-                    profiles = emptyList()
-                    selectedDetailsProfile = null
-                    currentIndex = 0
-                    globalError = throwable.message ?: "Impossibile caricare i profili discovery"
-                }
-            )
-
-            isInitialLoad = false
-            isLoading = false
-            delay(
-                if (result.isSuccess) {
-                    DiscoveryRefreshPolicy.TokenRefreshIntervalMillis
-                } else {
-                    DiscoveryRefreshPolicy.RetryIntervalMillis
-                }
-            )
+            feed.refresh()
+            delay(if (feed.state.value.error == null) DiscoveryRefreshPolicy.TokenRefreshIntervalMillis else DiscoveryRefreshPolicy.RetryIntervalMillis)
         }
     }
+    LaunchedEffect(feedState.error) { globalError = feedState.error }
 
     val filteredProfiles = discoverProfilesForDisplay(
         profiles = profiles,
         dismissedProfileIds = optimisticDismissedProfileIds
     )
+
+    LaunchedEffect(filteredProfiles.size, feedState.nextCursor) {
+        if (!isLoading && filteredProfiles.size <= 3 && feedState.nextCursor != null) feed.loadMore()
+    }
 
     val currentProfile = filteredProfiles.getOrNull(currentIndex)
     val nextProfile = filteredProfiles.getOrNull(currentIndex + 1)
@@ -252,7 +231,8 @@ fun DiscoverScreen(
         notificationGateway?.showLocalNotification(
             title = resources.getString(R.string.account_switch_matches),
             body = resources.getString(R.string.discover_match_notification_body, payload.profileName),
-            channelId = NotificationChannels.MATCHES
+            channelId = NotificationChannels.MATCHES,
+            destination = minni.fyre.core.notifications.NotificationDestination(currentUserId.orEmpty(), "chat", payload.threadId)
         )
     }
 
@@ -382,12 +362,13 @@ fun DiscoverScreen(
             exit = fadeOut()
         ) {
             Card(
+                modifier = Modifier.clickable { retryScope.launch { feed.refresh() } },
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer
                 )
             ) {
                 Text(
-                    text = globalError.orEmpty(),
+                    text = localizedUiMessage(globalError.orEmpty()),
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(12.dp)
                 )

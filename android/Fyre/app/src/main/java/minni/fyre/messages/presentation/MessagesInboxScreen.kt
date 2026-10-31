@@ -1,5 +1,6 @@
 package minni.fyre.messages.presentation
 
+import minni.fyre.ui.components.localizedUiMessage
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,7 +76,7 @@ fun MessagesInboxScreen(
                 shape = MaterialTheme.shapes.medium
             ) {
                 Text(
-                    text = errorMessage,
+                    text = localizedUiMessage(errorMessage),
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(10.dp)
                 )
@@ -246,6 +247,6 @@ private fun UnreadBadge(unreadCount: Int) {
 
 private fun formatInboxTimestamp(timestamp: Long): String {
     val pattern = "dd/MM HH:mm"
-    return SimpleDateFormat(pattern, Locale.ITALY).format(Date(timestamp))
+    return SimpleDateFormat(pattern, Locale.getDefault()).format(Date(timestamp))
 }
 

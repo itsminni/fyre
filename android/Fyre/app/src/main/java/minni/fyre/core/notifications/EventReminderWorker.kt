@@ -27,7 +27,7 @@ class EventReminderWorker(
         }
 
         val isStillScheduled = EventReminderScheduler.isReminderActive(applicationContext, eventId, milestone)
-        val settings = UserSettingsDataStore(applicationContext).currentNotificationSettingsOrNull()
+        val settings = UserSettingsDataStore(applicationContext, expectedAccountId).currentNotificationSettingsOrNull()
             ?: return finishWithoutNotification(eventId, milestone)
         if (!isStillScheduled || !settings.pushEnabled || !settings.eventReminders) {
             return finishWithoutNotification(eventId, milestone)
@@ -81,7 +81,8 @@ class EventReminderWorker(
         gateway.showLocalNotification(
             title = title,
             body = body,
-            channelId = NotificationChannels.EVENTS
+            channelId = NotificationChannels.EVENTS,
+            destination = NotificationDestination(expectedAccountId, "event", eventId)
         )
         EventReminderScheduler.markReminderFinished(applicationContext, eventId, milestone)
         return Result.success()

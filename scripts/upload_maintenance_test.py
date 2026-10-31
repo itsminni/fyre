@@ -19,6 +19,28 @@ spec.loader.exec_module(maintenance)
 class MaintenanceTests(unittest.TestCase):
     """Exercise stale runs and conservative inventory behavior."""
 
+    def test_shared_bucket_combines_references_and_counts_files_once(self) -> None:
+        """Count the shared bucket once while retaining both reference sets."""
+        env = {
+            "APPWRITE_ATTACHMENT_OPERATIONS_TABLE_ID": "ledger",
+            "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID": "media",
+            "APPWRITE_AVATARS_BUCKET_ID": "media",
+        }
+        snapshot = {"chat": {"attachment"}, "profile": {"avatar"}}
+        with (
+            patch.object(maintenance, "referenced_files", return_value=snapshot),
+            patch.object(maintenance, "rows", return_value=[]),
+            patch.object(
+                maintenance,
+                "pages",
+                return_value=[{"$id": "attachment"}, {"$id": "avatar"}],
+            ) as pages,
+        ):
+            result = maintenance.inventory(env)
+        pages.assert_called_once()
+        self.assertEqual(result["buckets"]["shared"]["referenced"], 2)
+        self.assertEqual(result["review"], [])
+
     def test_missing_hourly_runs_are_detected_even_after_healthy_result(self) -> None:
         """Detect missed schedules even after a successful execution."""
         now = datetime.now(UTC)
