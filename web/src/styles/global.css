@@ -2913,3 +2913,6 @@ textarea:focus {
     scroll-behavior: auto !important;
   }
 }
+
+.offline-demo-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .65rem 1rem; background: #493043; color: #fff; font: 600 .875rem system-ui; }
+.offline-demo-banner button { border: 1px solid currentColor; border-radius: .5rem; background: transparent; color: inherit; padding: .5rem .75rem; cursor: pointer; }

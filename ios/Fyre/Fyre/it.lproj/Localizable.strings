@@ -366,3 +366,6 @@
 "common.back" = "Indietro";
 
 "chat.accessibility.attach" = "Aggiungi allegato";
+
+"demo.offline.banner" = "Demo offline · dati fittizi";
+"demo.offline.reset" = "Ripristina demo";

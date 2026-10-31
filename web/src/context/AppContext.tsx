@@ -1,3 +1,5 @@
+import { OFFLINE_DEMO, LOCAL_STATE_PREFIX } from '../services/runtimeMode';
+import { OfflineDemoService } from '../demo/OfflineDemoService';
 import { notificationDestination } from '../services/notificationDestination';
 import { mergeChatMessages, mergeChatThreads } from '../services/chatState';
 export { mergeChatThreads } from '../services/chatState';
@@ -183,10 +185,11 @@ const EVENT_MESSAGE_BY_KEY: Record<string, string> = {
   'events.error.requestFailed': 'Operazione evento non riuscita. Riprova.'
 };
 
-const appwriteConfiguration = loadAppwriteConfiguration();
-const appwriteService = new AppwriteService(appwriteConfiguration);
+const liveConfiguration = OFFLINE_DEMO ? null : loadAppwriteConfiguration();
+const appwriteConfiguration = liveConfiguration ?? { projectId: 'offline-demo', eventAdminFunctionId: 'offline-demo' };
+const appwriteService = liveConfiguration ? new AppwriteService(liveConfiguration) : new OfflineDemoService();
 const IS_EVENT_ADMIN_ENABLED = Boolean(appwriteConfiguration.eventAdminFunctionId);
-const LOGOUT_TOMBSTONE_KEY = 'fyre_backend_logout_pending_v1';
+const LOGOUT_TOMBSTONE_KEY = `${LOCAL_STATE_PREFIX}backend_logout_pending_v1`;
 const DISCOVERY_TOKEN_REFRESH_INTERVAL_MS = 4 * 60 * 1000;
 
 function hasLogoutTombstone(): boolean {

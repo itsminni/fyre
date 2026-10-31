@@ -1,3 +1,4 @@
+import { LOCAL_STATE_PREFIX } from './runtimeMode';
 import {
   AppNotification,
   AppSettings,
@@ -14,7 +15,7 @@ import {
 } from '../types/models';
 import { normalizeUser } from '../types/models';
 
-const STORAGE_KEY = 'fyre_web_state';
+const STORAGE_KEY = `${LOCAL_STATE_PREFIX}web_state`;
 const STORAGE_VERSION = 2;
 
 interface PersistedStateEnvelope {

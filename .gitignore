@@ -72,3 +72,6 @@ android/Fyre/.idea/
 # Browser test artifacts
 web/test-results/
 web/playwright-report/
+
+# Standalone web demo build
+web/dist-demo/

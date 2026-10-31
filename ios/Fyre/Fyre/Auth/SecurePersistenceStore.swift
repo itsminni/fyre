@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum SecurePersistenceStore {
-    private static let service = "minni.fyre.secure-persistence.v1"
+    private static let service = OfflineDemoMode.isEnabled ? "minni.fyre.demo.secure-persistence.v1" : "minni.fyre.secure-persistence.v1"
 
     static func data(forKey key: String) throws -> Data? {
         var query = baseQuery(forKey: key)

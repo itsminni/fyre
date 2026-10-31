@@ -30,7 +30,7 @@ Fyre is a high-school final project built by a small team. It is a multi-platfor
 
 An offline demo for all three clients is available on the [`demo` branch](https://github.com/itsminni/fyre/tree/demo).
 
-Fyre requires your own Appwrite backend. First [configure your own Appwrite project](appwrite/README.md#one-time-appwrite-setup), deploy the schema and functions, and fill the ignored client configuration files with its endpoint and resource IDs. The example files contain placeholders.
+To try the app without a backend, use the offline demos: [Web](web/README.md#offline-demo), [Android](android/Fyre/README.md#offline-demo), or [iOS](ios/Fyre/README.md#offline-demo). The connected clients require your own Appwrite backend. First [configure your own Appwrite project](appwrite/README.md#one-time-appwrite-setup), deploy the schema and functions, and fill the ignored client configuration files with its endpoint and resource IDs.
 
 ### Web
 
@@ -101,7 +101,7 @@ Fyre è un progetto finale di quinta superiore realizzato da un piccolo gruppo. 
 
 Una demo offline dei tre client è disponibile nel [branch `demo`](https://github.com/itsminni/fyre/tree/demo).
 
-Fyre richiede un backend Appwrite proprio. Prima [configurare un proprio progetto Appwrite](appwrite/README.md#configurazione-iniziale-su-appwrite), distribuire schema e funzioni e compilare i file client ignorati con endpoint e ID delle risorse. I file di esempio contengono placeholder.
+Per provare Fyre senza backend sono disponibili le demo offline [web](web/README.md#demo-offline), [Android](android/Fyre/README.md#demo-offline) e [iOS](ios/Fyre/README.md#demo-offline). I client connessi richiedono un backend Appwrite proprio. Prima [configurare un proprio progetto Appwrite](appwrite/README.md#configurazione-iniziale-su-appwrite), distribuire schema e funzioni e compilare i file client ignorati con endpoint e ID delle risorse.
 
 
 #### Web

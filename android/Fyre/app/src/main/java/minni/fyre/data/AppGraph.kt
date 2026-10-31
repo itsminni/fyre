@@ -32,7 +32,9 @@ class AppGraph(
     private val backendUnavailableMessage =
         "Configurazione Appwrite incompleta: l'app Android richiede il database."
 
-    val appwriteConfiguration: AppwriteConfiguration? = AppwriteConfiguration.loadOrNull()
+    val isDemoMode: Boolean = minni.fyre.BuildConfig.DEMO_MODE
+    private val demo = if (isDemoMode) minni.fyre.data.demo.OfflineDemo() else null
+    val appwriteConfiguration: AppwriteConfiguration? = if (isDemoMode) null else AppwriteConfiguration.loadOrNull()
     private val appwriteGateway: AppwriteGateway? = appwriteConfiguration
         ?.let { configuration -> AppwriteGateway(appContext, configuration) }
     val realtimeService = appwriteConfiguration?.let { minni.fyre.data.appwrite.AppwriteRealtimeService(appContext, it) }
@@ -40,11 +42,11 @@ class AppGraph(
     val privateMediaStore: AppwritePrivateMediaStore? = appwriteGateway
         ?.let { gateway -> AppwritePrivateMediaStore(appContext, gateway) }
 
-    val authRepository: AuthRepository = appwriteGateway
+    val authRepository: AuthRepository = demo?.auth ?: appwriteGateway
         ?.let { gateway -> AppwriteAuthRepository(gateway, appContext) }
         ?: BackendUnavailableAuthRepository(backendUnavailableMessage)
 
-    val discoveryRepository: DiscoveryRepository = if (
+    val discoveryRepository: DiscoveryRepository = demo?.discovery ?: if (
         appwriteConfiguration != null && appwriteGateway != null
     ) {
         AppwriteDiscoveryRepository(
@@ -56,7 +58,7 @@ class AppGraph(
         BackendUnavailableDiscoveryRepository(backendUnavailableMessage)
     }
 
-    val messagesRepository: MessagesRepository = if (
+    val messagesRepository: MessagesRepository = demo?.chat ?: if (
         appwriteConfiguration != null && appwriteGateway != null
     ) {
         AppwriteMessagesRepository(appwriteGateway, appwriteConfiguration, localRecentChatStore)
@@ -64,7 +66,7 @@ class AppGraph(
         BackendUnavailableMessagesRepository(backendUnavailableMessage)
     }
 
-    val eventsRepository: EventsRepository = if (
+    val eventsRepository: EventsRepository = demo?.eventRepository ?: if (
         appwriteConfiguration != null && appwriteGateway != null
     ) {
         AppwriteEventsRepository(appwriteGateway, appwriteConfiguration)
@@ -73,12 +75,17 @@ class AppGraph(
     }
 
     val isBackendEnabled: Boolean
-        get() = appwriteConfiguration != null
+        get() = isDemoMode || appwriteConfiguration != null
 }
 
 object AppGraphProvider {
     @Volatile
     private var instance: AppGraph? = null
+
+    fun resetDemo() {
+        check(minni.fyre.BuildConfig.DEMO_MODE)
+        synchronized(this) { instance = null }
+    }
 
     fun get(context: Context): AppGraph {
         return instance ?: synchronized(this) {

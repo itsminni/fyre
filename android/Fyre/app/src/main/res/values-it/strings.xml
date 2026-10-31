@@ -357,5 +357,7 @@
     <string name="history_waitlisted">In attesa</string>
     <string name="history_cancelled">Annullato</string>
     <string name="history_attended">Partecipazione confermata</string>
-    <string name="backend_configuration_unavailable">Fyre non è ancora configurato. Configura il backend per continuare.</string>
+    <string name="offline_demo_banner">Demo offline · dati fittizi</string>
+    <string name="offline_demo_reset">Ripristina demo</string>
+    <string name="backend_configuration_unavailable">Fyre non è ancora configurato. Configura il backend oppure installa Fyre Demo per provarlo offline.</string>
 </resources>

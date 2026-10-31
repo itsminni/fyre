@@ -7,6 +7,26 @@ React and TypeScript client built with Vite.
 - Node.js 22.13+ (22.x), or Node.js 24 or newer;
 - npm; the lockfile is the reproducible dependency source.
 
+## Offline demo
+
+No Appwrite account, `.env.local` or API keys are needed:
+
+```sh
+npm ci
+npm run dev:demo
+```
+
+The app opens with a fictional complete profile. Discovery likes create local matches; chat and attachments, profile editing, event registration/cancellation and event administration use an in-memory backend. **Reset demo** restores the fixtures. Reloading the page also resets the data. Device settings use a separate demo storage namespace. City suggestions come from a local list; fonts and backend services require no external requests.
+
+For a standalone static build:
+
+```sh
+npm run build:demo
+npm run preview:demo
+```
+
+Serve `dist-demo/` with the same SPA fallback as the connected client. The default connected build remains `npm run build`; missing configuration never activates demo mode. Browser checks: `npm run test:demo` (desktop and mobile, all external requests blocked).
+
 ## Setup
 
 First [configure your own Appwrite backend](../appwrite/README.md#one-time-appwrite-setup). Then, from the repository root:
@@ -43,6 +63,24 @@ Client React e TypeScript costruito con Vite.
 
 - Node.js 22.13+ (serie 22), oppure Node.js 24 o successivo;
 - npm; il lockfile è la fonte riproducibile delle dipendenze.
+
+### Demo offline
+
+Non servono account Appwrite, `.env.local` o chiavi:
+
+```sh
+npm ci
+npm run dev:demo
+```
+
+Il profilo è fittizio e già completo. Discovery, match, chat e allegati, modifica profilo, iscrizione/annullamento e amministrazione eventi usano soltanto dati in memoria. **Ripristina demo** ripristina i dati; anche ricaricare la pagina li azzera. Le impostazioni usano uno spazio separato dalla versione connessa. Città e font non richiedono servizi esterni.
+
+```sh
+npm run build:demo
+npm run preview:demo
+```
+
+La build statica è in `dist-demo/`; il server deve gestire le rotte SPA. Il client connesso continua a usare `npm run build`: una configurazione mancante non abilita la demo. `npm run test:demo` verifica i flussi desktop/mobile bloccando tutte le richieste esterne.
 
 ### Avvio
 

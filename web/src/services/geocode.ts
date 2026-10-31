@@ -1,3 +1,4 @@
+import { OFFLINE_DEMO } from './runtimeMode';
 interface CityEntry {
   name: string;
   lat: number;
@@ -61,6 +62,7 @@ export function searchCities(query: string): GeocodeResult[] {
 }
 
 export async function searchCitiesRemote(query: string, signal?: AbortSignal): Promise<GeocodeResult[]> {
+  if (OFFLINE_DEMO) return searchCities(query);
   const normalized = query.trim();
   const cacheKey = normalized.toLowerCase();
   if (normalized.length < 2) {

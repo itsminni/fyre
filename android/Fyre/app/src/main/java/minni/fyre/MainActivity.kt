@@ -1,6 +1,17 @@
 package minni.fyre
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
+import androidx.compose.material3.TextButton
 import android.os.Bundle
 import android.os.LocaleList
 import androidx.activity.ComponentActivity
@@ -105,23 +116,42 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                NavGraph(
-                    navController = navController,
-                    authViewModel = authViewModel,
-                    sessionViewModel = sessionViewModel,
-                    notificationDestination = notificationDestination,
-                    onNotificationConsumed = {
-                        notificationDestination = null
-                        intent.removeExtra("notification_account")
-                        intent.removeExtra("notification_kind")
-                        intent.removeExtra("notification_resource")
-                        intent.data = null
-                    },
-                    onRetrySession = {
-                        sessionViewModel.verifyAgain()
-                        verificationAttempt++
+                Column {
+                    if (appGraph.isDemoMode) {
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(stringResource(R.string.offline_demo_banner),
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelMedium)
+                                TextButton(onClick = {
+                                    AppGraphProvider.resetDemo()
+                                    viewModelStore.clear()
+                                    recreate()
+                                }) { Text(stringResource(R.string.offline_demo_reset)) }
+                            }
+                        }
                     }
-                )
+                    NavGraph(
+                        navController = navController,
+                        authViewModel = authViewModel,
+                        sessionViewModel = sessionViewModel,
+                        notificationDestination = notificationDestination,
+                        onNotificationConsumed = {
+                            notificationDestination = null
+                            intent.removeExtra("notification_account")
+                            intent.removeExtra("notification_kind")
+                            intent.removeExtra("notification_resource")
+                            intent.data = null
+                        },
+                        onRetrySession = {
+                            sessionViewModel.verifyAgain()
+                            verificationAttempt++
+                        }
+                    )
+                }
             }
         }
     }

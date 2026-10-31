@@ -366,3 +366,6 @@
 "common.back" = "Back";
 
 "chat.accessibility.attach" = "Add attachment";
+
+"demo.offline.banner" = "Offline demo · fictional data";
+"demo.offline.reset" = "Reset demo";

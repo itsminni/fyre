@@ -20,6 +20,10 @@ final class AppServices {
             return
         }
 
+        if OfflineDemoMode.isEnabled {
+            self.backend = OfflineDemoBackend.shared
+            return
+        }
         do {
             // Prefer the real Appwrite backend, but fall back to an explicit unavailable backend
             // so the app can surface configuration issues without crashing during startup.

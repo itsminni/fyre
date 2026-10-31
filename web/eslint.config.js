@@ -34,7 +34,7 @@ const browserGlobals = {
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'node_modules']
+    ignores: ['dist', 'dist-demo', 'node_modules']
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -68,7 +68,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ['vite.config.ts', 'playwright.config.ts', 'e2e/**/*.ts', 'src/**/*.test.ts'],
+    files: ['vite.config.ts', 'playwright*.config.ts', 'e2e/**/*.ts', 'src/**/*.test.ts'],
     languageOptions: {
       globals: {
         ...browserGlobals,

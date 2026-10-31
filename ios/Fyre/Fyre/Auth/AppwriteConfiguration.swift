@@ -33,6 +33,7 @@ struct AppwriteConfiguration: Sendable {
     let endpointURL: URL
 
     static func load(bundle: Bundle = .main) throws -> AppwriteConfiguration {
+        guard !OfflineDemoMode.isEnabled else { throw AppwriteConfigurationError.missingFile }
         guard let url = bundle.url(forResource: "Config", withExtension: "plist") else {
             throw AppwriteConfigurationError.missingFile
         }

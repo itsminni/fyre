@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - demo
   pull_request:
   workflow_call:
     inputs:
@@ -55,6 +56,10 @@ jobs:
 
       - name: Test web user flows
         run: npm run test:e2e
+        working-directory: web
+
+      - name: Test offline web demo
+        run: npm run test:demo -- --workers=2
         working-directory: web
 
       - name: Validate Appwrite manifests
@@ -111,7 +116,10 @@ jobs:
           cache-provider: basic
 
       - name: Run unit tests, lint and release build
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease assembleDemo
+
+      - name: Test offline Android demo
+        run: ./gradlew --no-daemon -PfyreUiDemo=true testDemoUnitTest
 
   ios:
     name: iOS
@@ -143,3 +151,19 @@ jobs:
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -parallel-testing-enabled NO \
             -resultBundlePath /tmp/Fyre-tests.xcresult
+
+      - name: Test isolated iOS offline demo
+        shell: bash
+        run: |
+          set -euo pipefail
+          simulator_id="$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')"
+          test -n "$simulator_id"
+          xcodebuild test \
+            -project ios/Fyre/Fyre.xcodeproj \
+            -scheme FyreDemo \
+            -destination "platform=iOS Simulator,id=$simulator_id" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath /tmp/Fyre-demo-tests.xcresult \
+            -derivedDataPath /tmp/Fyre-demo \
+            CODE_SIGNING_ALLOWED=NO
+          test ! -f /tmp/Fyre-demo/Build/Products/Demo-iphonesimulator/Fyre.app/Config.plist

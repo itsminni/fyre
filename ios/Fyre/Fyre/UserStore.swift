@@ -521,7 +521,7 @@ final class UserStore: @unchecked Sendable {
 
     private let maxParticipants = 48
     private let mainEventTitle = "Fyre Event"
-    private let appwriteService: AppwriteService?
+    private let appwriteService: (any UserAccountService)?
     private let appwriteInitializationError: String?
     @ObservationIgnored private var profileMutationGate = AsyncOperationGate()
     @ObservationIgnored private var sessionBootstrapTask: Task<Void, Never>?
@@ -568,7 +568,11 @@ final class UserStore: @unchecked Sendable {
         selectedRemoteEventId = nil
         if Self.shouldUseAppwrite {
             UserDefaults.standard.removeObject(forKey: PersistenceKey.mainEventState)
-            do {
+            if OfflineDemoMode.isEnabled {
+                appwriteService = OfflineDemoBackend.shared
+                appwriteInitializationError = nil
+                currentUser = OfflineDemoMode.user
+            } else { do {
                 // Once Appwrite is configured, auth/profile/event state should come from the backend.
                 let configuration = try AppwriteConfiguration.load()
                 appwriteService = AppwriteService(configuration: configuration)
@@ -579,12 +583,25 @@ final class UserStore: @unchecked Sendable {
                 appwriteService = nil
                 appwriteInitializationError = error.localizedDescription
                 debugLog("Appwrite initialization failed")
-            }
+            } }
         } else {
             appwriteService = nil
             appwriteInitializationError = nil
         }
         AccountPreferenceScope.activate(accountId: currentUser?.appwriteUserId)
+    }
+
+    @MainActor
+    func resetOfflineDemo() async {
+        guard OfflineDemoMode.isEnabled else { return }
+        advanceSessionEpoch()
+        RecentChatThreadStore.clearForLogout(currentUserId: currentUser?.appwriteUserId)
+        MatchSeenStore.clearForLogout(currentUserId: currentUser?.appwriteUserId)
+        await OfflineDemoBackend.shared.reset()
+        currentUser = OfflineDemoMode.user
+        selectedRemoteEventId = nil
+        await refreshRemoteMainEventState()
+        NotificationCenter.default.post(name: .fyreThreadsDidChange, object: nil)
     }
 
     @MainActor
@@ -628,6 +645,7 @@ final class UserStore: @unchecked Sendable {
     }
 
     private func hasPendingLogout() -> Bool {
+        if OfflineDemoMode.isEnabled { return false }
         if logoutPendingInMemory {
             return true
         }
@@ -639,6 +657,7 @@ final class UserStore: @unchecked Sendable {
     }
 
     private func setLogoutPending(_ isPending: Bool) {
+        guard !OfflineDemoMode.isEnabled else { return }
         logoutPendingInMemory = isPending
         if isPending {
             try? SecurePersistenceStore.setData(Data([1]), forKey: SecurePersistenceKey.logoutPending)
@@ -648,7 +667,7 @@ final class UserStore: @unchecked Sendable {
     }
 
     @MainActor
-    private func finishPendingLogout(using service: AppwriteService) async -> Bool {
+    private func finishPendingLogout(using service: any UserAccountService) async -> Bool {
         guard hasPendingLogout() else { return true }
         do {
             try await service.logOut()
@@ -780,7 +799,7 @@ final class UserStore: @unchecked Sendable {
         await acquireAuthenticationOperation()
         defer { releaseAuthenticationOperation() }
 
-        await PushNotificationCoordinator.shared.unregister()
+        if !OfflineDemoMode.isEnabled { await PushNotificationCoordinator.shared.unregister() }
         do {
             try await appwriteService.logOut()
             setLogoutPending(false)
@@ -1110,7 +1129,7 @@ final class UserStore: @unchecked Sendable {
     private func enforceMainEventEligibilityAfterProfileChange(
         _ shouldRemoveRegistration: Bool,
         user: User,
-        appwriteService: AppwriteService
+        appwriteService: any UserAccountService
     ) async -> String? {
         let operationEpoch = sessionEpoch
         let operationIdentity = sessionIdentity(for: user)
@@ -1466,6 +1485,7 @@ final class UserStore: @unchecked Sendable {
 
     @MainActor
     private static func resolvedCity(for city: String) async throws -> (displayName: String, latitude: Double, longitude: Double) {
+        if OfflineDemoMode.isEnabled { return (city, 44.6471, 10.9252) }
 #if DEBUG
         if isRunningTests {
             return (city, 0, 0)
@@ -1590,6 +1610,7 @@ final class UserStore: @unchecked Sendable {
     }
 
     static func loadCurrentUser() -> User? {
+        if OfflineDemoMode.isEnabled { return nil }
         do {
             if let secureData = try SecurePersistenceStore.data(forKey: SecurePersistenceKey.currentUser) {
                 do {
@@ -1613,6 +1634,7 @@ final class UserStore: @unchecked Sendable {
     }
 
     private static func saveCurrentUser(_ user: User?) {
+        guard !OfflineDemoMode.isEnabled else { return }
         guard let user else {
             try? SecurePersistenceStore.removeData(forKey: SecurePersistenceKey.currentUser)
             return
@@ -1632,10 +1654,11 @@ final class UserStore: @unchecked Sendable {
     }
 
     private static func loadMainEventState() -> MainEventState {
-        loadPersistedValue(MainEventState.self, forKey: PersistenceKey.mainEventState) ?? MainEventState()
+        OfflineDemoMode.isEnabled ? MainEventState() : loadPersistedValue(MainEventState.self, forKey: PersistenceKey.mainEventState) ?? MainEventState()
     }
 
     private static func saveMainEventState(_ state: MainEventState) {
+        guard !OfflineDemoMode.isEnabled else { return }
         savePersistedValue(state, forKey: PersistenceKey.mainEventState)
     }
 
@@ -1740,6 +1763,8 @@ final class UserStore: @unchecked Sendable {
     }
 
     private static var shouldUseAppwrite: Bool {
+        // Demo uses the account/event adapter path with its local actor, including in UI tests.
+        if OfflineDemoMode.isEnabled { return true }
         if isRunningTests {
             return false
         }

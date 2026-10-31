@@ -1,3 +1,4 @@
+import { OFFLINE_DEMO } from './services/runtimeMode';
 import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
@@ -84,8 +85,8 @@ function RootRedirect(): JSX.Element {
 function AppRoutes(): JSX.Element {
   const { isAuthInitialized, authError, retrySession, persisted } = useAppStore();
 
+  const italian = persisted.settings.language === 'it';
   if (!isAuthInitialized) {
-    const italian = persisted.settings.language === 'it';
     const message = authError
       ? (italian ? 'Impossibile verificare la sessione. Controllare la connessione e riprovare.' : 'Unable to verify your session. Check your connection and try again.')
       : (italian ? 'Ripristino della sessione…' : 'Restoring your session…');
@@ -105,6 +106,10 @@ function AppRoutes(): JSX.Element {
   return (
     <>
       <ThemeBridge />
+      {OFFLINE_DEMO && <aside className="offline-demo-banner" aria-label="Offline demo">
+        <span>{italian ? 'Demo offline · dati fittizi' : 'Offline demo · fictional data'}</span>
+        <button type="button" onClick={() => { window.location.href = '/'; }}>{italian ? 'Ripristina demo' : 'Reset demo'}</button>
+      </aside>}
       <Routes>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/auth/login" element={<LoginPage />} />

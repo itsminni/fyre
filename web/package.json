@@ -12,7 +12,11 @@
     "test": "vitest run",
     "check": "npm run lint && npm run test && npm run typecheck:e2e && npm run build",
     "test:e2e": "playwright test",
-    "typecheck:e2e": "tsc -p tsconfig.e2e.json"
+    "typecheck:e2e": "tsc -p tsconfig.e2e.json",
+    "dev:demo": "vite --mode demo",
+    "build:demo": "tsc -b && vite build --mode demo --outDir dist-demo",
+    "preview:demo": "vite preview --mode demo --outDir dist-demo",
+    "test:demo": "playwright test --config playwright.demo.config.ts"
   },
   "dependencies": {
     "appwrite": "^14.0.0",

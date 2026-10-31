@@ -22,6 +22,7 @@ struct FyreApp: App {
     @State private var services = AppServices.shared
     @State private var notificationCoordinator = LocalNotificationCoordinator.shared
     @State private var pushNotificationCoordinator = PushNotificationCoordinator.shared
+    @State private var offlineDemoRevision = 0
     @State private var presenceHeartbeatTask: Task<Void, Never>?
 
     init() {
@@ -47,11 +48,23 @@ struct FyreApp: App {
                 ContentView()
 #endif
             }
+                .id(offlineDemoRevision)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if OfflineDemoMode.isEnabled {
+                        HStack {
+                            Text(L10n.tr("demo.offline.banner")).font(.caption)
+                            Spacer()
+                            Button(L10n.tr("demo.offline.reset")) { Task { await store.resetOfflineDemo(); offlineDemoRevision += 1 } }
+                                .accessibilityIdentifier("demo.reset")
+                        }.padding(10).background(.regularMaterial)
+                    }
+                }
                 .preferredColorScheme(preferredColorScheme)
                 .environment(store)
                 .environmentObject(router)
                 .environment(services)
                 .task(id: "\(pushUserId ?? "guest"):\(scenePhase == .active):\(store.sessionRevision)") {
+                    guard !OfflineDemoMode.isEnabled else { return }
                     SharedRealtimeHub.shared.configure(accountId: pushUserId, isActive: scenePhase == .active, sessionRevision: store.sessionRevision)
                 }
                 .task(id: scenePhase) {
@@ -61,12 +74,14 @@ struct FyreApp: App {
 #if DEBUG
                     guard !ChatHistoryPreview.isEnabled else { return }
 #endif
+                    guard !OfflineDemoMode.isEnabled else { return }
                     await notificationCoordinator.refresh(
                         currentUserId: store.currentUser?.appwriteUserId,
                         upcomingEvents: store.currentUserUpcomingEventHistory
                     )
                 }
                 .task(id: pushRefreshKey) {
+                    guard !OfflineDemoMode.isEnabled else { return }
                     await pushNotificationCoordinator.sync(
                         currentUserId: pushUserId,
                         enabled: notificationsEnabled
@@ -87,6 +102,7 @@ struct FyreApp: App {
     }
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {
+        guard !OfflineDemoMode.isEnabled else { return }
 #if DEBUG
         guard !ChatHistoryPreview.isEnabled else { return }
 #endif
@@ -148,7 +164,7 @@ final class FyreAppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         _ = launchOptions
         _ = LocalNotificationCoordinator.shared
-        application.registerForRemoteNotifications()
+        if !OfflineDemoMode.isEnabled { application.registerForRemoteNotifications() }
         return true
     }
 

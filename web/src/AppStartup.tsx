@@ -1,3 +1,4 @@
+import { OFFLINE_DEMO } from './services/runtimeMode';
 import { lazy, Suspense } from 'react';
 import { GradientBackdrop } from './components/layout/GradientBackdrop';
 import { Card } from './components/ui/Card';
@@ -9,7 +10,7 @@ const App = lazy(() => import('./App'));
 
 export function AppStartup(): JSX.Element {
   try {
-    loadAppwriteConfiguration();
+    if (!OFFLINE_DEMO) loadAppwriteConfiguration();
   } catch {
     return (
       <GradientBackdrop>

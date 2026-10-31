@@ -55,6 +55,7 @@ android {
 
     defaultConfig {
         applicationId = "minni.fyre"
+        buildConfigField("boolean", "DEMO_MODE", "false")
         minSdk = 29
         targetSdk = 36
         versionCode = 1
@@ -214,7 +215,50 @@ android {
         )
     }
 
+    testBuildType = if (providers.gradleProperty("fyreUiDemo").orNull == "true") "demo" else "debug"
     buildTypes {
+        create("demo") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".demo"
+            versionNameSuffix = "-offline-demo"
+            matchingFallbacks += listOf("debug")
+            signingConfig = signingConfigs.getByName("debug")
+            buildConfigField("boolean", "DEMO_MODE", "true")
+            buildConfigField("boolean", "APPWRITE_BACKEND_ENABLED", "false")
+            listOf(
+                "APPWRITE_API_FUNCTION_ID",
+                "APPWRITE_AVATARS_BUCKET_ID",
+                "APPWRITE_CANCEL_EVENT_REGISTRATION_FUNCTION_ID",
+                "APPWRITE_CHAT_ATTACHMENTS_BUCKET_ID",
+                "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_DOMAIN",
+                "APPWRITE_CREATE_OR_GET_THREAD_FUNCTION_ID",
+                "APPWRITE_DATABASE_ID",
+                "APPWRITE_DISCOVER_PROFILES_FUNCTION_DOMAIN",
+                "APPWRITE_DISCOVER_PROFILES_FUNCTION_ID",
+                "APPWRITE_ENDPOINT",
+                "APPWRITE_EVENTS_TABLE_ID",
+                "APPWRITE_EVENT_ADMIN_FUNCTION_DOMAIN",
+                "APPWRITE_EVENT_ADMIN_FUNCTION_ID",
+                "APPWRITE_EVENT_REGISTRATIONS_TABLE_ID",
+                "APPWRITE_MANAGE_PROFILE_FUNCTION_ID",
+                "APPWRITE_MANAGE_RELATIONSHIP_FUNCTION_ID",
+                "APPWRITE_MATCHES_TABLE_ID",
+                "APPWRITE_MESSAGES_TABLE_ID",
+                "APPWRITE_PROFILES_TABLE_ID",
+                "APPWRITE_PROJECT_ID",
+                "APPWRITE_RECORD_SWIPE_FUNCTION_DOMAIN",
+                "APPWRITE_RECORD_SWIPE_FUNCTION_ID",
+                "APPWRITE_REGISTER_FOR_EVENT_FUNCTION_ID",
+                "APPWRITE_RELATIONSHIPS_TABLE_ID",
+                "APPWRITE_SEND_MESSAGE_FUNCTION_DOMAIN",
+                "APPWRITE_SEND_MESSAGE_FUNCTION_ID",
+                "APPWRITE_STORAGE_BUCKET_ID",
+                "APPWRITE_SWIPES_TABLE_ID",
+                "APPWRITE_THREADS_TABLE_ID",
+                "APPWRITE_THREAD_PARTICIPANTS_TABLE_ID"
+            )
+                .forEach { buildConfigField("String", it, "\"\"") }
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(

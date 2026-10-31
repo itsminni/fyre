@@ -9,6 +9,19 @@ SwiftUI app with an iOS 17 deployment target.
 
 The app targets iOS 17, but building it requires the newer SDK for the conditionally enabled iOS 26 APIs. The shared scheme uses Debug for Run and Release for Archive and Profile.
 
+## Offline demo
+
+Open `Fyre.xcodeproj`, choose the shared **FyreDemo** scheme and run on an iOS simulator or device. No `Config.plist` or Appwrite project is needed. The **Demo** build configuration uses `minni.Fyre.demo`, displays **Fyre Demo**, excludes the runtime configuration and disables Appwrite loading, APNs registration and shared realtime.
+
+The fictional profile is complete. Discovery/matches, paginated chat with attachments, profile editing, the two-event catalog, registration/cancellation and event administration run in memory. **Reset demo** restores the data and navigation. The connected app keeps the **Fyre** scheme. Settings and secure caches remain separate from the demo installation.
+
+```sh
+xcodebuild build -project Fyre.xcodeproj -scheme FyreDemo \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+```
+
+The demo scheme selects `OfflineDemoBackendTests` and `OfflineDemoUITests` for Test. It requires full Xcode and an installed simulator runtime; Command Line Tools alone can check Swift syntax and the Foundation backend, but cannot build the iOS app.
+
 ## Setup
 
 From the repository root:
@@ -52,6 +65,19 @@ App SwiftUI con deployment target iOS 17.
 - un simulatore iOS o dispositivo fisico.
 
 L'app mantiene iOS 17 come deployment target, ma per compilarla occorre il nuovo SDK per le API iOS 26 abilitate condizionalmente. Lo schema condiviso usa Debug per Run e Release per Archive e Profile.
+
+### Demo offline
+
+Aprire `Fyre.xcodeproj`, selezionare lo schema condiviso **FyreDemo** e avviare un simulatore o dispositivo. Non servono `Config.plist` né un progetto Appwrite. La configurazione **Demo** usa il bundle `minni.Fyre.demo`, il nome **Fyre Demo**, esclude la configurazione live e disabilita Appwrite, APNs e realtime remoto.
+
+Profilo completo fittizio, discovery/match, chat paginata con allegati, modifica profilo, due eventi, iscrizioni/annullamento e amministrazione funzionano in memoria. **Ripristina demo** ripristina dati e navigazione. Il client connesso mantiene lo schema **Fyre**; impostazioni e cache sicure delle due installazioni restano separate.
+
+```sh
+xcodebuild build -project Fyre.xcodeproj -scheme FyreDemo \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+```
+
+Lo schema demo seleziona `OfflineDemoBackendTests` e `OfflineDemoUITests`. Per build e test dell’interfaccia servono Xcode completo e un runtime simulatore; i soli Command Line Tools consentono le verifiche di sintassi Swift e del backend Foundation.
 
 ### Avvio
 

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "2640"
+   version = "1.8">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES"
+      buildArchitectures = "Automatic">
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "3F9C19CD2F3C71A10045CA2F"
+               BuildableName = "Fyre.app"
+               BlueprintName = "Fyre"
+               ReferencedContainer = "container:Fyre.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Demo"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      shouldAutocreateTestPlan = "YES">
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1B2C3D72F3C71A10045CA2F"
+               BuildableName = "FyreTests.xctest"
+               BlueprintName = "FyreTests"
+               ReferencedContainer = "container:Fyre.xcodeproj">
+            </BuildableReference>
+            <SelectedTests><TestIdentifier Identifier="OfflineDemoBackendTests" /></SelectedTests>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1B2C3D82F3C71A10045CA2F"
+               BuildableName = "FyreUITests.xctest"
+               BlueprintName = "FyreUITests"
+               ReferencedContainer = "container:Fyre.xcodeproj">
+            </BuildableReference>
+            <MacroExpansion>
+               <BuildableReference
+                  BuildableIdentifier = "primary"
+                  BlueprintIdentifier = "3F9C19CD2F3C71A10045CA2F"
+                  BuildableName = "Fyre.app"
+                  BlueprintName = "Fyre"
+                  ReferencedContainer = "container:Fyre.xcodeproj">
+               </BuildableReference>
+            </MacroExpansion>
+            <SelectedTests><TestIdentifier Identifier="OfflineDemoUITests" /></SelectedTests>
+         </TestableReference>
+      </Testables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Demo"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "3F9C19CD2F3C71A10045CA2F"
+            BuildableName = "Fyre.app"
+            BlueprintName = "Fyre"
+            ReferencedContainer = "container:Fyre.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Demo"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "3F9C19CD2F3C71A10045CA2F"
+            BuildableName = "Fyre.app"
+            BlueprintName = "Fyre"
+            ReferencedContainer = "container:Fyre.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Demo">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Demo"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>
