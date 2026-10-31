@@ -511,12 +511,33 @@ class DependabotMergeTest < Minitest::Test
   def test_duplicate_requests_do_not_start_more_ci_runs
     stale_base
     path = "/actions/workflows/dependabot-integration.yml/runs?event=workflow_dispatch&branch=main&head_sha=#{BASE_SHA}"
-    %w[queued in_progress completed].each do |status|
+    %w[queued in_progress].each do |status|
       @responses[path] = [{ "display_title" => DependabotMerge.integration_title(integration_inputs), "status" => status,
                             "conclusion" => status == "completed" ? "success" : nil }]
       assert_empty run_merge
       assert_includes @merge_output, "already requested"
     end
+  end
+
+  def test_recovers_a_successful_integration_when_its_completion_event_was_lost
+    use_integration
+    path = "/actions/workflows/dependabot-integration.yml/runs?event=workflow_dispatch&branch=main&head_sha=#{BASE_SHA}"
+    @responses[path] = [{ "id" => 42, "display_title" => DependabotMerge.integration_title(integration_inputs),
+                            "status" => "completed", "conclusion" => "success" }]
+    api = FakeAPI.new(@responses)
+    capture_io { DependabotMerge.request_integration(api, @responses["/pulls/12"], "itsminni/fyre") }
+    assert_equal [["/pulls/12/merge", { "sha" => HEAD_SHA, "merge_method" => "squash" }]], api.writes
+  end
+
+  def test_recovered_integrations_still_require_each_successful_platform
+    use_integration
+    path = "/actions/workflows/dependabot-integration.yml/runs?event=workflow_dispatch&branch=main&head_sha=#{BASE_SHA}"
+    @responses[path] = [{ "id" => 42, "display_title" => DependabotMerge.integration_title(integration_inputs),
+                            "status" => "completed", "conclusion" => "success" }]
+    @responses["/actions/runs/42/attempts/1/jobs"].last["conclusion"] = "failure"
+    api = FakeAPI.new(@responses)
+    capture_io { DependabotMerge.request_integration(api, @responses["/pulls/12"], "itsminni/fyre") }
+    assert_empty api.writes
   end
 
   def test_failed_existing_integration_is_not_retried_in_a_loop
@@ -592,5 +613,12 @@ class DependabotMergeTest < Minitest::Test
       assert_equal "${{ inputs.checkout_ref || github.sha }}", checkout.fetch("with").fetch("ref")
       assert_equal false, checkout.fetch("with").fetch("persist-credentials")
     end
+  end
+
+  def test_merge_workflow_matches_dynamic_integration_run_names
+    workflow = YAML.load_file(File.expand_path("../.github/workflows/dependabot-automerge.yml", __dir__))
+    triggers = workflow["on"] || workflow[true]
+    assert_includes triggers.fetch("workflow_run").fetch("workflows"), "Dependabot integration*"
+    assert_equal ["main"], triggers.fetch("push").fetch("branches")
   end
 end
