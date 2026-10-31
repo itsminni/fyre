@@ -34,7 +34,7 @@ Con JDK 21 e Android SDK 37:
 ./gradlew --no-daemon -PfyreUiDemo=true connectedDemoAndroidTest
 ```
 
-Il primo comando comprende i test del repository demo. Il secondo richiede un emulatore e seleziona la demo senza credenziali. I tre test UI passati su emulatore Android 15 coprono cronologia, invio, ripristino, iscrizione/annullamento e apertura delle notifiche con verifica dell’account. Passano i 151 test unitari sia della variante normale sia della demo. Lint non segnala errori e le build release e demo sono riuscite. Anche i 136 test backend, i quattro contratti condivisi e i dodici test degli strumenti di migrazione passano. La configurazione CI locale include unit test, lint, release e compilazione demo; non è ancora pubblicata su GitHub. L’esecuzione su emulatore qui documentata è locale.
+Il primo comando comprende i test del repository demo. Il secondo richiede un emulatore e seleziona la demo senza credenziali. I tre test UI passati su emulatore Android 15 coprono cronologia, invio, ripristino, iscrizione/annullamento e apertura delle notifiche con verifica dell’account. Passano 145 test unitari nel branch `main` e 151 nella variante demo. Lint non segnala errori e le build release e demo sono riuscite. Anche i 136 test backend, i quattro contratti condivisi e i dodici test degli strumenti di migrazione passano. La [CI pubblicata su GitHub](https://github.com/itsminni/fyre/actions/runs/41218355830) verifica web, backend, strumenti Python, build e test Android, oltre a build e test iOS dei client connesso e demo. I tre test UI Android qui documentati sono stati eseguiti localmente su emulatore.
 
 Vedere il [README Android](README.md#demo-offline) per il percorso dimostrativo da un minuto e l’APK.
 
@@ -48,6 +48,6 @@ The Android fixes cover empty photo removal, chunked/resumable/cancellable uploa
 
 The separate Android demo uses fictional process-local data, blank Appwrite configuration and no Internet permission. See the [offline demo instructions](README.md#offline-demo). It supports discovery/matches, chat, local attachments, profile editing and event registration/cancellation. Remote push delivery, real-device accessibility and the previously excluded account/reporting features are not claimed complete. Emulator checks cover only the flows implemented in `OfflineDemoUiTest`.
 
-Appwrite technical consolidation is complete; the billing downgrade is deferred by the user's choice to retain seven historical backups. Scheduled backups remain disabled. No source publication is implied by local verification.
+Appwrite technical consolidation is complete; the billing downgrade is deferred by the user's choice to retain seven historical backups. Scheduled backups remain disabled. The [published GitHub CI](https://github.com/itsminni/fyre/actions/runs/41218355830) also passed web, backend, Python, Android and iOS checks, including the dedicated iOS demo backend and UI tests. Android emulator UI checks were run locally.
 
 Per le demo aggiunte successivamente a web e iOS e i limiti di verifica iOS, vedere [DEMO.md](../../DEMO.md).
