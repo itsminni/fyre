@@ -187,7 +187,7 @@ module DependabotMerge
       end
       sleep 2 if attempt < 4
     end
-    raise "GitHub has not produced a merge matching the current PR and main; retry this workflow."
+    puts "PR ##{pr['number']}: GitHub is still computing the current merge; deferred to the next automatic check."
   end
 
   def self.successful_jobs?(api, run, required)
@@ -197,6 +197,28 @@ module DependabotMerge
 
     puts "Skipping run: all CI jobs must succeed; missing or unsuccessful required jobs: #{missing.inspect}."
     false
+  end
+
+  def self.reconcile(api, repository)
+    # Recover missed events and delayed merge refs without changing bot branches.
+    # Always select the latest CI run for the current head, including failures.
+    api.list("/pulls?state=open&base=main").each do |candidate|
+      head = candidate.dig("head", "sha")
+      next unless eligible_pr?(candidate, repository, head) && SHA.match?(head.to_s)
+
+      runs = api.list("/actions/workflows/ci.yml/runs?event=pull_request&head_sha=#{head}", "workflow_runs")
+      latest = runs.select do |run|
+        run["head_branch"] == candidate.dig("head", "ref") && run.dig("head_repository", "full_name") == repository
+      end.max_by { |run| run.fetch("id") }
+      next unless latest && latest["status"] == "completed" && latest["conclusion"] == "success"
+
+      begin
+        merge(api, { "workflow_run" => { "id" => latest.fetch("id") } }, repository)
+      rescue RuntimeError => error
+        # A failed integration needs review, but must not block other PRs.
+        warn "PR ##{candidate['number']}: #{error.message}"
+      end
+    end
   end
 
   def self.merge(api, event, repository)
@@ -277,7 +299,21 @@ if $PROGRAM_NAME == __FILE__
     sha = DependabotMerge.prepare_integration(api, event.fetch("inputs"), repository)
     File.open(ENV.fetch("GITHUB_OUTPUT"), "a") { |file| file.puts("merge_sha=#{sha}") }
   elsif ARGV.empty?
-    DependabotMerge.merge(api, event, repository)
+    if event.dig("workflow_run", "event") == "push"
+      run = api.call("get", "/actions/runs/#{Integer(event.fetch('workflow_run').fetch('id'))}")
+      unless run["path"] == ".github/workflows/ci.yml" && run["head_branch"] == "main" &&
+             run["event"] == "push" && run["conclusion"] == "success" && run.dig("head_repository", "full_name") == repository
+        abort "Expected successful CI on main."
+      end
+    elsif event.key?("workflow_run")
+      begin
+        DependabotMerge.merge(api, event, repository)
+      ensure
+        DependabotMerge.reconcile(api, repository)
+      end
+      exit
+    end
+    DependabotMerge.reconcile(api, repository)
   else
     abort "Unknown arguments"
   end

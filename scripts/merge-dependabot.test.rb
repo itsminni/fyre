@@ -397,10 +397,79 @@ class DependabotMergeTest < Minitest::Test
     stale_base
     @responses["/git/commits/#{MERGE_SHA}"]["parents"].first["sha"] = NEW_BASE_SHA
     DependabotMerge.stub(:sleep, nil) do
-      error = assert_raises(RuntimeError) { run_merge }
-      assert_includes error.message, "not produced a merge matching"
-      assert_empty @api.writes
+      assert_empty run_merge
+      assert_includes @merge_output, "deferred to the next automatic check"
     end
+  end
+
+  def prepare_reconciliation
+    @responses["/pulls?state=open&base=main"] = [@responses["/pulls/12"]]
+    @responses["/actions/workflows/ci.yml/runs?event=pull_request&head_sha=#{HEAD_SHA}"] = [@responses["/actions/runs/42"]]
+  end
+
+  def reconcile
+    @api = FakeAPI.new(@responses)
+    capture_io { DependabotMerge.reconcile(@api, "itsminni/fyre") }
+    @api.writes
+  end
+
+  def test_reconciliation_recovers_green_prs_without_a_new_pr_event
+    prepare_reconciliation
+    assert_equal [["/pulls/12/merge", { "sha" => HEAD_SHA, "merge_method" => "squash" }]], reconcile
+  end
+
+  def test_reconciliation_dispatches_tests_when_main_has_advanced
+    prepare_reconciliation
+    stale_base
+    assert_equal [dispatch_write], reconcile
+  end
+
+  def test_reconciliation_never_falls_back_to_older_successful_ci
+    prepare_reconciliation
+    runs = @responses["/actions/workflows/ci.yml/runs?event=pull_request&head_sha=#{HEAD_SHA}"]
+    %w[failure cancelled].each do |conclusion|
+      runs << runs.first.merge("id" => 43, "conclusion" => conclusion)
+      assert_empty reconcile
+      runs.pop
+    end
+    runs << runs.first.merge("id" => 43, "status" => "in_progress", "conclusion" => nil)
+    assert_empty reconcile
+  end
+
+  def test_reconciliation_ignores_forks_humans_and_unsigned_updates
+    prepare_reconciliation
+    @responses["/pulls/12"]["user"]["login"] = "human"
+    assert_empty reconcile
+    @responses["/pulls/12"]["user"]["login"] = DependabotMerge::BOT
+    @responses["/pulls/12/commits"].first["commit"]["verification"]["verified"] = false
+    assert_empty reconcile
+    @responses["/pulls/12/commits"].first["commit"]["verification"]["verified"] = true
+    @responses["/actions/runs/42"]["head_repository"]["full_name"] = "attacker/fork"
+    assert_empty reconcile
+  end
+
+  def test_reconciliation_recovers_after_merge_ref_becomes_available
+    prepare_reconciliation
+    stale_base
+    @responses["/git/commits/#{MERGE_SHA}"]["parents"].first["sha"] = NEW_BASE_SHA
+    DependabotMerge.stub(:sleep, nil) { assert_empty reconcile }
+    @responses["/git/commits/#{MERGE_SHA}"]["parents"].first["sha"] = BASE_SHA
+    assert_equal [dispatch_write], reconcile
+  end
+
+  def test_a_failed_integration_does_not_block_another_pending_pr
+    prepare_reconciliation
+    stale_base
+    path = "/actions/workflows/dependabot-integration.yml/runs?event=workflow_dispatch&branch=main&head_sha=#{BASE_SHA}"
+    @responses[path] = [{ "display_title" => DependabotMerge.integration_title(integration_inputs), "conclusion" => "failure" }]
+    @responses["/pulls?state=open&base=main"] << @responses["/pulls/12"].merge("number" => 13)
+    visits = []
+    callback = lambda do |_api, event, _repository|
+      visits << event.fetch("workflow_run").fetch("id")
+      raise "Integration failed" if visits.length == 1
+    end
+    DependabotMerge.stub(:merge, callback) { assert_empty reconcile }
+    assert_equal [42, 42], visits
   end
 
   def test_rejects_integration_from_wrong_workflow_branch_repository_or_title
