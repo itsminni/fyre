@@ -102,6 +102,7 @@ test("blocking patches only the caller state and cannot overwrite the peer state
         return response(200, { $id: "user-a" });
       }
       if (request.path === "/v1/tablesdb/transactions" && request.method === "POST") {
+        assert.ok(Number.isInteger(request.body.ttl) && request.body.ttl >= 60 && request.body.ttl <= 3600);
         return response(201, { $id: "tx-block" });
       }
       if (request.path === "/v1/tablesdb/transactions/tx-block" && request.method === "PATCH") {

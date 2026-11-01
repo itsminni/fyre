@@ -66,6 +66,7 @@ test("client force cannot bypass the server cancellation deadline", async () => 
       return response(200, { $id: "user-a" });
     }
     if (method === "POST" && url.pathname === "/v1/tablesdb/transactions") {
+      assert.ok(Number.isInteger(body.ttl) && body.ttl >= 60 && body.ttl <= 3600);
       return response(201, { $id: "transaction-1" });
     }
     if (url.pathname.endsWith("/tables/events/rows/event-1")) {

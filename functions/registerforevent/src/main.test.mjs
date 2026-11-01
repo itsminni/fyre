@@ -162,6 +162,7 @@ function makeFakeAppwrite(options = {}) {
       }
 
       if (method === "POST" && url.pathname === "/v1/tablesdb/transactions") {
+        assert.ok(Number.isInteger(body.ttl) && body.ttl >= 60 && body.ttl <= 3600);
         const id = `transaction-${++transactionSequence}`;
         transactions.set(id, { baseEventVersion: eventVersion, operations: [], touchedEvent: false });
         return response(201, { $id: id });

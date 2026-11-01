@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 const DEFAULT_MATCH_SUBJECT = "Match";
 const MAX_TRANSACTION_ATTEMPTS = 4;
-const TRANSACTION_TTL_SECONDS = 30;
+const TRANSACTION_TTL_SECONDS = 60;
 const APPWRITE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/;
 
 export default async ({ req, res, error }) => {

@@ -1,6 +1,6 @@
 # Appwrite infrastructure
 
-This directory is the reproducible source for Fyre's Appwrite backend. Tracked files contain neutral logical IDs; the live endpoint, project ID, and mapped resource IDs belong in the ignored root `.env` file.
+This directory is the source for Fyre's Appwrite backend. Tracked files contain neutral logical IDs; the live endpoint, project ID, and mapped resource IDs belong in the ignored root `.env` file.
 
 ## Tracked resources
 
@@ -29,7 +29,7 @@ brew install appwrite
 1. Create or select a project intended for this demo.
 2. Enable email and password authentication.
 3. Register the client platforms:
-   - Web: `localhost`, `127.0.0.1`, and any public host used for the demo;
+   - Web: one hostname, such as `localhost` for local development or the public host used for the app;
    - Android: package `minni.fyre`;
    - Apple: bundle ID `minni.Fyre`.
 4. Log in with `appwrite login`. For self-hosted Appwrite, pass its endpoint to the login command.
@@ -68,7 +68,7 @@ scripts/deploy-appwrite-functions.sh --confirm-project 'EXACT-PROJECT-ID'
 
 ## Italiano
 
-Questa cartella è la fonte riproducibile del backend Appwrite di Fyre. I file tracciati contengono ID logici neutri; endpoint live, project ID e ID delle risorse associate vanno nel file `.env` alla root.
+Questa cartella è la fonte del backend Appwrite di Fyre. I file tracciati contengono ID logici neutri; endpoint live, project ID e ID delle risorse associate vanno nel file `.env` alla root.
 
 ### Risorse tracciate
 
@@ -97,7 +97,7 @@ brew install appwrite
 1. Creare o selezionare un progetto dedicato alla demo.
 2. Abilitare l'autenticazione tramite email e password.
 3. Registrare le platform dei client:
-   - Web: `localhost`, `127.0.0.1` e l'eventuale host pubblico della demo;
+   - Web: un solo hostname, per esempio `localhost` per lo sviluppo locale oppure l'host pubblico dell'app;
    - Android: package `minni.fyre`;
    - Apple: bundle ID `minni.Fyre`.
 4. Accedere con `appwrite login`. Per Appwrite self-hosted, indicare anche il relativo endpoint.

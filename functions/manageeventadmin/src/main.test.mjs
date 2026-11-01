@@ -323,6 +323,7 @@ test("adding by email resolves the canonical Users account and persists counters
         return response(200, canonicalProfile(userId, gender, `${userId}@example.test`));
       }
       if (request.path === "/v1/tablesdb/transactions" && request.method === "POST") {
+        assert.ok(Number.isInteger(request.body.ttl) && request.body.ttl >= 60 && request.body.ttl <= 3600);
         return response(201, { $id: "tx-add" });
       }
       if (request.path === "/v1/tablesdb/transactions/tx-add" && request.method === "PATCH") {

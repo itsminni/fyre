@@ -379,6 +379,7 @@ function transactionalBackend(options = {}) {
     }
 
     if (method === "POST" && url.pathname === "/v1/tablesdb/transactions") {
+      assert.ok(Number.isInteger(body.ttl) && body.ttl >= 60 && body.ttl <= 3600);
       transactionSequence += 1;
       const transactionId = `tx-${transactionSequence}`;
       transactions.set(transactionId, cloneTables(tables));
